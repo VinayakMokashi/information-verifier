@@ -124,6 +124,8 @@ scripts/
 
 ## 9. Environment notes (this machine)
 
+- **Repository:** https://github.com/VinayakMokashi/Information_Verifier (private).
+  Commit + push after each meaningful change so any session sees the latest state.
 - Python 3.12 ✅, git ✅, gh CLI ✅ (authed as VinayakMokashi).
 - **Node.js and Docker NOT installed** — needed for the Phase 3 PWA and Phase 2
   Postgres/Redis containers respectively.
