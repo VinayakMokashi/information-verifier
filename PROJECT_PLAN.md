@@ -105,6 +105,11 @@ scripts/
 - **2026-07-24 — Retrieval moved Opus → Haiku (cost).** Retrieval reads full page text
   (token-heavy) but is only summarizing evidence; the judgment is in adjudicate() on
   Opus. This is the biggest cost lever. Cut per-check cost ~3–4×.
+- **2026-07-24 — web_search on Haiku needs `allowed_callers=["direct"]`.** Haiku 4.5
+  doesn't support programmatic tool calling, so web_search 400s without that flag. Added
+  it to the tool config so retrieval keeps the cheap model AND web search. Verified: a
+  Hindi UNESCO-anthem claim returned FALSE 98% citing both web-search and Google
+  Fact Check sources (incl. crawler-blocked India Today & Vishvas News via Google).
 - **2026-07-24 — web_search `allowed_domains` is ALL-OR-NOTHING.** If any listed domain
   blocks Anthropic's crawler, the whole request 400s. Reuters, PTI, The Hindu, India
   Today, and Vishvas News block the crawler → moved to FACTCHECK_ONLY_DOMAINS. Only

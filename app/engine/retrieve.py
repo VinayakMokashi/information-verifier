@@ -38,6 +38,9 @@ async def _web_search(claim: Claim) -> tuple[str, list[Source]]:
             "name": "web_search",
             "allowed_domains": SEARCH_DOMAINS,   # only crawler-accessible domains
             "max_uses": settings.max_search_uses,
+            # Haiku doesn't support programmatic (code-invoked) tool calling;
+            # declare web_search as directly-called so it runs on the cheap model.
+            "allowed_callers": ["direct"],
         }
     ]
     messages = [{"role": "user", "content": RETRIEVAL_PROMPT.format(claim=claim.text)}]
