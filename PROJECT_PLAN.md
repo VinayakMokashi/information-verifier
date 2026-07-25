@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-24**.
+> Keep it updated as the project moves. Last updated: **2026-07-25**.
 
 ---
 
@@ -68,7 +68,9 @@ app/
 scripts/
   demo_offline.py    FREE full-pipeline demo with simulated LLM stages
   smoke_test.py      REAL one-claim end-to-end test (costs a few cents)
+  factcheck_probe.py FREE Google-API-only probe: shows KEEP/DROP per publisher
   render.py          console Truth Report formatter
+tests/               pytest unit tests (pure functions only — always free)
 ```
 
 ## 6. Roadmap & status
@@ -84,6 +86,10 @@ scripts/
 - [x] REST API: `/verify/text`, `/verify/image`, `/reports/{id}`, `/health`
 - [x] Verified end-to-end: Hindi 5G/COVID → FALSE 95%; Hindi UNESCO-anthem → FALSE 98%
       with web-search + Google Fact Check citations combined
+- [x] **Trust-filter Fact Check API results** (2026-07-25): Google returns ClaimReview
+      from ANY publisher; results are now filtered to `TRUSTED_DOMAINS` before reaching
+      the adjudicator, with dropped hosts logged. Unit tests (`tests/`, free) + free
+      curation probe (`scripts/factcheck_probe.py`). Verified live at $0.
 
 ### Phase 2 — Production hardening + media
 - [ ] Postgres + pgvector; migrate repository off SQLite
@@ -103,6 +109,29 @@ scripts/
 
 ## 7. Decisions & findings log
 
+- **2026-07-25 — Fact Check API results are now trust-filtered.** Google's Fact Check
+  API indexes ClaimReview from any publisher worldwide (live probe saw Full Fact,
+  Snopes, Fact Crescendo, The Quint). Bounded trust was only enforced on the web-search
+  path; now `trusted_domain_of()` (app/trusted_sources.py) gates the Fact Check path
+  too. Matching is exact-host or dot-boundary subdomain — lookalikes like
+  `notaltnews.in` or `altnews.in.evil.com` fail. Drops are logged, never silent.
+- **2026-07-25 — Trust matching is hardened against parser differentials.** An
+  adversarial review found that Python's `urlparse` and browsers' WHATWG parser can
+  disagree about where a URL's host ends (`https://evil.example\.altnews.in/` and
+  `https://evil.com\@altnews.in/` both read as altnews.in to urlparse but navigate to
+  the attacker's host in a browser), and that non-http(s) schemes (`javascript://`,
+  `data://`) passed. `trusted_domain_of()` now requires http(s), rejects userinfo,
+  and validates the hostname charset — anything a browser could read differently
+  fails closed. All bypasses are pinned by unit tests (41 pass, free to run).
+- **2026-07-25 — OPEN QUESTION: The Quint's ClaimReview lives on `www.thequint.com`.**
+  Our whitelist entry is `factcheck.thequint.com` (the crawler-accessible subdomain),
+  so The Quint's prior verdicts via Google are currently DROPPED. Options: add
+  `thequint.com` to FACTCHECK_ONLY_DOMAINS (trusts all Quint URLs in citations) or
+  leave as-is. **User decision pending** — curating the list is a trust decision.
+- **2026-07-25 — Whitelist-curation loop:** `scripts/factcheck_probe.py` (free, $0)
+  shows every publisher Google returns for a query and whether we keep or drop it.
+  Recurring DROPs of good IFCN-certified Indian publishers (seen live: Fact Crescendo)
+  are candidates for the whitelist.
 - **2026-07-24 — Retrieval moved Opus → Haiku (cost).** Retrieval reads full page text
   (token-heavy) but is only summarizing evidence; the judgment is in adjudicate() on
   Opus. This is the biggest cost lever. Cut per-check cost ~3–4×.
@@ -141,5 +170,7 @@ scripts/
 
 See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 - Free demo: `.venv\Scripts\python.exe scripts\demo_offline.py`
+- Free tests: `.venv\Scripts\python.exe -m pytest tests -q`
+- Free source probe: `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"`
 - Real check: `.venv\Scripts\python.exe scripts\smoke_test.py "your claim"`
 - API server: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → `/docs`

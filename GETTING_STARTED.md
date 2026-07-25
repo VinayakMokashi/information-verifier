@@ -140,5 +140,7 @@ The terminal now sits quietly — that means it's working. Leave it running.
 | Command | Cost | What it proves |
 |---|---|---|
 | `scripts\demo_offline.py` | Free | The whole pipeline + cache + report logic works |
+| `python -m pytest tests -q` | Free | Unit tests — trust filter & domain matching logic |
+| `scripts\factcheck_probe.py "claim"` | Free | Which fact-check publishers we keep vs drop |
 | `scripts\smoke_test.py` | ~cents | A real, cited fact-check on one claim |
 | `uvicorn app.main:app` | free to run | The live web API a UI/WhatsApp bot will call |
