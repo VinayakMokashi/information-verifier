@@ -6,3 +6,6 @@ pydantic>=2.7
 pydantic-settings>=2.3
 httpx>=0.27               # Google Fact Check API + Sarvam ASR
 python-multipart>=0.0.9   # multipart file uploads (image/audio)
+
+# Dev / tests (free to run: tests never call paid APIs)
+pytest>=8.0
