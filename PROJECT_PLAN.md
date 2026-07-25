@@ -78,11 +78,12 @@ scripts/
 - [x] Pydantic contracts for every stage
 - [x] normalize / extract / retrieve / adjudicate / aggregate / pipeline
 - [x] Native web search with trusted-domain whitelist
-- [x] Google Fact Check API integration (code done + unit-tested; needs free key to run)
+- [x] Google Fact Check API integration — **live & verified** (`GOOGLE_FACTCHECK_API_KEY`
+      set; reaches crawler-blocked sources like India Today & Vishvas News via Google)
 - [x] Image OCR via Opus vision (`/verify/image`)
 - [x] REST API: `/verify/text`, `/verify/image`, `/reports/{id}`, `/health`
-- [x] Verified end-to-end on a real Hindi 5G/COVID claim → FALSE 95% with 4 citations
-- [ ] Set `GOOGLE_FACTCHECK_API_KEY` to activate the Google layer live (user action)
+- [x] Verified end-to-end: Hindi 5G/COVID → FALSE 95%; Hindi UNESCO-anthem → FALSE 98%
+      with web-search + Google Fact Check citations combined
 
 ### Phase 2 — Production hardening + media
 - [ ] Postgres + pgvector; migrate repository off SQLite

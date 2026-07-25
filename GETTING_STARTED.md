@@ -87,18 +87,40 @@ sources — and prints a real Truth Report.
 
 ## Step 5 — Run it as a web service (for the app/UI later)
 
+Two things that trip everyone up first:
+- ⚠️ When the server starts, the terminal **looks frozen** — it isn't. That's the server
+  running and holding that terminal. Leave it open; don't type in it.
+- ⚠️ After you submit a claim, the first report check may say **`PROCESSING`**. That's
+  normal — wait ~10 seconds and check again; it turns `COMPLETE`.
+
+**1. Open a terminal in the project folder.** In VS Code: *Terminal → New Terminal*
+(it opens in the project folder). Confirm the prompt ends in `...\Information_Verifier`.
+
+**2. Start the server:**
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
+Wait for `Application startup complete.` / `Uvicorn running on http://127.0.0.1:8000`.
+The terminal now sits quietly — that means it's working. Leave it running.
 
-Then open **http://127.0.0.1:8000/docs** in your browser. This is an
-auto-generated control panel where you can:
+**3. Open the control panel** in your browser: **http://127.0.0.1:8000/docs**
 
-- expand **POST /api/v1/verify/text**, click *Try it out*, type a claim, **Execute**
-- copy the `job_id` from the response
-- expand **GET /api/v1/reports/{job_id}**, paste the id, **Execute** to read the report
+**4. Submit a claim:**
+- Click **POST /api/v1/verify/text** → **Try it out**.
+- In the Request body, keep the format: `{ "text": "your claim here" }`
+- Click **Execute**. Under *Server response* you get code `202` and
+  `{ "job_id": "…", "status": "QUEUED" }`. **Copy the `job_id`.**
 
-Press `Ctrl+C` in the terminal to stop the server.
+**5. Read the Truth Report:**
+- Click **GET /api/v1/reports/{job_id}** → **Try it out**.
+- Paste the `job_id` → **Execute**.
+- If `PROCESSING`, wait ~10s and **Execute** again. When `COMPLETE`, the response shows
+  `overall_rating` and each claim's rating, confidence, reasoning, correction, citations.
+
+**6. Stop the server:** click the terminal, press `Ctrl+C`.
+
+> Prefer no copy-pasting? `scripts\smoke_test.py "your claim"` does the identical thing
+> and prints the report directly.
 
 ---
 
