@@ -91,20 +91,42 @@ tests/               pytest unit tests (pure functions only — always free)
       the adjudicator, with dropped hosts logged. Unit tests (`tests/`, free) + free
       curation probe (`scripts/factcheck_probe.py`). Verified live at $0.
 
-### Phase 2 — Production hardening + media
-- [ ] Postgres + pgvector; migrate repository off SQLite
-- [ ] **Semantic** claim cache (embed claims → similarity search). Needs an embedding
-      model — Anthropic has no embeddings endpoint (candidate: Voyage).
-- [ ] ARQ/Redis queue replacing BackgroundTasks
-- [ ] Audio/video: wire `providers/asr.py` (Sarvam) into a `/verify/media` route;
-      keyframe extraction (needs `ffmpeg`, not installed)
+### Phase 2 — Production hardening + media  (stack decided 2026-07-25, see §11)
+- [ ] **Semantic claim cache — decided stack:** `sqlite-vec` 0.1.9 (pip, prebuilt
+      Windows wheel; brute-force KNN is milliseconds at our scale) + **local
+      EmbeddingGemma-300m** via sentence-transformers on CPU (100+ languages incl.
+      Hindi/Marathi/Tamil/Bengali; truncate to 256 dims). $0 recurring, offline.
+      Rule: store embedding model name + dims in the schema; never mix models.
+- [ ] Postgres + pgvector **deferred to deployment**: Neon free tier (pgvector
+      included, auto-wakes from scale-to-zero) beats Supabase (7-day hard pause)
+      and native Windows install (Visual Studio source compile). Keep the cache
+      behind the repository interface so the swap is SQL-only.
+- [ ] Audio/video `/verify/media`: ffmpeg **already installed** (Gyan 8.1.2 via
+      winget — verified). Sarvam **Saaras v3** (`saaras:v3`; Saarika is legacy —
+      adapter updated). Sync API ≤30 s/request; chunk longer audio with
+      `ffmpeg -f segment`; WhatsApp OGG/Opus accepted directly; `mode=translate`
+      can emit English straight into the pipeline. Needs SARVAM_API_KEY
+      (₹100 signup credits ≈ 3.3 h of audio at ₹30/hr).
+- [ ] ARQ/Redis queue replacing BackgroundTasks — needs Redis (Docker or Memurai);
+      lowest priority while traffic is one user at a time
 - [ ] Back-translate the Truth Report summary into the user's input language
-- [ ] Widen sources: route Reuters/PTI/The Hindu/India Today/Vishvas through the
-      Fact Check API (they block the Anthropic crawler — see Decisions log)
+- [x] Widen sources: Reuters/PTI/The Hindu/India Today/Vishvas (+ Quint, Fact
+      Crescendo, Full Fact, Snopes) reach the engine via the trust-filtered
+      Google Fact Check path (2026-07-25)
 
 ### Phase 3 — Delivery (the actual goal)
-- [ ] WhatsApp Business Cloud API webhook (forward a message → get a sourced reply)
-- [ ] Lightweight mobile-first PWA (Next.js) — needs Node.js installed
+- [ ] **Fastest demo path ($0, researched):** mobile-first static page served by
+      FastAPI `StaticFiles` (no Node needed — polling fits the existing job API)
+      + `cloudflared` quick tunnel (account-free, `winget install -e --id
+      Cloudflare.cloudflared`) → sharable https link. Avoid ngrok (account
+      required, 1 GB/20k-req monthly cap, interstitial page for browsers).
+- [ ] WhatsApp Cloud API: free **test number** covers exactly 5 verified
+      recipients; user-initiated service replies are free (per-message billing
+      since 2025-07). A real number needs Meta Business verification (2–7 days).
+- [ ] Telegram bot alternative: free, and long polling needs **no tunnel at
+      all** — lowest-friction chat demo; friends may need to install Telegram.
+- [ ] Lightweight PWA (Next.js) — only if the static page outgrows itself
+      (needs Node.js)
 - [ ] Localization UI (Hindi, Marathi, Tamil, Bengali…)
 
 ## 7. Decisions & findings log
@@ -131,6 +153,16 @@ tests/               pytest unit tests (pure functions only — always free)
   smoke test is needed before promoting any to SEARCH_DOMAINS.
   **Remaining candidate:** `factcheck.afp.com` (AFP Fact Check, IFCN) is now the only
   live drop — awaiting user decision.
+- **2026-07-25 — Phase 2/3 stack decided after a live 4-agent web-research sweep**
+  (numbers checked against vendor docs; sources in §11). Semantic cache: sqlite-vec +
+  local EmbeddingGemma-300m — **Voyage is no longer the embeddings candidate**
+  (embedding volume is tiny, local is $0/offline; Gemini `gemini-embedding-001` on the
+  existing Google key is the API fallback). Media: Sarvam **Saaras v3** — Saarika is
+  legacy/deprecating, `providers/asr.py` updated `saarika:v2` → `saaras:v3` (docs-
+  verified, not yet live-tested; needs a key). Demo delivery: FastAPI static page +
+  cloudflared quick tunnel (ngrok free tier now capped + interstitial). Known
+  uncertainties: Sarvam signup credits ₹100 per official docs (blogs claim ₹1,000 —
+  trust the dashboard); Gemini free-tier embedding rate limits unpublished.
 - **2026-07-25 — Whitelist-curation loop:** `scripts/factcheck_probe.py` (free, $0)
   shows every publisher Google returns for a query and whether we keep or drop it.
   Recurring DROPs of good IFCN-certified publishers are candidates for the whitelist.
@@ -163,9 +195,11 @@ tests/               pytest unit tests (pure functions only — always free)
 
 - **Repository:** https://github.com/VinayakMokashi/Information_Verifier (private).
   Commit + push after each meaningful change so any session sees the latest state.
-- Python 3.12 ✅, git ✅, gh CLI ✅ (authed as VinayakMokashi).
-- **Node.js and Docker NOT installed** — needed for the Phase 3 PWA and Phase 2
-  Postgres/Redis containers respectively.
+- Python 3.12 ✅, git ✅, gh CLI ✅ (authed as VinayakMokashi), winget ✅.
+- **ffmpeg ✅ installed** (Gyan.FFmpeg 8.1.2 via winget, on PATH) — the plan
+  previously said it wasn't; corrected 2026-07-25 after a local check.
+- **Node.js and Docker NOT installed** (also no psql, no redis-server) — but the
+  decided Phase 2 stack (sqlite-vec + local embeddings) needs neither.
 - Secrets live only in `.env` (git-ignored). `.env.example` stays blank.
 
 ## 10. How to run
@@ -176,3 +210,34 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 - Free source probe: `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"`
 - Real check: `.venv\Scripts\python.exe scripts\smoke_test.py "your claim"`
 - API server: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → `/docs`
+
+## 11. Phase 2/3 prep — your action checklist (researched 2026-07-25)
+
+Everything below was verified on the live web on 2026-07-25 (key sources:
+sqlite-vec GitHub/PyPI, neon.com/docs, docs.voyageai.com, ai.google.dev,
+developers.googleblog.com (EmbeddingGemma), docs.sarvam.ai, developers.facebook.com,
+developers.cloudflare.com, core.telegram.org). Prices/tiers drift — re-check before
+relying on a number months from now.
+
+**Semantic cache (option b) — nothing to sign up for:**
+- [ ] `pip install sqlite-vec sentence-transformers` into the venv (~1.5–2 GB disk
+      for CPU torch; pin sqlite-vec — it is pre-v1)
+- [ ] Hugging Face account + accept the Gemma license on the
+      `google/embeddinggemma-300m` model page (repo is gated), then `hf auth login`
+      once — first model load downloads ~1.2 GB
+
+**Audio/video (option c):**
+- [ ] Sign up at https://dashboard.sarvam.ai, create an API key, note your real
+      free-credit balance, put `SARVAM_API_KEY=` in `.env`
+- [ ] Nothing else — ffmpeg is already installed and the adapter is updated
+
+**Demo to friends (option d):**
+- [ ] `winget install -e --id Cloudflare.cloudflared` (no account needed)
+- [ ] Optional Telegram route: message @BotFather → `/newbot` → token into `.env`
+- [ ] WhatsApp test-number route (when wanted): Meta developer account → app with
+      WhatsApp product → add up to 5 friends' numbers (each confirms a code) →
+      webhook = the cloudflared URL (re-paste it on every tunnel restart)
+
+**Recommended build order:** (d)-lite static page first (pure code, $0, immediately
+showable), then (b) semantic cache (pure code after the two installs, $0), then (c)
+media (needs the Sarvam key), then WhatsApp/Telegram bots on top.
