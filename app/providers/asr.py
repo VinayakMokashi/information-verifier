@@ -6,10 +6,13 @@ WER on exactly the audio Indian users send. The Protocol keeps the
 pipeline decoupled from the vendor — swap in AI4Bharat IndicWhisper or
 another provider without touching engine code.
 
-NOTE (Phase 2): the request/response shape below follows Sarvam's
-documented STT API but should be confirmed against their current docs
-before production use. The audio path is not wired into the REST surface
-in Phase 1 — this is the adapter, ready to plug in.
+NOTE (Phase 2): request/response shape re-verified against Sarvam's docs
+on 2026-07-25 (endpoint, api-subscription-key header, multipart fields).
+Not yet live-tested — needs a SARVAM_API_KEY. The sync endpoint takes
+audio up to 30 s; longer audio must be chunked (ffmpeg -f segment) or go
+through Sarvam's batch API. WhatsApp voice notes (OGG/Opus) are accepted
+directly. The audio path is not wired into the REST surface yet — this
+is the adapter, ready to plug in.
 """
 from typing import Protocol
 
@@ -31,7 +34,7 @@ class ASRProvider(Protocol):
 
 
 class SarvamASR:
-    """Sarvam AI Saarika speech-to-text."""
+    """Sarvam AI Saaras speech-to-text (saarika is legacy, deprecating)."""
 
     _ENDPOINT = "https://api.sarvam.ai/speech-to-text"
 
@@ -40,7 +43,9 @@ class SarvamASR:
 
     async def transcribe(self, audio: bytes, language_hint: str | None = None) -> Transcript:
         headers = {"api-subscription-key": self._api_key}
-        data = {"model": "saarika:v2", "language_code": language_hint or "unknown"}
+        # mode=translate would emit English directly into our English-centric
+        # pipeline; decide transcribe-vs-translate when wiring /verify/media.
+        data = {"model": "saaras:v3", "language_code": language_hint or "unknown"}
         files = {"file": ("audio.wav", audio, "audio/wav")}
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(self._ENDPOINT, headers=headers, data=data, files=files)
