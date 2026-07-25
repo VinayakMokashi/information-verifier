@@ -123,15 +123,17 @@ tests/               pytest unit tests (pure functions only — always free)
   `data://`) passed. `trusted_domain_of()` now requires http(s), rejects userinfo,
   and validates the hostname charset — anything a browser could read differently
   fails closed. All bypasses are pinned by unit tests (41 pass, free to run).
-- **2026-07-25 — OPEN QUESTION: The Quint's ClaimReview lives on `www.thequint.com`.**
-  Our whitelist entry is `factcheck.thequint.com` (the crawler-accessible subdomain),
-  so The Quint's prior verdicts via Google are currently DROPPED. Options: add
-  `thequint.com` to FACTCHECK_ONLY_DOMAINS (trusts all Quint URLs in citations) or
-  leave as-is. **User decision pending** — curating the list is a trust decision.
+- **2026-07-25 — Whitelist widened (user-approved).** Added to FACTCHECK_ONLY_DOMAINS:
+  `thequint.com` (their ClaimReview lives on www.thequint.com — the WebQoof section —
+  not the factcheck. subdomain used for web search), `factcrescendo.com` (IFCN, India),
+  `fullfact.org` (IFCN, UK), `snopes.com` (US). Verified live at $0: the 5G claim went
+  from 2 kept / 8 dropped to 9 kept / 1 dropped. All four are crawler-UNTESTED — a paid
+  smoke test is needed before promoting any to SEARCH_DOMAINS.
+  **Remaining candidate:** `factcheck.afp.com` (AFP Fact Check, IFCN) is now the only
+  live drop — awaiting user decision.
 - **2026-07-25 — Whitelist-curation loop:** `scripts/factcheck_probe.py` (free, $0)
   shows every publisher Google returns for a query and whether we keep or drop it.
-  Recurring DROPs of good IFCN-certified Indian publishers (seen live: Fact Crescendo)
-  are candidates for the whitelist.
+  Recurring DROPs of good IFCN-certified publishers are candidates for the whitelist.
 - **2026-07-24 — Retrieval moved Opus → Haiku (cost).** Retrieval reads full page text
   (token-heavy) but is only summarizing evidence; the judgment is in adjudicate() on
   Opus. This is the biggest cost lever. Cut per-check cost ~3–4×.

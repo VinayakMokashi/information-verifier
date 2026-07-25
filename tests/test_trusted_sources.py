@@ -14,12 +14,16 @@ from app.trusted_sources import is_trusted_url, trusted_domain_of
         ("https://www.boomlive.in/fact-check/x", "boomlive.in"),
         ("https://hindi.boomlive.in/fact-check/x", "boomlive.in"),
         ("https://telugu.factly.in/x", "factly.in"),
-        # A whitelist entry that is itself a subdomain trusts only that subtree
+        # The subdomain entry wins for its own subtree; the rest of The Quint
+        # matches the broader thequint.com entry (user-approved 2026-07-25)
         ("https://factcheck.thequint.com/story", "factcheck.thequint.com"),
-        ("https://www.thequint.com/news/story", None),
+        ("https://www.thequint.com/news/webqoof/story", "thequint.com"),
         # FACTCHECK_ONLY domains are trusted for citations
         ("https://www.vishvasnews.com/hindi/viral/x", "vishvasnews.com"),
         ("https://www.reuters.com/fact-check/x", "reuters.com"),
+        ("https://english.factcrescendo.com/x", "factcrescendo.com"),
+        ("https://fullfact.org/online/x", "fullfact.org"),
+        ("https://www.snopes.com/fact-check/x", "snopes.com"),
         # Lookalikes must fail
         ("https://notaltnews.in/x", None),
         ("https://altnews.in.evil.com/x", None),
@@ -40,9 +44,9 @@ from app.trusted_sources import is_trusted_url, trusted_domain_of
         ("//altnews.in/x", None),
         ("ftp://altnews.in/x", None),
         ("http://altnews.in/x", "altnews.in"),
-        # Unrelated / global fact-checkers are not on the whitelist
-        ("https://www.snopes.com/fact-check/x", None),
+        # Publishers not on the whitelist stay untrusted
         ("https://www.politifact.com/x", None),
+        ("https://leadstories.com/x", None),
         # Normalization: case and port
         ("HTTPS://WWW.ALTNEWS.IN/Story", "altnews.in"),
         ("https://altnews.in:8443/story", "altnews.in"),
@@ -59,4 +63,4 @@ def test_trusted_domain_of(url: str, expected: str | None):
 
 def test_is_trusted_url_mirrors_domain_lookup():
     assert is_trusted_url("https://altnews.in/x")
-    assert not is_trusted_url("https://snopes.com/x")
+    assert not is_trusted_url("https://politifact.com/x")

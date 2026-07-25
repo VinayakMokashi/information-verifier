@@ -25,14 +25,23 @@ SEARCH_DOMAINS: list[str] = [
     "pib.gov.in",
 ]
 
-# Trusted but block the Anthropic crawler. Reached via the Google Fact Check
-# API, NOT web search. Kept here for documentation and citation-trust checks.
+# Trusted for citations but reached via the Google Fact Check API, NOT web
+# search — either they block the Anthropic crawler (verified 2026-07-24) or
+# they haven't been crawler-smoke-tested yet. A paid smoke test can promote
+# an untested entry to SEARCH_DOMAINS.
 FACTCHECK_ONLY_DOMAINS: list[str] = [
+    # Block the crawler (verified):
     "reuters.com",
     "ptinews.com",
     "thehindu.com",
     "indiatoday.in",
     "vishvasnews.com",
+    # Added 2026-07-25 (user-approved), crawler access untested:
+    "thequint.com",       # ClaimReview lives on www.thequint.com (WebQoof),
+                          # not the factcheck. subdomain used for web search
+    "factcrescendo.com",  # IFCN-certified, India (english./marathi./hindi. subdomains)
+    "fullfact.org",       # IFCN-certified, UK — covers global claims that reach India
+    "snopes.com",         # US — covers global claims that reach India
 ]
 
 # Everything we treat as trustworthy. Enforced: web search via allowed_domains
