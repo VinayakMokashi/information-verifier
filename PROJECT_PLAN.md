@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-25**.
+> Keep it updated as the project moves. Last updated: **2026-07-26**.
 
 ---
 
@@ -57,20 +57,29 @@ normalize (Haiku)  ->  extract claims (Opus)  ->  per claim, in parallel:
 
 ```
 app/
-  main.py            FastAPI app + lifespan (init_db)
-  config.py          settings + model IDs + max_search_uses
-  trusted_sources.py SEARCH_DOMAINS (crawlable) + FACTCHECK_ONLY_DOMAINS (blocked)
-  api/               routes + wire DTOs
+  main.py            FastAPI app + lifespan (init_db) + static mount at "/"
+  config.py          settings + model IDs + cache/media knobs
+  trusted_sources.py SEARCH_DOMAINS (crawlable) + FACTCHECK_ONLY_DOMAINS + trust matching
+  api/               routes (text/image/media/reports) + wire DTOs
   models/            Pydantic contracts: Claim, Verdict, Evidence, TruthReport
-  engine/            normalize, extract, retrieve, adjudicate, aggregate, pipeline, prompts
-  providers/         llm (Anthropic), vision (OCR), factcheck (Google), asr (Sarvam)
-  store/             SQLite db + repository (reports + claim cache)
+  engine/            normalize, extract, retrieve, adjudicate, equivalence,
+                     aggregate, pipeline, prompts
+  providers/         llm (Anthropic), vision (OCR), factcheck (Google),
+                     asr (Sarvam Saaras v3), embeddings (EmbeddingGemma),
+                     media (ffmpeg helpers)
+  store/             SQLite + sqlite-vec db, repository (reports + 2-tier claim cache)
+static/
+  index.html         self-contained mobile demo page (text/image/voice, no build step)
 scripts/
   demo_offline.py    FREE full-pipeline demo with simulated LLM stages
+  serve_demo.py      FREE demo web server (real UI, simulated stages)
+  share_demo.ps1     uvicorn + cloudflared quick tunnel (public share link)
   smoke_test.py      REAL one-claim end-to-end test (costs a few cents)
   factcheck_probe.py FREE Google-API-only probe: shows KEEP/DROP per publisher
+  asr_probe.py       Sarvam-only transcription probe (fractions of a rupee)
+  fake_stages.py     the shared simulated LLM stages (demos + tests)
   render.py          console Truth Report formatter
-tests/               pytest unit tests (pure functions only — always free)
+tests/               pytest suite — always free, every paid seam faked
 ```
 
 ## 6. Roadmap & status
@@ -91,22 +100,25 @@ tests/               pytest unit tests (pure functions only — always free)
       the adjudicator, with dropped hosts logged. Unit tests (`tests/`, free) + free
       curation probe (`scripts/factcheck_probe.py`). Verified live at $0.
 
-### Phase 2 — Production hardening + media  (stack decided 2026-07-25, see §11)
-- [ ] **Semantic claim cache — decided stack:** `sqlite-vec` 0.1.9 (pip, prebuilt
-      Windows wheel; brute-force KNN is milliseconds at our scale) + **local
-      EmbeddingGemma-300m** via sentence-transformers on CPU (100+ languages incl.
-      Hindi/Marathi/Tamil/Bengali; truncate to 256 dims). $0 recurring, offline.
-      Rule: store embedding model name + dims in the schema; never mix models.
+### Phase 2 — Production hardening + media
+- [x] **Semantic claim cache — LIVE (2026-07-26):** `sqlite-vec` 0.1.9 + local
+      EmbeddingGemma-300m (256-dim, STS prompt, CPU, $0/lookup). Design is
+      **nominate-then-confirm**: the vector index only NOMINATES the nearest
+      cached claim (distance ≤ 0.20); a ~$0.0005 Haiku equivalence check must
+      CONFIRM before the cached verdict is served, and a confirmed phrasing is
+      learned as an exact-cache alias. See Decisions log for why a pure
+      distance threshold is provably unsafe. Vectors auto-wipe when the
+      embedding model/dim changes (signature check in init_db).
 - [ ] Postgres + pgvector **deferred to deployment**: Neon free tier (pgvector
       included, auto-wakes from scale-to-zero) beats Supabase (7-day hard pause)
       and native Windows install (Visual Studio source compile). Keep the cache
       behind the repository interface so the swap is SQL-only.
-- [ ] Audio/video `/verify/media`: ffmpeg **already installed** (Gyan 8.1.2 via
-      winget — verified). Sarvam **Saaras v3** (`saaras:v3`; Saarika is legacy —
-      adapter updated). Sync API ≤30 s/request; chunk longer audio with
-      `ffmpeg -f segment`; WhatsApp OGG/Opus accepted directly; `mode=translate`
-      can emit English straight into the pipeline. Needs SARVAM_API_KEY
-      (₹100 signup credits ≈ 3.3 h of audio at ₹30/hr).
+- [x] **Audio/video `/verify/media` — LIVE (2026-07-26):** any audio/video →
+      ffmpeg-normalized to 16 kHz mono WAV → Sarvam Saaras v3 (chunked at 29 s
+      for the sync API) → transcript → existing text pipeline. Caps: 25 MB
+      upload, 300 s duration (protects credits), checked BEFORE any spend.
+      WhatsApp OGG/Opus accepted. **Verified live:** a Windows-TTS spoken
+      sentence transcribed verbatim (en-IN) for ₹0.04 of free credits.
 - [ ] ARQ/Redis queue replacing BackgroundTasks — needs Redis (Docker or Memurai);
       lowest priority while traffic is one user at a time
 - [ ] Back-translate the Truth Report summary into the user's input language
@@ -115,11 +127,12 @@ tests/               pytest unit tests (pure functions only — always free)
       Google Fact Check path (2026-07-25)
 
 ### Phase 3 — Delivery (the actual goal)
-- [ ] **Fastest demo path ($0, researched):** mobile-first static page served by
-      FastAPI `StaticFiles` (no Node needed — polling fits the existing job API)
-      + `cloudflared` quick tunnel (account-free, `winget install -e --id
-      Cloudflare.cloudflared`) → sharable https link. Avoid ngrok (account
-      required, 1 GB/20k-req monthly cap, interstitial page for browsers).
+- [x] **Mobile web demo — BUILT (2026-07-26):** self-contained `static/index.html`
+      (text + image + voice/video, Hinglish labels, dark mode, XSS-escaped
+      rendering) served by FastAPI at `/`. Free full-UI demo:
+      `scripts\serve_demo.py` (all LLM stages simulated, $0). Share a real
+      public link: `.\scripts\share_demo.ps1` (cloudflared quick tunnel;
+      `-DemoMode` for the free variant). ngrok avoided deliberately.
 - [ ] WhatsApp Cloud API: free **test number** covers exactly 5 verified
       recipients; user-initiated service replies are free (per-message billing
       since 2025-07). A real number needs Meta Business verification (2–7 days).
@@ -131,6 +144,45 @@ tests/               pytest unit tests (pure functions only — always free)
 
 ## 7. Decisions & findings log
 
+- **2026-07-26 — Semantic cache: embeddings NOMINATE, Haiku CONFIRMS.** Local
+  calibration on the real model produced a decisive finding: genuine paraphrases
+  score 0.926–0.982 cosine similarity, but claims differing by ONE token score up
+  to **0.971** ("pandemic in March 2020" vs "March 2019") — i.e. a wrong-verdict
+  pair can embed CLOSER than a correct-hit pair. **No pure distance threshold is
+  safe.** Design: KNN nominates within distance 0.20, then a Haiku structured
+  yes/no equivalence check (~$0.0005, ~100× cheaper than a full check) gates the
+  hit; confirmed phrasings are written back as exact-cache aliases so repeats are
+  free. When the embedding model or dim changes, `init_db()` wipes vectors
+  (verdicts survive; vectors re-learn on the next put).
+- **2026-07-26 — Adversarial review of the Phase 2/3 build found 7 real defects;
+  all fixed.** Most important: **"free demo mode" could spend real money** — the
+  fake stages never patched the ASR seam, so the Voice button on a public
+  `-DemoMode` link made live Sarvam calls. Fixed by patching every paid seam AND
+  swapping the API keys for dummies, so a missed seam now fails auth instead of
+  billing. Others: cache exceptions could silently discard a fully-paid verdict
+  and report "no claims found" (all cache calls are now guarded and the DB uses
+  WAL + a 30 s busy timeout); confirmed aliases were indexed, letting a chain of
+  hops drift arbitrarily far from the claim actually adjudicated (aliases are now
+  stored unindexed — only adjudicated claims are nomination anchors); a huge
+  upload was buffered to disk and RAM before the size cap applied (now rejected
+  by middleware before the body is parsed); ASR outages returned a bare 500 (now
+  502 with a readable message); one transient embedding error disabled the
+  semantic tier permanently (now a 3-failure budget that a success resets).
+  Hardening added alongside: ffmpeg/ffprobe run with timeouts, a sanitized temp
+  filename, and a protocol whitelist so a crafted "voice note" cannot make the
+  server fetch remote URLs; the equivalence prompt delimits claim text as data.
+- **2026-07-26 — Spending guard for the public link.** `share_demo.ps1` exposes
+  the app to anyone with the URL, so `app/api/limits.py` caps checks per visitor
+  (10/hour) and per deployment (100/day), returning a friendly 429. Reading a
+  report is never limited. Off by default in tests; tune in `config.py`.
+- **2026-07-26 — Media = transcribe-then-pipeline, caps before spend.** Sarvam
+  `mode=transcribe` (not translate) keeps the existing normalize stage as the
+  single language-detection point. Transcription happens inline in the route
+  (like OCR) so failures surface as clear HTTP errors, with duration/size caps
+  enforced BEFORE the first paid second. Verified live: TTS clip → verbatim
+  transcript, `en-IN`, ₹0.04. Sarvam dashboard shows the user's actual balance.
+- **2026-07-26 — ffmpeg was already installed** (Gyan 8.1.2 via winget) — the
+  plan previously said otherwise; environment notes corrected.
 - **2026-07-25 — Fact Check API results are now trust-filtered.** Google's Fact Check
   API indexes ClaimReview from any publisher worldwide (live probe saw Full Fact,
   Snopes, Fact Crescendo, The Quint). Bounded trust was only enforced on the web-search
@@ -205,11 +257,14 @@ tests/               pytest unit tests (pure functions only — always free)
 ## 10. How to run
 
 See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
-- Free demo: `.venv\Scripts\python.exe scripts\demo_offline.py`
+- Free demo (console): `.venv\Scripts\python.exe scripts\demo_offline.py`
+- Free demo (web UI): `.venv\Scripts\python.exe scripts\serve_demo.py` → http://127.0.0.1:8000
 - Free tests: `.venv\Scripts\python.exe -m pytest tests -q`
 - Free source probe: `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"`
+- ASR probe (~paise): `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg`
 - Real check: `.venv\Scripts\python.exe scripts\smoke_test.py "your claim"`
-- API server: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → `/docs`
+- Real server + UI: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → http://127.0.0.1:8000
+- Share publicly: `.\scripts\share_demo.ps1` (add `-DemoMode` for the free variant)
 
 ## 11. Phase 2/3 prep — your action checklist (researched 2026-07-25)
 
@@ -219,25 +274,19 @@ developers.googleblog.com (EmbeddingGemma), docs.sarvam.ai, developers.facebook.
 developers.cloudflare.com, core.telegram.org). Prices/tiers drift — re-check before
 relying on a number months from now.
 
-**Semantic cache (option b) — nothing to sign up for:**
-- [ ] `pip install sqlite-vec sentence-transformers` into the venv (~1.5–2 GB disk
-      for CPU torch; pin sqlite-vec — it is pre-v1)
-- [ ] Hugging Face account + accept the Gemma license on the
-      `google/embeddinggemma-300m` model page (repo is gated), then `hf auth login`
-      once — first model load downloads ~1.2 GB
+**Semantic cache (option b) — DONE 2026-07-26:**
+- [x] `sqlite-vec==0.1.9` + `sentence-transformers` installed (in requirements.txt)
+- [x] HF account + Gemma license accepted; `HF_TOKEN` in `.env`; model downloaded
+      (~1.2 GB, cached in `~\.cache\huggingface`) and verified (256-dim)
 
-**Audio/video (option c):**
-- [ ] Sign up at https://dashboard.sarvam.ai, create an API key, note your real
-      free-credit balance, put `SARVAM_API_KEY=` in `.env`
-- [ ] Nothing else — ffmpeg is already installed and the adapter is updated
+**Audio/video (option c) — DONE 2026-07-26:**
+- [x] Sarvam key in `.env`; live transcription verified (₹0.04)
 
-**Demo to friends (option d):**
-- [ ] `winget install -e --id Cloudflare.cloudflared` (no account needed)
-- [ ] Optional Telegram route: message @BotFather → `/newbot` → token into `.env`
+**Demo to friends (option d) — page BUILT; sharing is one command away:**
+- [x] cloudflared 2026.7.3 installed (found at `C:\Program Files (x86)\cloudflared\`)
+- [ ] To actually share: `.\scripts\share_demo.ps1` and send the printed
+      trycloudflare.com link (REAL mode spends money per check — share privately)
+- [ ] Telegram route: SKIPPED for now (user decision 2026-07-26 — maybe later)
 - [ ] WhatsApp test-number route (when wanted): Meta developer account → app with
       WhatsApp product → add up to 5 friends' numbers (each confirms a code) →
       webhook = the cloudflared URL (re-paste it on every tunnel restart)
-
-**Recommended build order:** (d)-lite static page first (pure code, $0, immediately
-showable), then (b) semantic cache (pure code after the two installs, $0), then (c)
-media (needs the Sarvam key), then WhatsApp/Telegram bots on top.

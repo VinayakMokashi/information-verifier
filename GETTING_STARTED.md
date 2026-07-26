@@ -140,7 +140,21 @@ The terminal now sits quietly — that means it's working. Leave it running.
 | Command | Cost | What it proves |
 |---|---|---|
 | `scripts\demo_offline.py` | Free | The whole pipeline + cache + report logic works |
-| `python -m pytest tests -q` | Free | Unit tests — trust filter & domain matching logic |
+| `scripts\serve_demo.py` | Free | The real web page + API, with simulated verdicts |
+| `python -m pytest tests -q` | Free | The full test suite (web, cache, media, trust filter) |
 | `scripts\factcheck_probe.py "claim"` | Free | Which fact-check publishers we keep vs drop |
+| `scripts\asr_probe.py clip.ogg` | ~paise | Sarvam transcription of one audio clip |
 | `scripts\smoke_test.py` | ~cents | A real, cited fact-check on one claim |
-| `uvicorn app.main:app` | free to run | The live web API a UI/WhatsApp bot will call |
+| `uvicorn app.main:app` | free to run | The live web app: open http://127.0.0.1:8000 |
+| `.\scripts\share_demo.ps1` | per check | A public share link (cloudflared quick tunnel) |
+
+---
+
+## The web page
+
+Start the server (`uvicorn app.main:app` for real checks, `scripts\serve_demo.py`
+for the free simulated demo) and open **http://127.0.0.1:8000** — a mobile-first
+page where you can paste text, upload a screenshot/meme, or send a voice note /
+video. To show friends on their phones, run `.\scripts\share_demo.ps1` and share
+the printed `https://….trycloudflare.com` link (it dies when you press Ctrl+C —
+and in real mode every check they run spends your API credits, so share privately).
