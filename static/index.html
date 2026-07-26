@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Information Verifier — सच जानिए</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1a1d21; --muted: #5c6570;
+    --accent: #1a56db; --border: #e3e6ea;
+    --true: #0e7a3d; --mostly: #4d8b31; --misleading: #b45309;
+    --false: #b91c1c; --unverified: #5c6570;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101418; --card: #1a2027; --ink: #e8eaed; --muted: #9aa4af;
+      --accent: #6ea8ff; --border: #2a323b;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+    line-height: 1.55; padding: 16px; max-width: 640px; margin: 0 auto;
+  }
+  header { text-align: center; margin: 12px 0 20px; }
+  header h1 { font-size: 1.5rem; }
+  header p { color: var(--muted); font-size: .92rem; margin-top: 4px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 14px;
+  }
+  textarea {
+    width: 100%; min-height: 110px; resize: vertical; font: inherit;
+    color: inherit; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px;
+  }
+  .row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 8px;
+    padding: 10px 18px; cursor: pointer; background: var(--accent); color: #fff;
+  }
+  button:disabled { opacity: .55; cursor: wait; }
+  .ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  input[type=file] { display: none; }
+  #status { color: var(--muted); font-size: .95rem; }
+  .spin {
+    display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
+    border: 2px solid var(--muted); border-top-color: transparent;
+    border-radius: 50%; animation: r 0.8s linear infinite; margin-right: 6px;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .badge {
+    display: inline-block; font-weight: 700; font-size: .85rem; color: #fff;
+    border-radius: 999px; padding: 3px 12px; letter-spacing: .02em;
+  }
+  .b-TRUE { background: var(--true); } .b-MOSTLY_TRUE { background: var(--mostly); }
+  .b-MISLEADING { background: var(--misleading); } .b-FALSE { background: var(--false); }
+  .b-UNVERIFIED { background: var(--unverified); }
+  .claim { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+  .claim h3 { font-size: 1rem; margin-bottom: 6px; }
+  .meta { color: var(--muted); font-size: .85rem; }
+  .correction {
+    border-left: 3px solid var(--true); padding: 6px 10px; margin: 8px 0;
+    background: color-mix(in srgb, var(--true) 8%, transparent);
+    border-radius: 0 6px 6px 0; font-size: .95rem;
+  }
+  .cites { margin-top: 8px; font-size: .9rem; }
+  .cites a { color: var(--accent); word-break: break-all; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; margin: 22px 0 10px; }
+  .hidden { display: none; }
+  .error { color: var(--false); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔎 Information Verifier</h1>
+  <p>Kya yeh sach hai? Paste a forwarded message — Hindi, Marathi, Tamil, Bengali,
+     English sab chalega — and get a sourced answer.</p>
+</header>
+
+<div class="card">
+  <textarea id="text" placeholder="Example: WHO ne kaha hai ki 5G se coronavirus phailta hai…"></textarea>
+  <div class="row">
+    <button id="check">Check it</button>
+    <button id="pickImage" class="ghost" type="button">📷 Image</button>
+    <button id="pickMedia" class="ghost" type="button">🎤 Voice / video</button>
+    <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif">
+    <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
+    <span id="status"></span>
+  </div>
+</div>
+
+<div id="report" class="card hidden"></div>
+
+<footer>
+  Verdicts cite only trusted fact-checkers &amp; official sources (AltNews, BOOM,
+  Factly, PIB, Vishvas News&hellip;). The checker can make mistakes — always read the
+  cited sources. No verdict is given when trusted sources are silent.
+</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const POLL_MS = 2500, POLL_MAX = 60;  // up to ~2.5 minutes
+let busy = false;
+
+const RATING_LABELS = {
+  TRUE: "TRUE — sach hai", MOSTLY_TRUE: "MOSTLY TRUE",
+  MISLEADING: "MISLEADING — bhramak", FALSE: "FALSE — jhooth hai",
+  UNVERIFIED: "UNVERIFIED — pushti nahi ho saki",
+};
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function setStatus(html) { $("status").innerHTML = html; }
+function setBusy(b) {
+  busy = b;
+  for (const id of ["check", "pickImage", "pickMedia"]) $(id).disabled = b;
+}
+
+function safeUrl(u) {
+  try { const p = new URL(u); if (p.protocol === "https:" || p.protocol === "http:") return p.href; }
+  catch (e) { /* not a URL */ }
+  return null;
+}
+
+function renderReport(r) {
+  const el = $("report");
+  el.classList.remove("hidden");
+  if (r.status === "FAILED") {
+    el.innerHTML = `<p class="error">Check failed.</p><p class="meta">${esc(r.error || "Unknown error")}</p>`;
+    return;
+  }
+  const parts = [];
+  if (r.overall_rating) {
+    parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
+  }
+  if (r.summary) parts.push(`<p style="margin-top:8px">${esc(r.summary)}</p>`);
+  if (r.input_language && r.input_language !== "en") {
+    parts.push(`<p class="meta">Detected language: ${esc(r.input_language)}</p>`);
+  }
+  for (const cv of r.claim_verdicts || []) {
+    const v = cv.verdict;
+    const cites = (v.citations || []).map((c) => {
+      const u = safeUrl(c.url);
+      const label = `${esc(c.publisher)}: ${esc(c.title)}`;
+      return `<li>${u ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</li>`;
+    }).join("");
+    parts.push(`
+      <div class="claim">
+        <h3>“${esc(cv.claim.text)}”</h3>
+        <p><span class="badge b-${esc(v.rating)}">${esc(v.rating)}</span>
+           <span class="meta"> confidence ${esc(v.confidence)}%${cv.cache_hit ? " · answered from cache" : ""}</span></p>
+        <p style="margin-top:6px">${esc(v.reasoning)}</p>
+        ${v.correction ? `<div class="correction"><strong>Sach yeh hai:</strong> ${esc(v.correction)}</div>` : ""}
+        ${cites ? `<div class="cites"><strong>Sources:</strong><ul>${cites}</ul></div>` : ""}
+      </div>`);
+  }
+  el.innerHTML = parts.join("") || "<p>No checkable factual claims were found in this message.</p>";
+}
+
+async function poll(jobId) {
+  for (let i = 0; i < POLL_MAX; i++) {
+    await new Promise((res) => setTimeout(res, POLL_MS));
+    let r;
+    try {
+      const resp = await fetch(`api/v1/reports/${encodeURIComponent(jobId)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      r = await resp.json();
+    } catch (e) {
+      setStatus(`<span class="error">Connection lost — retrying…</span>`);
+      continue;
+    }
+    if (r.status === "COMPLETE" || r.status === "FAILED") return r;
+    setStatus(`<span class="spin"></span>Checking against trusted sources… (${Math.round((i + 1) * POLL_MS / 1000)}s)`);
+  }
+  throw new Error("Timed out waiting for the report. Try again in a minute.");
+}
+
+async function submit(promise) {
+  if (busy) return;
+  setBusy(true);
+  $("report").classList.add("hidden");
+  setStatus(`<span class="spin"></span>Submitting…`);
+  try {
+    const resp = await promise;
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${resp.status}`);
+    }
+    const { job_id } = await resp.json();
+    setStatus(`<span class="spin"></span>Queued…`);
+    const report = await poll(job_id);
+    setStatus("");
+    renderReport(report);
+  } catch (e) {
+    setStatus(`<span class="error">${esc(e.message)}</span>`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+$("check").addEventListener("click", () => {
+  const text = $("text").value.trim();
+  if (!text) { setStatus("Type or paste a message first."); return; }
+  submit(fetch("api/v1/verify/text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  }));
+});
+
+function wireFilePicker(buttonId, inputId, endpoint) {
+  $(buttonId).addEventListener("click", () => $(inputId).click());
+  $(inputId).addEventListener("change", () => {
+    const f = $(inputId).files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    submit(fetch(endpoint, { method: "POST", body: fd }));
+    $(inputId).value = "";
+  });
+}
+wireFilePicker("pickImage", "image", "api/v1/verify/image");
+wireFilePicker("pickMedia", "media", "api/v1/verify/media");
+</script>
+</body>
+</html>
