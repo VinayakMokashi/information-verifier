@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from app.engine.adjudicate import adjudicate
 from app.engine.aggregate import build_summary, overall_rating
+from app.engine.equivalence import claims_equivalent
 from app.engine.extract import extract_claims
 from app.engine.normalize import normalize
 from app.engine.retrieve import gather_evidence
@@ -22,10 +23,42 @@ from app.models.verdict import Rating, Verdict
 from app.store.repository import ReportRepository
 
 
+async def _cache_call(fn, *args):
+    """Run a cache operation off the event loop, never letting it sink a claim.
+
+    The cache is an optimization: a locked DB, a corrupt cached row, or a
+    failed embedding must degrade to doing the real work — never discard a
+    verdict we already paid for, and never surface as "no claims found".
+    Cache calls also run in a worker thread because the semantic tier embeds
+    on CPU (lazy-loading the model on first use), which would block the loop.
+    """
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except Exception as exc:  # noqa: BLE001 — see above
+        print(f"[cache] {getattr(fn, '__name__', fn)} failed: {type(exc).__name__}: {exc}")
+        return None
+
+
 async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
-    cached = repo.cache.get(claim.text)
+    cached = await _cache_call(repo.cache.get, claim.text)
     if cached is not None:
         return ClaimVerdict(claim=claim, verdict=cached, cache_hit=True)
+
+    # Semantic tier: the vector index only NOMINATES a near-neighbour; a
+    # cheap Haiku check must confirm it is the same claim before the cached
+    # verdict is served (one-token-different claims embed deceptively close).
+    candidate = await _cache_call(repo.cache.nearest, claim.text)
+    if candidate is not None:
+        try:
+            if await claims_equivalent(claim.text, candidate.text):
+                # Learn this phrasing so next time it's an exact (free) hit.
+                # index=False: aliases must never become nomination anchors,
+                # or hops would drift away from the adjudicated claim.
+                await _cache_call(repo.cache.put, claim.text, candidate.verdict, False)
+                return ClaimVerdict(claim=claim, verdict=candidate.verdict, cache_hit=True)
+        except Exception as exc:  # noqa: BLE001 — confirmation is an optimization
+            print(f"[cache] equivalence check failed, doing a full check: "
+                  f"{type(exc).__name__}: {exc}")
 
     try:
         evidence = await gather_evidence(claim)
@@ -47,7 +80,7 @@ async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
             cache_hit=False,
         )
 
-    repo.cache.put(claim.text, verdict)
+    await _cache_call(repo.cache.put, claim.text, verdict)
     return ClaimVerdict(claim=claim, verdict=verdict, cache_hit=False)
 
 

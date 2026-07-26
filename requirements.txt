@@ -7,5 +7,9 @@ pydantic-settings>=2.3
 httpx>=0.27               # Google Fact Check API + Sarvam ASR
 python-multipart>=0.0.9   # multipart file uploads (image/audio)
 
+# Semantic claim cache (Phase 2) — local, $0 per lookup
+sqlite-vec==0.1.9         # pinned: pre-v1, warns of breaking changes
+sentence-transformers>=3.0  # EmbeddingGemma-300m on CPU (gated repo: needs HF_TOKEN once)
+
 # Dev / tests (free to run: tests never call paid APIs)
 pytest>=8.0

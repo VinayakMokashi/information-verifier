@@ -35,6 +35,19 @@ RETRIEVAL_PROMPT = (
     "agree or disagree. If nothing relevant is found, say so plainly."
 )
 
+EQUIVALENCE_SYSTEM = (
+    "You are the semantic-cache gate of a fact-checking engine. You are given "
+    "two claims. Decide whether they assert the SAME checkable fact, such that "
+    "a fact-check verdict for one applies to the other verbatim.\n\n"
+    "Answer same_claim=true ONLY for genuine paraphrases: same subject, same "
+    "assertion, same specifics.\n"
+    "Answer same_claim=false if ANY entity, number, date, place, quantity, or "
+    "direction of the assertion differs — even by one token. 'WHO declared "
+    "COVID-19 a pandemic in 2020' and the same sentence with 2019 are "
+    "DIFFERENT claims. Serving a cached verdict for a different claim is the "
+    "worst failure this system can make; when unsure, answer false."
+)
+
 ADJUDICATION_SYSTEM = (
     "You are the adjudication step of a fact-checking engine that publicly "
     "rates claims about India. Your output can accuse someone of spreading "

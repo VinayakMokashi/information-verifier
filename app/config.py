@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_factcheck_api_key: str = ""
     sarvam_api_key: str = ""
+    hf_token: str = ""  # Hugging Face token — EmbeddingGemma is a gated repo
 
     # Model tiers  (see docs: $5/$25 vs $1/$5 per MTok)
     opus_model: str = "claude-opus-4-8"   # adjudication, extraction, vision OCR
@@ -25,6 +26,26 @@ class Settings(BaseSettings):
 
     # Retrieval
     max_search_uses: int = 4  # cap web_search rounds per claim (each ~$0.01)
+
+    # Semantic claim cache (Phase 2) — local EmbeddingGemma via sentence-transformers
+    semantic_cache_enabled: bool = True
+    embedding_model: str = "google/embeddinggemma-300m"
+    embedding_dim: int = 256      # Matryoshka truncation; must match the vec0 DDL
+    # Max cosine DISTANCE for the vector index to NOMINATE a cached claim as a
+    # candidate. Candidates are never served directly — calibration showed a
+    # one-token swap (2020->2019) sits at distance 0.03, closer than real
+    # paraphrases — a Haiku equivalence check confirms every candidate first.
+    semantic_candidate_distance: float = 0.20
+
+    # Media (Phase 2) — audio/video via ffmpeg + Sarvam Saaras
+    max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap
+    max_media_seconds: int = 300             # 5 min cap — protects ASR credits
+    asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
+
+    # Spending guard — every check costs money and the share link is public
+    rate_limit_enabled: bool = True
+    max_checks_per_hour: int = 10   # per visitor IP
+    max_checks_per_day: int = 100   # across the whole deployment
 
 
 @lru_cache
