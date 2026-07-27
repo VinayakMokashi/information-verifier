@@ -236,6 +236,14 @@ def test_a_verdict_too_long_to_afford_is_left_in_english_not_shortened(stub):
                for kw in stub.messages.calls)
 
 
+def test_an_empty_summary_buys_nothing(stub):
+    report = _report()
+    report.summary = "   "
+    localized = asyncio.run(T.localize(report))
+    assert localized.summary is None
+    assert all(kw["output_format"] is LocalizedClaim for kw in stub.messages.calls)
+
+
 def test_an_oversize_summary_is_left_in_english(stub):
     report = _report()
     report.summary = "x" * 2001

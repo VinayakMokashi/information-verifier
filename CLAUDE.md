@@ -54,6 +54,12 @@ Secrets live only in `.env` (git-ignored): `ANTHROPIC_API_KEY`,
    checks come before any paid call, and the rate limiter reserves atomically.
 6. **A cache failure degrades to doing the real work.** It must never discard a
    verdict already paid for, or surface as "no claims found".
+7. **Back-translation is additive.** The adjudicated English is canonical and
+   lives on; the reader's language goes in `report.localized`, index-aligned
+   with `claim_verdicts` (`None` = show the English for that one, never shift).
+   Ratings and citations have no translated form and must not grow one. Never
+   translate a `Verdict` before caching it — the first Hindi reader would
+   poison that rumour for every Tamil reader behind them.
 
 ## How we work
 
@@ -73,7 +79,7 @@ Secrets live only in `.env` (git-ignored): `ANTHROPIC_API_KEY`,
 ## Shape of the code
 
 `app/api/` routes → `app/engine/pipeline.py` orchestrates →
-`normalize → extract → (cache | retrieve → adjudicate) → aggregate` →
+`normalize → extract → (cache | retrieve → adjudicate) → aggregate → translate` →
 `app/store/` persists. Providers (`app/providers/`) wrap every external service.
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` → poll
 `/reports/{job_id}`. The web page, and any future WhatsApp/Telegram bot, use the

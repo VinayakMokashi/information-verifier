@@ -167,6 +167,8 @@ async def _translate_claim(
 
 async def _translate_summary(language: str, summary: str, cache=None) -> str | None:
     source = (summary,)
+    if not summary.strip():
+        return None   # nothing to translate; don't buy a call and cache the answer
     if not _translatable(summary):
         print(f"[translate] summary exceeds {_MAX_FIELD_CHARS} chars; left in English")
         return None

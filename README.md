@@ -6,11 +6,12 @@ claims, checks each against a **whitelist of trusted sources** (Indian fact-chec
 government portals, wire services), and returns a **Truth Report** with a rating,
 reasoning, the correction, and clickable citations.
 
-Works in Hindi, Marathi, Tamil, Bengali and English. Mobile-first, no app to install.
+Works in Hindi, Marathi, Tamil, Bengali and English — and **answers in the language
+the rumour arrived in**. Mobile-first, no app to install.
 
-> Status: text, image and audio/video all work end-to-end, with a mobile web page
-> and a semantic claim cache. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly
-> where things stand and what's next.
+> Status: text, image and audio/video all work end-to-end, with a mobile web page,
+> a semantic claim cache, and back-translated Truth Reports. See
+> [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand and what's next.
 
 ## Why the design looks the way it does
 
@@ -34,6 +35,11 @@ Works in Hindi, Marathi, Tamil, Bengali and English. Mobile-first, no app to ins
 - **We show you what we heard.** Speech-to-text and OCR are guesses. The
   transcript is displayed above the verdict, so a mis-hear is visible instead of
   becoming a confident answer to a question you never asked.
+- **The answer comes back in your language, but the English stays underneath.**
+  A red FALSE badge you can't read the reasoning for changes nobody's mind. The
+  translation is *additive*: it never overwrites what was adjudicated, ratings
+  and citations are never translated (a translated headline is unfindable on the
+  source page), and the English is always one tap away.
 
 ## Quick start
 
