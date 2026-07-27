@@ -143,6 +143,7 @@ scripts/
   share_demo.ps1     uvicorn + cloudflared quick tunnel (public share link)
   smoke_test.py      REAL one-claim end-to-end test (costs a few cents)
   factcheck_probe.py FREE Google-API-only probe: shows KEEP/DROP per publisher
+  link_probe.py      FREE yt-dlp probe: does a Reel/Shorts URL resolve, captions?
   asr_probe.py       Sarvam-only transcription probe (fractions of a rupee)
   fake_stages.py     the shared simulated LLM stages (demos + tests)
   render.py          console Truth Report formatter
@@ -207,17 +208,25 @@ tests/               pytest suite — always free, every paid seam faked
       back half already exists: `/verify/media` does ffmpeg → chunk → Sarvam →
       transcript → pipeline, with caps. What is missing is *fetching* the media
       from a URL. Plan, cheapest step first:
-      1. **Free probe before any code** (`scripts/link_probe.py`, in the style
-         of `factcheck_probe.py`): `yt-dlp` metadata-only, no download, no paid
-         call. Answers the only question that matters — which platforms
-         actually resolve from this machine. **Expect YouTube Shorts to work
-         and Instagram to be flaky**: Reels usually need login cookies and
-         Instagram blocks aggressively. Do not design around Instagram until
-         measured.
-      2. **Prefer captions over ASR.** yt-dlp can pull existing/auto captions
-         without downloading video and without paying Sarvam at all — a link
-         check then costs only the pipeline. Fall back to audio + ASR when
-         there are none.
+      1. ✅ **Free probe built and run** (`scripts/link_probe.py`, yt-dlp
+         2026.07.04, metadata only, $0). **Measured 2026-07-28:**
+         - **YouTube works, all three URL forms**: `/shorts/<id>`,
+           `/watch?v=<id>`, `youtu.be/<id>` all resolved with title, uploader,
+           duration and formats.
+         - **Instagram refused anonymous access** — "Instagram sent an empty
+           media response … use --cookies-from-browser". ⚠️ The probe used an
+           **invented** Reel ID, so this is *consistent with* login-gating but
+           does not prove it; that error is indistinguishable from "no such
+           post". **A real public Reel URL is still needed to settle it.**
+           `--cookies-from <browser>` exists in the probe for that test, and
+           lends yt-dlp Vinayak's real Instagram session — fine locally, not
+           for a public service.
+      2. **Prefer captions over ASR — measured, and it is the big lever.**
+         Two Hindi fact-check videos both carried auto-captions in
+         `hi` and `hi-orig` (plus mr/ta/bn/te/kn/ml/gu/pa/or/as/ur), so the
+         claim can be read for **₹0 of ASR**. But the 14 s PIB *Short* had
+         **none** — short-form is likelier to lack them, so the ASR fallback
+         is not optional. Sarvam on a 250 s video would have been ~₹2.08.
       3. **Consider frame OCR.** A lot of Indian reel misinformation is burned
          into the image, not spoken; we already have Opus vision. Adds cost per
          frame, so make it opt-in or heuristic.

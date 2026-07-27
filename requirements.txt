@@ -11,5 +11,9 @@ python-multipart>=0.0.9   # multipart file uploads (image/audio)
 sqlite-vec==0.1.9         # pinned: pre-v1, warns of breaking changes
 sentence-transformers>=3.0  # EmbeddingGemma-300m on CPU (gated repo: needs HF_TOKEN once)
 
+# Reel / Shorts link ingestion (Phase 2, NOT yet wired into the app).
+# Needed by scripts/link_probe.py, which is free: metadata only, no download.
+yt-dlp>=2026.7            # YouTube verified working; Instagram gates anonymous access
+
 # Dev / tests (free to run: tests never call paid APIs)
 pytest>=8.0
