@@ -25,6 +25,7 @@ on a full report (~$0.01, under 2% of the check it rides on) instead of one,
 and it buys per-claim failure isolation as well.
 """
 import asyncio
+import hashlib
 import re
 
 from pydantic import BaseModel, Field, ValidationError
@@ -82,6 +83,24 @@ def _delimited(**fields: str) -> str:
     )
 
 
+_PROMPT_FINGERPRINT = hashlib.sha256(
+    TRANSLATION_SYSTEM.encode("utf-8")
+).hexdigest()[:16]
+
+
+def _cache_source(*fields: str) -> tuple[str, ...]:
+    """The cache key covers everything that decides the output, not just the text.
+
+    Measured gap: keyed on source text alone, editing TRANSLATION_SYSTEM left
+    every cached translation exactly where it was — so a prompt fix would
+    silently do nothing for precisely the rumours that had been seen before,
+    which are the ones that matter most. Same hazard the embedding-signature
+    check in store/db.py exists for, handled here as part of the key rather
+    than as a wipe: superseded rows simply stop being reachable.
+    """
+    return (_PROMPT_FINGERPRINT, settings.haiku_model, *fields)
+
+
 def _translatable(*fields: str) -> bool:
     """Decline anything we would have to truncate to afford.
 
@@ -114,12 +133,13 @@ async def _translate_claim(
     language: str, cv: ClaimVerdict, cache=None
 ) -> LocalizedClaim | None:
     """Translate one claim's prose, or None if it could not be done faithfully."""
-    source = (cv.claim.text, cv.verdict.reasoning, cv.verdict.correction)
-    if not _translatable(*source):
+    fields = (cv.claim.text, cv.verdict.reasoning, cv.verdict.correction)
+    if not _translatable(*fields):
         print(f"[translate] claim prose exceeds {_MAX_FIELD_CHARS} chars; "
               f"answering this claim in English rather than shortening it")
         return None
 
+    source = _cache_source(*fields)
     if cache is not None:
         hit = await safe_cache_call(cache.get, language, source)
         if hit is not None:
@@ -166,12 +186,12 @@ async def _translate_claim(
 
 
 async def _translate_summary(language: str, summary: str, cache=None) -> str | None:
-    source = (summary,)
     if not summary.strip():
         return None   # nothing to translate; don't buy a call and cache the answer
     if not _translatable(summary):
         print(f"[translate] summary exceeds {_MAX_FIELD_CHARS} chars; left in English")
         return None
+    source = _cache_source(summary)
     if cache is not None:
         hit = await safe_cache_call(cache.get, language, source)
         if hit:

@@ -83,6 +83,51 @@ def test_put_overwrites_rather_than_erroring(cache):
     assert cache.get("hi", ("a",)) == "two"
 
 
+# -- the key covers everything that decides the output -----------------------
+
+def test_editing_the_translation_prompt_invalidates_cached_translations(monkeypatch):
+    """The measured gap: keyed on source text alone, a prompt fix would have
+    silently done nothing for exactly the rumours already seen — the ones
+    that matter most. So the prompt is part of the key."""
+    import hashlib
+
+    before = T._cache_source("a claim", "some reasoning", "")
+    edited = T.TRANSLATION_SYSTEM + " One extra rule."
+    # _PROMPT_FINGERPRINT is derived at import; recompute it exactly as the
+    # module does, so this test fails if that derivation ever stops happening.
+    monkeypatch.setattr(T, "_PROMPT_FINGERPRINT",
+                        hashlib.sha256(edited.encode("utf-8")).hexdigest()[:16])
+
+    after = T._cache_source("a claim", "some reasoning", "")
+    assert before != after
+    assert _content_key(before) != _content_key(after)
+
+
+def test_the_fingerprint_actually_comes_from_the_prompt():
+    import hashlib
+    assert T._PROMPT_FINGERPRINT == hashlib.sha256(
+        T.TRANSLATION_SYSTEM.encode("utf-8")).hexdigest()[:16]
+
+
+def test_switching_the_model_invalidates_cached_translations(monkeypatch):
+    """A different model writes different Hindi; the old rows are not its work."""
+    before = T._cache_source("a claim", "some reasoning", "")
+    monkeypatch.setattr(settings, "haiku_model", "claude-haiku-9-9")
+    assert T._cache_source("a claim", "some reasoning", "") != before
+
+
+def test_a_stale_row_from_the_old_key_is_not_served(cache, stub, monkeypatch):
+    """End-to-end version of the above, through the stage."""
+    asyncio.run(T.localize(_report(), cache))
+    assert len(stub.messages.calls) == 2
+
+    stub.messages.calls.clear()
+    monkeypatch.setattr(T, "_PROMPT_FINGERPRINT", "a-different-prompt")
+    asyncio.run(T.localize(_report(), cache))
+
+    assert len(stub.messages.calls) == 2   # re-translated, not served from before
+
+
 # -- the stage uses it -------------------------------------------------------
 
 def test_a_repeat_forward_costs_nothing(cache, stub):
@@ -126,8 +171,9 @@ def test_a_broken_cache_still_produces_a_translation(stub):
 
 
 def test_a_corrupt_cached_row_costs_one_retranslation_not_the_report(cache, stub):
-    cache.put("hi", ("5G spreads coronavirus.", "Trusted sources say this is false.",
-                     "Corona spreads by droplets."), "{not json at all")
+    cache.put("hi", T._cache_source(
+        "5G spreads coronavirus.", "Trusted sources say this is false.",
+        "Corona spreads by droplets."), "{not json at all")
 
     localized = asyncio.run(T.localize(_report(), cache))
     assert localized.claims[0].claim == HINDI_CLAIM
@@ -136,7 +182,8 @@ def test_a_corrupt_cached_row_costs_one_retranslation_not_the_report(cache, stub
 def test_a_cached_invented_correction_is_still_discarded(cache, stub):
     """The never-become-an-author rules apply to cached rows too, so a row
     written by an older ruleset cannot smuggle one past."""
-    source = ("5G spreads coronavirus.", "Trusted sources say this is false.", "")
+    source = T._cache_source(
+        "5G spreads coronavirus.", "Trusted sources say this is false.", "")
     cache.put("hi", source, LocalizedClaim(
         claim=HINDI_CLAIM, reasoning="कारण", correction="मनगढ़ंत सुधार",
     ).model_dump_json())
@@ -149,8 +196,9 @@ def test_a_rejected_cached_row_is_replaced_not_obeyed_forever(cache, stub):
     """A row today's rules reject must cost one re-translation, not permanent
     English for that claim — otherwise one bad row is a silent, sticky
     downgrade nobody would ever notice."""
-    source = ("5G spreads coronavirus.", "Trusted sources say this is false.",
-              "Corona spreads by droplets.")
+    source = T._cache_source(
+        "5G spreads coronavirus.", "Trusted sources say this is false.",
+        "Corona spreads by droplets.")
     cache.put("hi", source, LocalizedClaim(
         claim=HINDI_CLAIM, reasoning="कारण", correction="   ",   # dropped field
     ).model_dump_json())
