@@ -27,12 +27,13 @@ and it buys per-claim failure isolation as well.
 import asyncio
 import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
 from app.engine.prompts import TRANSLATION_SYSTEM, as_prompt_data
 from app.models.report import ClaimVerdict, LocalizedClaim, LocalizedReport, TruthReport
 from app.providers.llm import async_client
+from app.store.repository import safe_cache_call
 
 # `input_language` is model output derived from a stranger's text, and it is
 # interpolated into a prompt. Anything that is not a plain language tag or
@@ -75,8 +76,36 @@ def _delimited(**fields: str) -> str:
     )
 
 
-async def _translate_claim(language: str, cv: ClaimVerdict) -> LocalizedClaim | None:
+def _accept(cv: ClaimVerdict, out: LocalizedClaim) -> LocalizedClaim | None:
+    """The translator must not become an author. Applied to CACHED values too,
+    so a row written by an older ruleset cannot smuggle one past."""
+    # A correction the engine never made must not materialize out of a
+    # translator: UNVERIFIED and TRUE claims carry an empty correction, and
+    # inventing one there would be the engine asserting a fact it never
+    # adjudicated.
+    if not cv.verdict.correction.strip():
+        out = out.model_copy(update={"correction": ""})
+    elif not out.correction.strip():
+        return None  # the correction was dropped — fall back to English wholesale
+    if not out.claim.strip() or not out.reasoning.strip():
+        return None  # a silently emptied field would read as a claim with no answer
+    return out
+
+
+async def _translate_claim(
+    language: str, cv: ClaimVerdict, cache=None
+) -> LocalizedClaim | None:
     """Translate one claim's prose, or None if it could not be done faithfully."""
+    source = (cv.claim.text, cv.verdict.reasoning, cv.verdict.correction)
+    if cache is not None:
+        hit = await safe_cache_call(cache.get, language, source)
+        if hit is not None:
+            try:
+                return _accept(cv, LocalizedClaim.model_validate_json(hit))
+            except ValidationError as exc:
+                # A corrupt row costs one re-translation, never the report.
+                print(f"[translate] discarding a bad cached translation: {exc}")
+
     try:
         resp = await async_client.messages.parse(
             model=settings.haiku_model,
@@ -101,21 +130,19 @@ async def _translate_claim(language: str, cv: ClaimVerdict) -> LocalizedClaim | 
         print(f"[translate] claim translation failed: {type(exc).__name__}: {exc}")
         return None
 
-    out = resp.parsed_output
-    # A correction the engine never made must not materialize out of a
-    # translator: UNVERIFIED and TRUE claims carry an empty correction, and
-    # inventing one there would be the engine asserting a fact it never
-    # adjudicated.
-    if not cv.verdict.correction.strip():
-        out.correction = ""
-    elif not out.correction.strip():
-        return None  # the correction was dropped — fall back to English wholesale
-    if not out.claim.strip() or not out.reasoning.strip():
-        return None  # a silently emptied field would read as a claim with no answer
+    out = _accept(cv, resp.parsed_output)
+    if out is not None and cache is not None:
+        await safe_cache_call(cache.put, language, source, out.model_dump_json())
     return out
 
 
-async def _translate_summary(language: str, summary: str) -> str | None:
+async def _translate_summary(language: str, summary: str, cache=None) -> str | None:
+    source = (summary,)
+    if cache is not None:
+        hit = await safe_cache_call(cache.get, language, source)
+        if hit:
+            return hit
+
     try:
         resp = await async_client.messages.parse(
             model=settings.haiku_model,
@@ -136,7 +163,11 @@ async def _translate_summary(language: str, summary: str) -> str | None:
         print(f"[translate] summary translation failed: {type(exc).__name__}: {exc}")
         return None
     text = resp.parsed_output.summary.strip()
-    return text or None
+    if not text:
+        return None
+    if cache is not None:
+        await safe_cache_call(cache.put, language, source, text)
+    return text
 
 
 def _source_chars(report: TruthReport) -> int:
@@ -146,12 +177,14 @@ def _source_chars(report: TruthReport) -> int:
     return total
 
 
-async def localize(report: TruthReport) -> LocalizedReport | None:
+async def localize(report: TruthReport, cache=None) -> LocalizedReport | None:
     """Build the reader's-language view of a finished report.
 
-    Pure: it returns the block rather than writing it, so "the English is
-    canonical" is a property of the code shape and not of remembering to be
-    careful. Returns None whenever there is nothing to do or nothing worked.
+    Does not write to `report`: it returns the block, so "the English is
+    canonical" is a property of the code shape rather than of remembering to
+    be careful. Returns None whenever there is nothing to do or nothing
+    worked. `cache` is a TranslationCache (optional — omitting it just means
+    paying for every translation).
     """
     if not settings.translate_reports:
         return None
@@ -169,8 +202,8 @@ async def localize(report: TruthReport) -> LocalizedReport | None:
         return None
 
     summary, *claims = await asyncio.gather(
-        _translate_summary(language, report.summary or ""),
-        *(_translate_claim(language, cv) for cv in report.claim_verdicts),
+        _translate_summary(language, report.summary or "", cache),
+        *(_translate_claim(language, cv, cache) for cv in report.claim_verdicts),
     )
 
     # Nothing landed — don't hand the page an empty shell it has to reason

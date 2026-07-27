@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS claim_cache (
     created_at   TEXT NOT NULL
 );
 
+-- Content-addressed: source_hash is a digest of the exact English text a
+-- translation was made from, so a re-adjudicated claim simply misses rather
+-- than needing invalidation. Independent of claim_cache on purpose — the
+-- summary is translated too, and it belongs to no single claim.
+CREATE TABLE IF NOT EXISTS translation_cache (
+    source_hash  TEXT NOT NULL,
+    language     TEXT NOT NULL,
+    payload      TEXT NOT NULL,          -- LocalizedClaim as JSON, or raw text
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (source_hash, language)
+);
+
 CREATE TABLE IF NOT EXISTS cache_meta (
     key          TEXT PRIMARY KEY,
     value        TEXT NOT NULL

@@ -23,55 +23,13 @@ from app.models.verdict import Citation, Rating, Verdict
 from app.store.db import init_db
 from app.store.repository import ReportRepository
 
+# Mirrors of what the `stub` fixture (conftest) returns by default. Repeated
+# rather than imported: `tests` is not a package, so a cross-test-module
+# import would depend on pytest's sys.path insertion order.
 HINDI_CLAIM = "5जी से कोरोना वायरस फैलता है।"
 HINDI_REASONING = "भरोसेमंद स्रोतों के अनुसार यह दावा झूठा है।"
 HINDI_CORRECTION = "कोरोना वायरस साँस की बूँदों से फैलता है।"
-
-
-# -- stub Anthropic client ---------------------------------------------------
-
-class _Resp:
-    def __init__(self, parsed):
-        self.parsed_output = parsed
-
-
-class _Messages:
-    def __init__(self, handler):
-        self._handler = handler
-        self.calls = []
-
-    async def parse(self, **kw):
-        self.calls.append(kw)
-        result = self._handler(kw)
-        if isinstance(result, Exception):
-            raise result
-        return _Resp(result)
-
-
-class StubClient:
-    """Stands in for the shared AsyncAnthropic; `handler` decides each reply."""
-
-    def __init__(self, handler):
-        self.messages = _Messages(handler)
-
-
-def _default_handler(kw):
-    if kw["output_format"] is LocalizedClaim:
-        return LocalizedClaim(
-            claim=HINDI_CLAIM, reasoning=HINDI_REASONING, correction=HINDI_CORRECTION
-        )
-    return T._LocalizedSummary(summary="1 दावे की जाँच की गई।")
-
-
-@pytest.fixture()
-def stub(monkeypatch):
-    """Install a stub client; the fixture value swaps the handler mid-test."""
-    holder = {"handler": _default_handler}
-    client = StubClient(lambda kw: holder["handler"](kw))
-    monkeypatch.setattr(T, "async_client", client)
-    monkeypatch.setattr(settings, "translate_reports", True)
-    client.holder = holder
-    return client
+HINDI_SUMMARY = "1 दावे की जाँच की गई।"
 
 
 # -- fixtures ----------------------------------------------------------------
@@ -191,7 +149,7 @@ def test_one_failed_claim_leaves_a_hole_not_a_shift(stub):
                                   correction=HINDI_CORRECTION)
         return T._LocalizedSummary(summary="जाँच पूरी हुई।")
 
-    stub.holder["handler"] = handler
+    stub.messages.handler = handler
     localized = asyncio.run(T.localize(_report(n=3)))
 
     assert len(localized.claims) == 3
@@ -200,7 +158,7 @@ def test_one_failed_claim_leaves_a_hole_not_a_shift(stub):
 
 
 def test_total_failure_yields_no_block_at_all(stub):
-    stub.holder["handler"] = lambda kw: RuntimeError("api down")
+    stub.messages.handler = lambda kw: RuntimeError("api down")
     assert asyncio.run(T.localize(_report(n=2))) is None
 
 
@@ -211,7 +169,7 @@ def test_summary_failure_still_localizes_the_claims(stub):
                                   correction=HINDI_CORRECTION)
         return RuntimeError("api down")
 
-    stub.holder["handler"] = handler
+    stub.messages.handler = handler
     localized = asyncio.run(T.localize(_report()))
     assert localized.summary is None
     assert localized.claims[0].reasoning == HINDI_REASONING
@@ -222,7 +180,7 @@ def test_summary_failure_still_localizes_the_claims(stub):
 def test_an_invented_correction_is_discarded(stub):
     """UNVERIFIED and TRUE claims carry no correction; a translator adding one
     would be the engine asserting a fact it never adjudicated."""
-    stub.holder["handler"] = lambda kw: (
+    stub.messages.handler = lambda kw: (
         LocalizedClaim(claim=HINDI_CLAIM, reasoning=HINDI_REASONING,
                        correction="सही जानकारी यह है कि …")
         if kw["output_format"] is LocalizedClaim
@@ -243,7 +201,7 @@ def test_a_dropped_field_falls_back_to_english_wholesale(stub, dropped):
         fields[dropped] = "   "
         return LocalizedClaim(**fields)
 
-    stub.holder["handler"] = handler
+    stub.messages.handler = handler
     localized = asyncio.run(T.localize(_report()))
     assert localized.claims == [None]
 
@@ -281,7 +239,7 @@ def _run_pipeline_with(monkeypatch, tmp_path, localizer):
 
 def test_a_broken_translator_cannot_fail_a_paid_report(monkeypatch, tmp_path):
     """The verdicts are bought and paid for before this stage ever runs."""
-    async def boom(report):
+    async def boom(report, cache=None):
         raise RuntimeError("translator down")
 
     _, saved = _run_pipeline_with(monkeypatch, tmp_path, boom)
@@ -310,7 +268,7 @@ def test_the_dropped_claim_note_is_part_of_what_gets_translated(monkeypatch, tmp
     """Translation runs last, so the cap note is not left stranded in English."""
     seen = {}
 
-    async def spy(report):
+    async def spy(report, cache=None):
         seen["summary"] = report.summary
         return LocalizedReport(language="hi", summary="अनुवादित", claims=[None, None])
 

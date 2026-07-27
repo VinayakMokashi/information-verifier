@@ -5,7 +5,54 @@ from fastapi.testclient import TestClient
 import scripts.fake_stages as F
 from app.api import limits, routes as R
 from app.config import settings
-from app.engine import pipeline as P
+from app.engine import pipeline as P, translate as T
+from app.models.report import LocalizedClaim
+
+HINDI_CLAIM = "5जी से कोरोना वायरस फैलता है।"
+HINDI_REASONING = "भरोसेमंद स्रोतों के अनुसार यह दावा झूठा है।"
+HINDI_CORRECTION = "कोरोना वायरस साँस की बूँदों से फैलता है।"
+HINDI_SUMMARY = "1 दावे की जाँच की गई।"
+
+
+def default_translation(kw):
+    if kw["output_format"] is LocalizedClaim:
+        return LocalizedClaim(claim=HINDI_CLAIM, reasoning=HINDI_REASONING,
+                              correction=HINDI_CORRECTION)
+    return T._LocalizedSummary(summary=HINDI_SUMMARY)
+
+
+class _Resp:
+    def __init__(self, parsed):
+        self.parsed_output = parsed
+
+
+class _Messages:
+    def __init__(self):
+        self.handler = default_translation   # swap per-test
+        self.calls = []
+
+    async def parse(self, **kw):
+        self.calls.append(kw)
+        result = self.handler(kw)
+        if isinstance(result, Exception):     # a handler may return one to raise it
+            raise result
+        return _Resp(result)
+
+
+class StubClient:
+    """Stands in for the shared AsyncAnthropic in translation tests."""
+
+    def __init__(self):
+        self.messages = _Messages()
+
+
+@pytest.fixture()
+def stub(monkeypatch):
+    """A translation stage that answers instantly, for free, and counts calls."""
+    client = StubClient()
+    monkeypatch.setattr(T, "async_client", client)
+    monkeypatch.setattr(settings, "translate_reports", True)
+    return client
 
 
 @pytest.fixture(autouse=True)

@@ -19,6 +19,9 @@ Two cache tiers:
 The semantic tier degrades to a no-op (with one warning) if sqlite-vec or
 the embedding model is unavailable — the engine never breaks over it.
 """
+import asyncio
+import hashlib
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -41,6 +44,22 @@ def _now_iso() -> str:
 
 def _norm_key(text: str) -> str:
     return " ".join(text.lower().split())
+
+
+async def safe_cache_call(fn, *args):
+    """Run a cache operation off the event loop, never letting it sink a claim.
+
+    The cache is an optimization: a locked DB, a corrupt cached row, or a
+    failed embedding must degrade to doing the real work — never discard a
+    verdict we already paid for, and never surface as "no claims found".
+    Cache calls also run in a worker thread because the semantic tier embeds
+    on CPU (lazy-loading the model on first use), which would block the loop.
+    """
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except Exception as exc:  # noqa: BLE001 — see above
+        print(f"[cache] {getattr(fn, '__name__', fn)} failed: {type(exc).__name__}: {exc}")
+        return None
 
 
 class CacheCandidate(NamedTuple):
@@ -188,9 +207,55 @@ class ClaimCache:
                 )
 
 
+def _content_key(fields: tuple[str, ...]) -> str:
+    """Address a translation by the exact English text it was made from.
+
+    JSON rather than a concatenation because ("ab", "c") and ("a", "bc")
+    must not hash into one another's translation — a cache that can serve
+    the wrong claim's answer is the worst failure this system has.
+    """
+    blob = json.dumps(fields, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class TranslationCache:
+    """Caches a translation, keyed by the exact English text it came from.
+
+    Without this the claim cache's economics invert. One viral Hindi forward
+    reaching a thousand readers is a single $0.05 check — and then a
+    thousand separate $0.01 translations of the same cached verdict, i.e.
+    back to per-USER pricing, which is precisely what the claim cache
+    exists to avoid.
+
+    Content-addressed, so nothing ever needs invalidating: re-adjudicate a
+    claim and its prose changes, so the key changes and the stale
+    translation is simply never looked up again.
+    """
+
+    def get(self, language: str, source: tuple[str, ...]) -> str | None:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT payload FROM translation_cache "
+                "WHERE source_hash = ? AND language = ?",
+                (_content_key(source), language),
+            ).fetchone()
+        return row["payload"] if row else None
+
+    def put(self, language: str, source: tuple[str, ...], payload: str) -> None:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO translation_cache "
+                "(source_hash, language, payload, created_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(source_hash, language) DO UPDATE "
+                "SET payload = excluded.payload, created_at = excluded.created_at",
+                (_content_key(source), language, payload, _now_iso()),
+            )
+
+
 class ReportRepository:
     def __init__(self) -> None:
         self.cache = ClaimCache()
+        self.translations = TranslationCache()
 
     def save(self, report: TruthReport) -> None:
         with get_conn() as conn:

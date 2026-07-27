@@ -22,23 +22,7 @@ from app.engine.translate import localize
 from app.models.claim import Claim
 from app.models.report import ClaimVerdict, JobStatus, TruthReport
 from app.models.verdict import Rating, Verdict
-from app.store.repository import ReportRepository
-
-
-async def _cache_call(fn, *args):
-    """Run a cache operation off the event loop, never letting it sink a claim.
-
-    The cache is an optimization: a locked DB, a corrupt cached row, or a
-    failed embedding must degrade to doing the real work — never discard a
-    verdict we already paid for, and never surface as "no claims found".
-    Cache calls also run in a worker thread because the semantic tier embeds
-    on CPU (lazy-loading the model on first use), which would block the loop.
-    """
-    try:
-        return await asyncio.to_thread(fn, *args)
-    except Exception as exc:  # noqa: BLE001 — see above
-        print(f"[cache] {getattr(fn, '__name__', fn)} failed: {type(exc).__name__}: {exc}")
-        return None
+from app.store.repository import ReportRepository, safe_cache_call as _cache_call
 
 
 async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
@@ -141,7 +125,7 @@ async def run_pipeline(
         # complete and already paid for, and a translator being down must
         # cost the reader a translation, never the verdict.
         try:
-            report.localized = await localize(report)
+            report.localized = await localize(report, getattr(repo, "translations", None))
         except Exception as exc:  # noqa: BLE001 — see above
             print(f"[translate] localization skipped: {type(exc).__name__}: {exc}")
 

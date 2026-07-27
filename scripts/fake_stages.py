@@ -138,7 +138,7 @@ _HINDI_CORRECTION = (
 )
 
 
-async def fake_localize(report):
+async def fake_localize(report, cache=None):
     """Offline stand-in for the back-translation stage.
 
     Reproduces the real gating (English in, nothing to do) rather than always
