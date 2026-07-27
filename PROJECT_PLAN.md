@@ -226,6 +226,34 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+- **2026-07-28 — First live Devanagari run, and an audit that found a critical
+  spend hole.** A real `smoke_test.py` run on a Hindi ₹2000-note rumour went
+  end to end: 3 claims extracted from one compound sentence, rated separately
+  (MOSTLY_TRUE/FALSE/FALSE), citing only pib.gov.in and factly.in — bounded
+  trust held. Numbers, dates and percentages carried across translation
+  exactly, and the MOSTLY_TRUE hedge survived instead of hardening into FALSE.
+  Two translation defects showed up only by reading the Hindi: terminology
+  drifted across claims (प्रचलन / संचलन / परिसंचरण for "circulation" in one
+  report — the measured price of translating each claim in its own call) and
+  English was left sitting inside Hindi sentences ("अभी भी exchange या जमा").
+  Both are prompt fixes, **not yet verified against the live API**.
+  **Cost note:** the run was quoted at ~$0.06–0.13 on the assumption of one
+  claim. The sentence became three, so it cost roughly 3× that. The per-claim
+  figure in §8 also looks low against the actual call structure — see the
+  revised model there. **We do not log token usage, so no exact figure exists
+  for any run.** Fixing that is the single highest-value next task.
+  A six-way adversarial audit then raised 37 findings, 23 surviving an agent
+  told to refute them. The critical one: `_quota` refunded the rate-limit slot
+  on ANY HTTPException, including the 422/502 that `/verify/media` and
+  `/verify/image` raise *after* Sarvam and Opus vision have been billed — so a
+  loop of silent audio could burn credit indefinitely with the daily counter
+  reading zero. Fixed; the routes now mark the spend boundary explicitly.
+  Also found: `pytest` could reach the real Sarvam API (conftest faked every
+  seam but `get_asr_provider`), the per-claim translation isolation did not
+  actually exist (`parsed_output` dereferenced outside its guard, into a
+  `gather` with no `return_exceptions`), and last commit's `dir="auto"` fix was
+  inert on the two blocks that carry RTL text. The remaining 19 are listed in
+  §11 as a backlog rather than silently carried.
 - **2026-07-27 — Reviewing the back-translation diff found 5 more defects, all
   reproduced before fixing and re-measured after.**
   (1) **The language tag could carry instructions.** `input_language` is Haiku
@@ -460,8 +488,27 @@ obvious-looking design.*
   case for a forward that has been seen before in the same language.
 - Sarvam ASR: **₹30/hour**, billed per second (~₹0.50/min). Sarvam TTS (only used
   for testing): bulbul:v2 ₹15 / 10K chars.
-- **Per real single-claim check: ~$0.05–0.12.** A report can hold up to
-  `max_claims_per_report` (8) claims, so a worst-case single submission is ~8×.
+- **Per real single-claim check: ~$0.12–0.26** (revised 2026-07-28 from the
+  actual call structure — retrieval reads full page text on Haiku, and Opus
+  adjudication with adaptive thinking bills thinking tokens as output). The
+  older "$0.05–0.12" figure appears to have been optimistic. **Neither number
+  is measured**: we do not log token usage, so every figure here is a model.
+- A submission is priced per CLAIM, not per message, and one ordinary compound
+  sentence becomes several claims — a single Hindi sentence about ₹2000 notes
+  extracted into **three**. Budget per sentence, not per submission.
+- **Fixed per report** (regardless of claim count): ~$0.03 for normalize +
+  extract.
+
+| Submission | Typical | Worst case at current caps |
+|---|---|---|
+| 1 claim | ~$0.15 | ~$0.29 |
+| 3 claims | ~$0.39 | ~$0.81 |
+| 8 claims (`max_claims_per_report`) | ~$0.99 | ~$2.11 |
+| repeat of a cached rumour, same language | ~$0.03 | (both caches hit) |
+
+⚠️ **At the current caps a public link's daily ceiling is ~$99 typical /
+~$211 worst case** (`max_checks_per_day` 100 × `max_claims_per_report` 8).
+That is what open decision 2 is really asking about.
 
 **What bounds the spend** (all in `app/config.py`):
 
@@ -527,6 +574,63 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    is the translation) would show the actual Hindi prose and whether it reads
    naturally to you — which is a judgment only you can make. Worth doing before
    any bot goes in front of people.
+
+### Known-defect backlog (from the 2026-07-28 adversarial audit)
+
+Six independent read-only sweeps raised 37 findings; each was then handed to a
+separate agent instructed to *refute* it. 23 survived. Four are fixed (see the
+Decisions log); these are the rest, in the order I would take them. None is
+known to be actively causing harm today — the app is not publicly exposed.
+
+**Before sharing a public link (these are the blockers):**
+1. **Nothing checks the verdict's own citations against the whitelist.** Bounded
+   trust is enforced on retrieval *inputs* only (`retrieve.py` `allowed_domains`,
+   `factcheck.py` `trusted_domain_of`). `adjudicate()` returns the model's
+   `Verdict` verbatim and `is_trusted_url()` has *no* production caller — it is
+   dead code. Cached verdicts also keep citations from domains later removed
+   from the whitelist. Invariant 1 is currently a prompt request, not a guarantee.
+2. **`max_search_uses` is a per-REQUEST tool cap.** Whether the documented "4
+   billed searches per claim" holds across a `pause_turn` resume loop is
+   disputed — one agent argued up to 24, another refuted the mechanism. Needs
+   measuring, not arguing, and it is a direct multiplier on the cost model below.
+3. **Evidence text never passes through `as_prompt_data`.** It is the only
+   user-influenced string that reaches the adjudicator undelimited — and a Google
+   Fact Check `title` is attacker-influenced and unfiltered (only the URL is
+   trust-checked).
+4. **CORS is `allow_origins=["*"]` with no auth.** Any website could spend the
+   budget from its visitors' browsers.
+5. **`/verify/media` does ffmpeg + ASR inline before returning 202.** Cloudflare
+   cuts an idle connection at ~100 s while the server keeps spending.
+6. **A slow check becomes an unreachable paid report.** No client-side timeout
+   (SDK default 10 min), the page gives up at 150 s, and the `job_id` is never
+   shown — so the user cannot get back to a report they paid for.
+
+**Correctness / trust:**
+7. `aggregate.py` has no test file and every fake verdict in the suite is FALSE,
+   so the worst-first roll-up precedence is vacuously verified.
+8. The "a failed claim surfaces as UNVERIFIED, never vanishes" branch in
+   `pipeline.py` is never exercised by a test.
+9. Raw exception strings are stored in `report.error` and rendered to the user.
+10. A claim adjudicated while the semantic tier is paused is stored with no
+    vector and never re-indexed.
+
+**i18n (from this feature):**
+11. The verdict word itself is never localized — per-claim badges show the raw
+    English enum, and `RATING_LABELS` is romanized *Hindi* shown to Tamil and
+    Bengali readers too.
+12. The translation cache keys on the detector's raw tag, so `hi`, `hi-IN` and
+    `Hindi` each buy a separate copy of the same translation.
+
+**Ops / hygiene:**
+13. Nothing is ever pruned: `created_at` is written and never read, so every
+    stranger's message is retained indefinitely.
+14. All `asyncio.to_thread` work shares one default executor — an embedder cold
+    start can freeze report polling for everyone.
+15. `/health` is a constant; there is no way to see spend, queue depth, or which
+    subsystems are degraded.
+16. Two weak tests: `test_devanagari.py:97` asserts a property of a constant, not
+    of the page; the embedding failure-budget tests neutralize `_FAILURE_WINDOW_S`
+    and so hide whether the budget ever exhausts under production timing.
 
 ### Prerequisites already in place
 
