@@ -16,7 +16,10 @@ import subprocess
 import tempfile
 
 _TIMEOUT_S = 120           # a crafted file must not pin a worker forever
-_SAFE_SUFFIX = re.compile(r"^\.[A-Za-z0-9]{1,8}$")
+# \Z, not $: in Python `$` also matches before a trailing newline, so
+# "note.ogg\n" would have passed and then failed at open() with an OSError
+# the route does not catch — a 500 from any curl against the public link.
+_SAFE_SUFFIX = re.compile(r"\.[A-Za-z0-9]{1,8}\Z")
 # The uploaded bytes are untrusted. Some ffmpeg demuxers (HLS, concat) will
 # happily open URLs referenced *inside* the file; restricting protocols to
 # local files keeps a "voice note" from turning into a server-side fetcher.
@@ -53,7 +56,7 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
 def _safe_suffix(filename: str) -> str:
     """A temp-file extension derived from, but never trusting, the upload name."""
     suffix = os.path.splitext(filename)[1]
-    return suffix if _SAFE_SUFFIX.match(suffix) else ".bin"
+    return suffix if _SAFE_SUFFIX.fullmatch(suffix) else ".bin"
 
 
 def _probe_duration(path: str) -> float:
@@ -84,8 +87,11 @@ def normalize_to_wav(
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "src" + _safe_suffix(filename))
         wav = os.path.join(tmp, "out.wav")
-        with open(src, "wb") as f:
-            f.write(data)
+        try:
+            with open(src, "wb") as f:
+                f.write(data)
+        except OSError as exc:  # a filesystem refusal is the caller's 422
+            raise MediaError("Could not stage the upload for decoding.") from exc
 
         limit: list[str] = []
         if max_seconds is not None:

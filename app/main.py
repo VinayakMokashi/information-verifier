@@ -8,9 +8,8 @@ Interactive API docs at http://127.0.0.1:8000/docs
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
@@ -18,6 +17,79 @@ from app.config import settings
 from app.store.db import init_db
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+class _BodyTooLarge(Exception):
+    """Raised inside the ASGI receive channel to abort an oversize upload."""
+
+
+async def _send_413(send) -> None:
+    body = b'{"detail":"File too large. Please send a shorter clip."}'
+    await send({
+        "type": "http.response.start",
+        "status": 413,
+        "headers": [(b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode())],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+class LimitUploadSize:
+    """Reject oversize request bodies before anything reads them.
+
+    Written as raw ASGI on purpose. A `@app.middleware("http")` function
+    cannot do this: Starlette builds the downstream request with its own
+    receive channel, so replacing `request._receive` there is ignored and a
+    chunked upload sails through (measured: 629 MB spooled against a 1 MB
+    cap). Here we own the receive callable the parser actually pulls from.
+
+    Content-Length is checked first as a cheap fast path, but it is advisory
+    and absent entirely on chunked uploads, so the body is also counted as
+    it streams and aborted the moment it crosses the limit.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        limit = settings.max_media_bytes
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length" and value.isdigit() and int(value) > limit:
+                return await _send_413(send)
+
+        received = 0
+        too_large = False
+        answered = False
+
+        async def limited_receive():
+            nonlocal received, too_large
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    too_large = True
+                    # Cut the stream off. Raising here is no good: the
+                    # multipart parser catches exceptions and turns them into
+                    # a generic 400, so we signal end-of-stream and correct
+                    # the status on the way out instead.
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def tracking_send(message):
+            nonlocal answered
+            if too_large:
+                if not answered:      # replace the app's parse error with 413
+                    answered = True
+                    await _send_413(send)
+                return                # and drop whatever else it tries to send
+            await send(message)
+
+        await self.app(scope, limited_receive, tracking_send)
+        if too_large and not answered:
+            await _send_413(send)
 
 
 @asynccontextmanager
@@ -41,23 +113,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def reject_oversize_uploads(request: Request, call_next):
-    """Refuse huge bodies before anything reads them.
-
-    Route handlers run only after the framework has parsed (and spooled to
-    disk) the whole multipart body, so a size check inside the endpoint is
-    already too late — a multi-gigabyte POST to the public share link would
-    fill the disk and the RAM before being rejected. Content-Length is
-    advisory, so the endpoint still checks the real length afterwards.
-    """
-    declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > settings.max_media_bytes:
-        return JSONResponse(
-            {"detail": "File too large. Please send a shorter clip."}, status_code=413
-        )
-    return await call_next(request)
-
+app.add_middleware(LimitUploadSize)
 
 app.include_router(router)
 

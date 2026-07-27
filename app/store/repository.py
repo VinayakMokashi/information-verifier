@@ -19,6 +19,8 @@ Two cache tiers:
 The semantic tier degrades to a no-op (with one warning) if sqlite-vec or
 the embedding model is unavailable — the engine never breaks over it.
 """
+import threading
+import time
 from datetime import datetime, timezone
 from typing import NamedTuple
 
@@ -53,16 +55,33 @@ class CacheCandidate(NamedTuple):
 # not cost the semantic tier for the life of the process, but a genuinely
 # missing model shouldn't be retried on every claim forever either.
 _MAX_EMBED_FAILURES = 3
+# Short enough that separate user requests (seconds apart) still accumulate
+# toward the budget, long enough that one report's concurrent fan-out — which
+# fails within milliseconds of itself — counts once.
+_FAILURE_WINDOW_S = 1.0
+_RETRY_AFTER_S = 300.0      # give a paused tier another chance rather than
+                            # staying off until the process restarts
 
 
 class ClaimCache:
     def __init__(self, embedder=None) -> None:
         self._embedder = embedder
         self._embed_failures = 0
+        self._last_failure_at = -_FAILURE_WINDOW_S
+        self._fail_lock = threading.Lock()
 
     # -- embedding helpers ---------------------------------------------------
     def _semantic_on(self) -> bool:
-        return vec_enabled() and self._embed_failures < _MAX_EMBED_FAILURES
+        if not vec_enabled():
+            return False
+        if self._embed_failures < _MAX_EMBED_FAILURES:
+            return True
+        # Paused, not dead: an outage (or a slow first download) should not
+        # cost per-rumour pricing for the life of the server.
+        if time.monotonic() - self._last_failure_at >= _RETRY_AFTER_S:
+            self._embed_failures = 0
+            return True
+        return False
 
     def _embed(self, text: str) -> list[float] | None:
         if not self._semantic_on():
@@ -76,14 +95,30 @@ class ClaimCache:
             self._embed_failures = 0  # a success clears earlier transient errors
             return vec
         except Exception as exc:  # noqa: BLE001 — cache must never sink a claim
-            self._embed_failures += 1
+            self._note_failure()
             note = (
-                "disabling semantic tier until restart"
+                f"semantic tier paused for {_RETRY_AFTER_S:.0f}s"
                 if self._embed_failures >= _MAX_EMBED_FAILURES
                 else f"attempt {self._embed_failures}/{_MAX_EMBED_FAILURES}"
             )
             print(f"[cache] embedding failed ({note}): {type(exc).__name__}: {exc}")
             return None
+
+    def _note_failure(self) -> None:
+        """Count failure EVENTS, not calls.
+
+        A report fans out up to max_claims_per_report claims concurrently, so
+        one cold-start hiccup produces N simultaneous exceptions. Counting
+        each would burn the whole budget on a single event — measured: one
+        8-claim report exhausted a 3-failure budget during a 1s model load.
+        """
+        now = time.monotonic()
+        with self._fail_lock:
+            # >=, not >: time.monotonic() has ~15 ms resolution on Windows, so
+            # two failures in the same tick would otherwise never separate.
+            if now - self._last_failure_at >= _FAILURE_WINDOW_S:
+                self._embed_failures += 1
+            self._last_failure_at = now
 
     # -- public API ----------------------------------------------------------
     def get(self, claim_text: str) -> Verdict | None:
@@ -135,13 +170,18 @@ class ClaimCache:
                 "SET verdict = excluded.verdict, created_at = excluded.created_at",
                 (key, verdict.model_dump_json(), _now_iso()),
             )
+            if not vec_enabled():
+                return
+            # Keyed by claim_cache.rowid (preserved by the upsert above), so a
+            # KNN result joins straight back to its verdict.
+            rowid = conn.execute(
+                "SELECT rowid FROM claim_cache WHERE norm_key = ?", (key,)
+            ).fetchone()["rowid"]
+            # Always clear first: an alias written over a row that used to be
+            # an anchor must not inherit the old vector, or "unindexed" would
+            # be true only for rows that happened to be new.
+            conn.execute("DELETE FROM claim_vecs WHERE rowid = ?", (rowid,))
             if vec is not None:
-                # Keyed by claim_cache.rowid (preserved by the upsert above),
-                # so the KNN result joins straight back to its verdict.
-                rowid = conn.execute(
-                    "SELECT rowid FROM claim_cache WHERE norm_key = ?", (key,)
-                ).fetchone()["rowid"]
-                conn.execute("DELETE FROM claim_vecs WHERE rowid = ?", (rowid,))
                 conn.execute(
                     "INSERT INTO claim_vecs (rowid, embedding) VALUES (?, ?)",
                     (rowid, serialize_float32(vec)),

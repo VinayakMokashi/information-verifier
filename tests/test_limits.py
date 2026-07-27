@@ -68,5 +68,18 @@ def test_visitor_table_does_not_grow_without_bound(limited, monkeypatch):
         return Request({"type": "http", "client": (ip, 1234), "headers": []})
 
     for i in range(600):
-        limits.count(fake_request(f"10.0.{i // 256}.{i % 256}"))
+        limits.reserve(fake_request(f"10.0.{i // 256}.{i % 256}"))
     assert len(limits._per_client) <= 512
+
+
+def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited):
+    """The cap must hold under parallel uploads, not just sequential ones."""
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+        codes = [f.result().status_code
+                 for f in [pool.submit(_check, limited) for _ in range(20)]]
+
+    # 3 allowed per hour (see the `limited` fixture); the rest must be refused.
+    assert codes.count(202) == 3
+    assert codes.count(429) == 17

@@ -74,6 +74,32 @@ def test_within_limit_audio_still_normalizes(tmp_path):
     assert 4.5 < duration < 5.5
 
 
+def test_chunked_upload_cannot_skip_the_size_cap(client, monkeypatch):
+    """Content-Length is advisory and absent on chunked uploads; the body
+    must be counted as it streams or a 50 MB POST sails past a 1 MB cap."""
+    monkeypatch.setattr(settings, "max_media_bytes", 1_000_000)
+    boundary = "----t"
+    prefix = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="big.ogg"\r\n'
+        "Content-Type: audio/ogg\r\n\r\n"
+    ).encode()
+
+    def body():                       # a generator makes httpx send it chunked
+        yield prefix
+        for _ in range(20):
+            yield b"x" * (256 * 1024)
+        yield f"\r\n--{boundary}--\r\n".encode()
+
+    resp = client.post(
+        "/api/v1/verify/media",
+        content=body(),
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+    )
+    assert resp.status_code == 413
+    assert "too large" in resp.json()["detail"]
+
+
 def test_semantic_tier_off_does_not_break_the_database(tmp_path, monkeypatch):
     """A missing/broken sqlite-vec must cost the cache, never the whole API."""
     from app.store import db as D

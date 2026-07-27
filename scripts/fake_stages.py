@@ -9,6 +9,8 @@ failure that matters: every paid seam is patched (LLM stages, OCR, ASR,
 equivalence), AND the real API keys are replaced with obvious dummies, so a
 seam we forget to patch fails authentication instead of billing the user.
 """
+import os
+
 from app.models.claim import Claim
 from app.models.evidence import Evidence, Source
 from app.models.verdict import Rating, Verdict
@@ -137,3 +139,13 @@ def apply_fake_stages() -> None:
     settings.anthropic_api_key = _DUMMY_KEY
     settings.google_factcheck_api_key = _DUMMY_KEY
     settings.sarvam_api_key = _DUMMY_KEY
+
+    # Sarvam and Google read settings at call time, so the lines above cover
+    # them. Anthropic does NOT: providers/llm.py builds one client at import,
+    # which already happened above, and every stage holds a reference to that
+    # same object. Mutating the live client's key is what actually protects
+    # the expensive provider; setting `settings` alone does nothing.
+    from app.providers import llm
+
+    llm.async_client.api_key = _DUMMY_KEY
+    os.environ["ANTHROPIC_API_KEY"] = _DUMMY_KEY  # for any lazily-built client

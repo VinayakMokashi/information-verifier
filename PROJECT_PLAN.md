@@ -171,6 +171,35 @@ tests/               pytest suite — always free, every paid seam faked
   hit; confirmed phrasings are written back as exact-cache aliases so repeats are
   free. When the embedding model or dim changes, `init_db()` wipes vectors
   (verdicts survive; vectors re-learn on the next put).
+- **2026-07-27 — Independent re-verification found 5 more live defects, 3 of them
+  introduced by the previous round of fixes.** A second adversarial workflow
+  re-ran every unverified finding against the fixed code and swept the fixes
+  themselves for regressions. Confirmed fixed: the decode amplification and the
+  sqlite-vec gating. Still live, now fixed and re-measured:
+  (1) **The "free demo" never protected Anthropic.** `providers/llm.py` builds
+  one client at import, so blanking `settings.anthropic_api_key` left the LIVE
+  client holding the real key — the backstop looked right and protected nothing,
+  for the most expensive provider. Now the client's key and the env var are
+  overwritten; the test asserts on `auth_headers`, i.e. the wire value.
+  (2) **The 413 middleware was bypassable by omitting Content-Length** — a
+  chunked upload skipped it entirely (629 MB spooled against a 1 MB cap). It is
+  now raw ASGI counting bytes as they stream; a `@app.middleware("http")`
+  function structurally cannot do this, since Starlette rebuilds the downstream
+  receive channel.
+  (3) **The rate limiter was defeated by plain concurrency.** Splitting
+  check-from-count left awaits in between, so 30 simultaneous uploads all saw an
+  empty counter and passed a 2/day cap. Reserving is now atomic, with a refund
+  for submissions rejected before any paid work.
+  (4) One embedding blip burned the whole 3-failure budget, because a report's
+  claims embed concurrently. Failures are now counted per event, and a paused
+  tier retries after 5 minutes instead of staying off until restart.
+  (5) Report reads/writes ran on the event loop, so the 30 s busy timeout could
+  freeze the entire server for 30 s; they now run in threads.
+  Also: equivalence-prompt delimiters are escapable (`</claim_a>` in claim text)
+  → angle brackets neutralized and claims truncated to 1000 chars; `_SAFE_SUFFIX`
+  used `$`, which matches before a trailing newline, so `note.ogg\n` reached
+  `open()` and 500'd → `\Z` + `fullmatch`; the web page dispatched its request
+  before the double-submit guard ran → it now takes a request factory.
 - **2026-07-27 — Machine-read text is now shown back to the user.** The Hindi
   audio test lost `5जी` from a claim about 5G (see Phase 2 checklist). Speech and
   image text are *guesses*, and a wrong guess means the engine confidently checks

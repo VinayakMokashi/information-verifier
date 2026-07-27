@@ -38,6 +38,15 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         for key in (settings.anthropic_api_key, settings.sarvam_api_key,
                     settings.google_factcheck_api_key):
             assert key == "demo-mode-not-a-real-key"
+
+        # Assert on the value that actually goes ON THE WIRE. The Anthropic
+        # client is built once at import, so blanking `settings` alone left
+        # the live client holding the real key — the backstop looked right
+        # and protected nothing.
+        from app.providers import llm
+
+        assert llm.async_client.api_key == "demo-mode-not-a-real-key"
+        assert "demo-mode-not-a-real-key" in str(llm.async_client.auth_headers)
     finally:
         for mod, name, original in originals:
             setattr(mod, name, original)

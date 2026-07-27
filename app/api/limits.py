@@ -30,11 +30,19 @@ def _client_of(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def check_limit(request: Request) -> None:
-    """Raise 429 if this visitor has no quota left. Does NOT consume any."""
+def reserve(request: Request) -> None:
+    """Claim one check, or raise 429. Checking and claiming MUST be atomic.
+
+    An earlier version checked here and consumed later, after the upload had
+    been read and transcoded. Those awaits were a wide-open window: 30
+    simultaneous uploads from one IP all saw an empty counter and all passed
+    a 2/day cap (measured). Rejected submissions get their claim back via
+    refund() instead, so nothing is charged for work that never happened.
+    """
     if not settings.rate_limit_enabled:
         return
     now = time.monotonic()
+    client = _client_of(request)
     with _lock:
         global _day
         _day = _prune(_day, 86400, now)
@@ -44,27 +52,16 @@ def check_limit(request: Request) -> None:
                 "This demo has reached its daily limit of "
                 f"{settings.max_checks_per_day} checks. Please try tomorrow.",
             )
-        mine = _prune(_per_client.get(_client_of(request), []), 3600, now)
+        mine = _prune(_per_client.get(client, []), 3600, now)
         if len(mine) >= settings.max_checks_per_hour:
+            _per_client[client] = mine
             raise HTTPException(
                 429,
                 f"You've used {settings.max_checks_per_hour} checks this hour — "
                 "that's the limit for this demo. Please try again later.",
             )
-
-
-def count(request: Request) -> None:
-    """Consume one check. Called only once a submission reaches paid work,
-    so a rejected upload (wrong type, too big) never costs someone's quota."""
-    if not settings.rate_limit_enabled:
-        return
-    now = time.monotonic()
-    client = _client_of(request)
-    with _lock:
-        global _day
-        _day = _prune(_day, 86400, now)
         _day.append(now)
-        _per_client[client] = _prune(_per_client.get(client, []), 3600, now) + [now]
+        _per_client[client] = mine + [now]
         if len(_per_client) > _MAX_TRACKED_CLIENTS:
             # Expired visitors first...
             for ip in [k for k, v in _per_client.items() if not _prune(v, 3600, now)]:
@@ -78,6 +75,18 @@ def count(request: Request) -> None:
                 oldest = sorted(_per_client.items(), key=lambda kv: kv[1][-1])
                 for ip, _ in oldest[:overflow]:
                     del _per_client[ip]
+
+
+def refund(request: Request) -> None:
+    """Give back a reservation for a submission that never reached paid work."""
+    if not settings.rate_limit_enabled:
+        return
+    with _lock:
+        if _day:
+            _day.pop()
+        mine = _per_client.get(_client_of(request))
+        if mine:
+            mine.pop()
 
 
 def reset() -> None:

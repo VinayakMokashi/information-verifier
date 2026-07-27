@@ -107,11 +107,13 @@ def test_disabled_flag_skips_embedding_entirely(cache, monkeypatch):
 
 def test_broken_embedder_degrades_to_exact_only(tmp_path, monkeypatch):
     """A hard-down model latches off after a few tries, never sinking a claim."""
+    from app.store import repository as R
     from app.store.repository import _MAX_EMBED_FAILURES
 
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "broken.db"))
     monkeypatch.setattr(settings, "embedding_dim", 4)
     monkeypatch.setattr(settings, "semantic_cache_enabled", True)
+    monkeypatch.setattr(R, "_FAILURE_WINDOW_S", 0)  # each call = a separate event
     init_db()
     cache = ClaimCache(embedder=ExplodingEmbedder())
 
@@ -121,6 +123,34 @@ def test_broken_embedder_degrades_to_exact_only(tmp_path, monkeypatch):
         assert cache.nearest("Coronavirus is spread by 5G networks.") is None
     # Tried up to the budget, then stopped calling the broken model entirely.
     assert cache._embedder.calls == _MAX_EMBED_FAILURES
+
+
+def test_one_reports_concurrent_fanout_burns_only_one_failure(cache, monkeypatch):
+    """8 claims failing together is ONE outage, not eight — it must not
+    exhaust the budget and silently disable the tier for everyone."""
+    from app.store.repository import _MAX_EMBED_FAILURES
+
+    cache._embedder = ExplodingEmbedder()
+    for _ in range(8):                       # a report's worth of parallel claims
+        cache.nearest("5G spreads coronavirus.")
+
+    assert cache._embed_failures == 1
+    assert cache._embed_failures < _MAX_EMBED_FAILURES
+    assert cache._semantic_on() is True      # tier survives the blip
+
+
+def test_paused_tier_recovers_after_the_retry_window(cache, monkeypatch):
+    """An outage must not cost per-rumour pricing until the next restart."""
+    from app.store import repository as R
+
+    monkeypatch.setattr(R, "_FAILURE_WINDOW_S", 0)
+    cache._embedder = ExplodingEmbedder()
+    for _ in range(R._MAX_EMBED_FAILURES):
+        cache.nearest("5G spreads coronavirus.")
+    assert cache._semantic_on() is False     # paused
+
+    monkeypatch.setattr(R, "_RETRY_AFTER_S", 0)  # pretend the window elapsed
+    assert cache._semantic_on() is True       # and it tries again
 
 
 def test_transient_embedding_failure_does_not_disable_the_tier(cache):

@@ -93,14 +93,16 @@ async def run_pipeline(
 ) -> None:
     """`derived_text` is set when a machine produced the text (ASR/OCR), so the
     report can show the user what was actually read."""
-    report = repo.get(job_id)
+    # Report reads/writes are synchronous SQLite; keep them off the event loop
+    # so a contended write stalls this job only, not the whole server.
+    report = await asyncio.to_thread(repo.get, job_id)
     if report is None:  # defensive: job row should already exist
         return
 
     try:
         report.status = JobStatus.PROCESSING
         report.source_text = derived_text
-        repo.save(report)
+        await asyncio.to_thread(repo.save, report)
 
         norm = await normalize(raw_text)
         report.input_language = norm.detected_language
@@ -137,4 +139,4 @@ async def run_pipeline(
         report.error = f"{type(exc).__name__}: {exc}"
     finally:
         report.completed_at = datetime.now(timezone.utc)
-        repo.save(report)
+        await asyncio.to_thread(repo.save, report)

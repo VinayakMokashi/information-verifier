@@ -126,7 +126,11 @@ function esc(s) {
 function setStatus(html) { $("status").innerHTML = html; }
 function setBusy(b) {
   busy = b;
-  for (const id of ["check", "pickImage", "pickMedia"]) $(id).disabled = b;
+  // The file inputs are disabled too: a disabled input fires no change
+  // event, so a picker that returns mid-request cannot submit at all.
+  for (const id of ["check", "pickImage", "pickMedia", "image", "media"]) {
+    $(id).disabled = b;
+  }
 }
 
 function safeUrl(u) {
@@ -193,13 +197,16 @@ async function poll(jobId) {
   throw new Error("Timed out waiting for the report. Try again in a minute.");
 }
 
-async function submit(promise) {
+// Takes a FACTORY, not a live promise: `submit(fetch(...))` would dispatch
+// the request while evaluating the argument, i.e. before the busy check —
+// so a second submission could spend money before the guard ever ran.
+async function submit(makeRequest) {
   if (busy) return;
   setBusy(true);
   $("report").classList.add("hidden");
   setStatus(`<span class="spin"></span>Submitting…`);
   try {
-    const resp = await promise;
+    const resp = await makeRequest();
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new Error(body.detail || `HTTP ${resp.status}`);
@@ -219,7 +226,7 @@ async function submit(promise) {
 $("check").addEventListener("click", () => {
   const text = $("text").value.trim();
   if (!text) { setStatus("Type or paste a message first."); return; }
-  submit(fetch("api/v1/verify/text", {
+  submit(() => fetch("api/v1/verify/text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -233,8 +240,8 @@ function wireFilePicker(buttonId, inputId, endpoint) {
     if (!f) return;
     const fd = new FormData();
     fd.append("file", f);
-    submit(fetch(endpoint, { method: "POST", body: fd }));
-    $(inputId).value = "";
+    $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
+    submit(() => fetch(endpoint, { method: "POST", body: fd }));
   });
 }
 wireFilePicker("pickImage", "image", "api/v1/verify/image");
