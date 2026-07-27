@@ -2,7 +2,36 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-26**.
+> Keep it updated as the project moves. Last updated: **2026-07-27**.
+
+---
+
+## 0. Where we are right now (read this first)
+
+**Everything below is built, tested, committed and pushed.** `main` is clean at
+commit `54e0d45`; **114 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`,
+free — every paid API is faked).
+
+Working end-to-end, verified against live APIs:
+- **Text, image and voice/video fact-checking** through one pipeline, with a
+  mobile web page at `/` and a REST API underneath.
+- **Bounded trust**: verdicts can only cite a curated whitelist; Google Fact Check
+  results are filtered to it too.
+- **Two-tier claim cache**: exact match, then semantic nomination confirmed by a
+  cheap LLM check.
+- **Spend guards**: per-visitor and per-deployment rate limits, input/claim caps,
+  upload size and duration caps — all enforced before any paid call.
+
+**To see it right now (free, $0):**
+```powershell
+.\.venv\Scripts\python.exe scripts\serve_demo.py     # then open http://127.0.0.1:8000
+```
+
+**The next piece of work** is Phase 3 delivery — a WhatsApp bot (or Telegram),
+so people can check a forward without leaving the app they already use. See §6
+Phase 3 and §11 for what that needs.
+
+**Three things are waiting on your decision** — see §11 "Open decisions".
 
 ---
 
@@ -34,23 +63,37 @@ is: mobile, and ultimately WhatsApp.
 |---|---|
 | Backend | Python 3.12 + FastAPI + Pydantic v2 |
 | Reasoning / vision / extraction / adjudication | Claude **Opus 4.8** (`claude-opus-4-8`) |
-| Language detect + translation + **retrieval** | Claude **Haiku 4.5** (`claude-haiku-4-5`) |
+| Language detect + translation + retrieval + cache confirm | Claude **Haiku 4.5** (`claude-haiku-4-5`) |
 | Retrieval | Native `web_search_20260209` (allowed_domains) + Google Fact Check API |
 | OCR | Opus 4.8 vision (no Tesseract) |
-| ASR (Phase 2) | Sarvam AI (Indic languages) — adapter written, not wired |
-| Storage | SQLite (Phase 1) → Postgres + pgvector (Phase 2) |
-| Async | FastAPI BackgroundTasks (Phase 1) → ARQ/Redis (Phase 2) |
-| Frontend (Phase 3) | Next.js PWA + WhatsApp Cloud API |
+| ASR | **Sarvam Saaras v3** (`saaras:v3`) — live, wired to `/verify/media` |
+| Audio/video handling | ffmpeg (normalize to 16 kHz mono WAV, chunk, probe) |
+| Embeddings | **EmbeddingGemma-300m** local on CPU, 256-dim ($0/lookup) |
+| Storage | **SQLite + sqlite-vec** (Postgres + pgvector deferred to deployment) |
+| Async | FastAPI BackgroundTasks (ARQ/Redis still deferred) |
+| Frontend | **Self-contained `static/index.html`** served by FastAPI — no Node, no build |
+| Public sharing | cloudflared quick tunnel (`scripts/share_demo.ps1`) |
 
 **Every LLM boundary returns a validated Pydantic object** via `messages.parse`.
 
 ## 4. Pipeline
 
 ```
-normalize (Haiku)  ->  extract claims (Opus)  ->  per claim, in parallel:
-    cache gate  ->  retrieve (Haiku: web_search whitelist + Fact Check API)
-             ->  adjudicate (Opus, adaptive thinking)
-->  aggregate  ->  persist  ->  Truth Report (rating + confidence + correction + citations)
+INPUT
+  /verify/text   raw text
+  /verify/image  → OCR (Opus vision)            ─┐  machine-read text is kept in
+  /verify/media  → ffmpeg → Sarvam ASR (chunked) ┘  report.source_text and shown back
+
+normalize (Haiku: detect language + English pivot)
+  → extract claims (Opus)   → capped at max_claims_per_report
+  → per claim, concurrently:
+        1. exact cache hit?                        → serve, free
+        2. semantic nomination (sqlite-vec KNN)     → candidate only, never served
+           └ Haiku equivalence confirm (~$0.0005)   → serve + learn alias (unindexed)
+        3. otherwise: retrieve (Haiku: web_search whitelist + Google Fact Check,
+           trust-filtered) → adjudicate (Opus, adaptive thinking)
+  → aggregate → persist
+OUTPUT  Truth Report: rating + confidence + reasoning + correction + citations
 ```
 
 ## 5. Directory map
@@ -161,16 +204,10 @@ tests/               pytest suite — always free, every paid seam faked
 
 ## 7. Decisions & findings log
 
-- **2026-07-26 — Semantic cache: embeddings NOMINATE, Haiku CONFIRMS.** Local
-  calibration on the real model produced a decisive finding: genuine paraphrases
-  score 0.926–0.982 cosine similarity, but claims differing by ONE token score up
-  to **0.971** ("pandemic in March 2020" vs "March 2019") — i.e. a wrong-verdict
-  pair can embed CLOSER than a correct-hit pair. **No pure distance threshold is
-  safe.** Design: KNN nominates within distance 0.20, then a Haiku structured
-  yes/no equivalence check (~$0.0005, ~100× cheaper than a full check) gates the
-  hit; confirmed phrasings are written back as exact-cache aliases so repeats are
-  free. When the embedding model or dim changes, `init_db()` wipes vectors
-  (verdicts survive; vectors re-learn on the next put).
+*Newest first. This is the "why", and the most useful section to skim before
+changing anything — several entries record measurements that overturned an
+obvious-looking design.*
+
 - **2026-07-27 — Independent re-verification found 5 more live defects, 3 of them
   introduced by the previous round of fixes.** A second adversarial workflow
   re-ran every unverified finding against the fixed code and swept the fixes
@@ -228,6 +265,17 @@ tests/               pytest suite — always free, every paid seam faked
   setting and degrades only the cache.
   Also: the limiter no longer charges a visitor for a submission rejected before
   any paid work, and its visitor table is hard-bounded against an IP flood.
+- **2026-07-26 — Semantic cache: embeddings NOMINATE, Haiku CONFIRMS.** Local
+  calibration on the real model produced a decisive finding: genuine paraphrases
+  score 0.926–0.982 cosine similarity, but claims differing by ONE token score up
+  to **0.971** ("pandemic in March 2020" vs "March 2019") — i.e. a wrong-verdict
+  pair can embed CLOSER than a correct-hit pair. **No pure distance threshold is
+  safe.** Design: KNN nominates within distance 0.20, then a Haiku structured
+  yes/no equivalence check (~$0.0005, ~100× cheaper than a full check) gates the
+  hit; confirmed phrasings are written back as exact-cache aliases so repeats are
+  free. When the embedding model or dim changes, `init_db()` wipes vectors
+  (verdicts survive; vectors re-learn on the next put). **Any new embedding model
+  needs its own calibration — never copy this threshold.**
 - **2026-07-26 — Adversarial review of the Phase 2/3 build found 7 real defects;
   all fixed.** Most important: **"free demo mode" could spend real money** — the
   fake stages never patched the ASR seam, so the Voice button on a public
@@ -310,12 +358,34 @@ tests/               pytest suite — always free, every paid seam faked
 - **Semantic cache deferred to Phase 2** — no embeddings endpoint on Anthropic; Phase 1
   uses exact normalized-text match.
 
-## 8. Cost model (approximate, USD)
+## 8. Cost model (approximate)
 
 - Opus 4.8: $5 / $25 per million tokens (in / out). Haiku 4.5: $1 / $5.
 - Web search: ~$0.01 per search (separate fee); capped at `max_search_uses` (4) per claim.
-- **Per real single-claim check after the Haiku retrieval fix: ~$0.05–0.12.**
-- The offline demo (`scripts/demo_offline.py`) is always free.
+- Semantic-cache confirm: ~**$0.0005** per candidate (Haiku, structured bool) —
+  roughly 100× cheaper than the full check it can replace.
+- Sarvam ASR: **₹30/hour**, billed per second (~₹0.50/min). Sarvam TTS (only used
+  for testing): bulbul:v2 ₹15 / 10K chars.
+- **Per real single-claim check: ~$0.05–0.12.** A report can hold up to
+  `max_claims_per_report` (8) claims, so a worst-case single submission is ~8×.
+
+**What bounds the spend** (all in `app/config.py`):
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `max_checks_per_hour` | 10 | submissions per visitor IP |
+| `max_checks_per_day` | 100 | submissions across the whole deployment |
+| `max_input_chars` | 5000 | text per submission |
+| `max_claims_per_report` | 8 | paid claim checks per submission |
+| `max_media_bytes` | 25 MB | upload size (enforced as bytes stream in) |
+| `max_media_seconds` | 300 | audio duration (probed before decoding) |
+| `max_search_uses` | 4 | billed web searches per claim |
+
+⚠️ Before sharing the public link widely, consider lowering `max_checks_per_day`
+and/or `max_claims_per_report` — 100 × 8 claims is a large worst case.
+
+**Always-free**: the whole test suite, `demo_offline.py`, `serve_demo.py`,
+`share_demo.ps1 -DemoMode`, and `factcheck_probe.py`.
 
 ## 9. Environment notes (this machine)
 
@@ -340,27 +410,49 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 - Real server + UI: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → http://127.0.0.1:8000
 - Share publicly: `.\scripts\share_demo.ps1` (add `-DemoMode` for the free variant)
 
-## 11. Phase 2/3 prep — your action checklist (researched 2026-07-25)
+## 11. Open items
 
-Everything below was verified on the live web on 2026-07-25 (key sources:
-sqlite-vec GitHub/PyPI, neon.com/docs, docs.voyageai.com, ai.google.dev,
-developers.googleblog.com (EmbeddingGemma), docs.sarvam.ai, developers.facebook.com,
-developers.cloudflare.com, core.telegram.org). Prices/tiers drift — re-check before
-relying on a number months from now.
+### Open decisions — these need Vinayak, not code
 
-**Semantic cache (option b) — DONE 2026-07-26:**
-- [x] `sqlite-vec==0.1.9` + `sentence-transformers` installed (in requirements.txt)
-- [x] HF account + Gemma license accepted; `HF_TOKEN` in `.env`; model downloaded
-      (~1.2 GB, cached in `~\.cache\huggingface`) and verified (256-dim)
+1. **AFP Fact Check** (`factcheck.afp.com`, IFCN-certified) is the only publisher
+   still being dropped by the trust filter on live queries. Add it to
+   `FACTCHECK_ONLY_DOMAINS` or leave it out? Curating the whitelist is a trust
+   decision, deliberately not an automatic one.
+2. **Spend caps before going public** — see §8. Lower `max_checks_per_day` (100)
+   and/or `max_claims_per_report` (8)?
+3. **Hindi ASR accuracy is unresolved.** A synthetic Hindi clip lost `5जी` (see
+   Phase 2). The cheap way to settle whether that is Sarvam's ASR or the robot
+   voice: record a 5-second Hindi voice note on a phone, save the file, and run
+   `.venv\Scripts\python.exe scripts\asr_probe.py path\to\clip.opus` (a fraction
+   of a rupee). If real speech transcribes cleanly, the concern was synthetic.
 
-**Audio/video (option c) — DONE 2026-07-26:**
-- [x] Sarvam key in `.env`; live transcription verified (₹0.04)
+### Prerequisites already in place
 
-**Demo to friends (option d) — page BUILT; sharing is one command away:**
-- [x] cloudflared 2026.7.3 installed (found at `C:\Program Files (x86)\cloudflared\`)
-- [ ] To actually share: `.\scripts\share_demo.ps1` and send the printed
-      trycloudflare.com link (REAL mode spends money per check — share privately)
-- [ ] Telegram route: SKIPPED for now (user decision 2026-07-26 — maybe later)
-- [ ] WhatsApp test-number route (when wanted): Meta developer account → app with
-      WhatsApp product → add up to 5 friends' numbers (each confirms a code) →
-      webhook = the cloudflared URL (re-paste it on every tunnel restart)
+- `.env` holds `ANTHROPIC_API_KEY`, `GOOGLE_FACTCHECK_API_KEY`, `SARVAM_API_KEY`,
+  `HF_TOKEN`, `DB_PATH`. Never commit it; `.env.example` stays blank.
+- Installed: Python 3.12, git, gh, winget, ffmpeg (Gyan 8.1.2),
+  cloudflared 2026.7.3 (at `C:\Program Files (x86)\cloudflared\`),
+  `sqlite-vec==0.1.9`, `sentence-transformers`, EmbeddingGemma-300m
+  (~1.2 GB cached in `~\.cache\huggingface`).
+- NOT installed and not needed by the current stack: Node.js, Docker, psql, Redis.
+
+### To share the demo with people
+
+`.\scripts\share_demo.ps1` prints a `https://….trycloudflare.com` link that works
+on any phone. REAL mode spends money per check, so share it privately and Ctrl+C
+when done (the link dies with the process). `-DemoMode` gives the same UI for $0
+with simulated verdicts.
+
+### Next build step: WhatsApp (or Telegram) bot
+
+Researched 2026-07-25; re-check pricing before relying on it:
+- **WhatsApp Cloud API** — a free **test number** allows exactly **5 verified
+  recipients** (each confirms a code in the Meta dashboard), and user-initiated
+  service replies are free. Needs: Meta developer account → app with the WhatsApp
+  product → webhook pointed at the cloudflared URL (re-pasted on every restart).
+  A real number additionally needs Meta Business verification (2–7 days).
+- **Telegram** — free, and long polling needs **no tunnel at all**, so it is the
+  lowest-friction chat demo. User chose to skip it on 2026-07-26 ("maybe later").
+- The engine is already surface-agnostic: a bot only needs to call
+  `POST /api/v1/verify/text` (or `/media` for voice notes) and poll
+  `GET /api/v1/reports/{job_id}` — the exact contract the web page uses.

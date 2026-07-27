@@ -103,7 +103,13 @@ Two things that trip everyone up first:
 Wait for `Application startup complete.` / `Uvicorn running on http://127.0.0.1:8000`.
 The terminal now sits quietly — that means it's working. Leave it running.
 
-**3. Open the control panel** in your browser: **http://127.0.0.1:8000/docs**
+**3. Open it in your browser: http://127.0.0.1:8000**
+
+That's the actual app — paste a message, upload a screenshot, or send a voice
+note, and the verdict appears on the page. Nothing else to do.
+
+*(If you'd rather poke the raw API, **http://127.0.0.1:8000/docs** is the
+interactive control panel; steps 4–5 below use that.)*
 
 **4. Submit a claim:**
 - Click **POST /api/v1/verify/text** → **Try it out**.
@@ -130,8 +136,27 @@ The terminal now sits quietly — that means it's working. Leave it running.
 |---|---|
 | `ModuleNotFoundError` | You didn't use the venv Python. Prefix with `.\.venv\Scripts\python.exe` |
 | Report status `FAILED`, error mentions *authentication* | Key missing/typo in `.env` |
-| `429` / *rate limit* or *credit* error | Add credits at console.anthropic.com |
+| `429` with *"You've used N checks this hour"* | That's our own spend guard, not the API. Tune it in `app/config.py`. |
+| `429` / *rate limit* or *credit* error from Anthropic | Add credits at console.anthropic.com |
 | Server won't start, "address in use" | Another server is running; close it or use `--port 8001` |
+| Voice note gives `503` | `SARVAM_API_KEY` missing from `.env` |
+| Voice note gives `413` | Clip is over 25 MB or 5 minutes — send a shorter one |
+| The verdict answers a different claim than you sent | Check the "We read this from your file" line — the transcription was wrong. Retype it as text. |
+
+---
+
+## Sharing it with someone else
+
+```powershell
+.\scripts\share_demo.ps1              # real checks — costs money per check
+.\scripts\share_demo.ps1 -DemoMode    # simulated verdicts — free
+```
+
+This prints a `https://….trycloudflare.com` link that works on any phone, with no
+install on their side. In real mode **anyone with the link spends your API
+credits**, so share it privately; built-in limits cap it at 10 checks per visitor
+per hour and 100 per day (tune in `app/config.py`). Press `Ctrl+C` to stop — the
+link dies with it.
 
 ---
 

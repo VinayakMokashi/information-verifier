@@ -1,102 +1,104 @@
 # Information Verifier
 
 A multi-modal fact-checking engine built to combat fake news and propaganda in India.
-Submit text or an image; the engine extracts the verifiable claims, checks each one
-against a **whitelist of trusted sources** (Indian fact-checkers, government portals,
-wire services), and returns a **Truth Report** with a rating, reasoning, the correction,
-and citations.
+Send **text, a screenshot, or a voice note** — the engine extracts the verifiable
+claims, checks each against a **whitelist of trusted sources** (Indian fact-checkers,
+government portals, wire services), and returns a **Truth Report** with a rating,
+reasoning, the correction, and clickable citations.
 
-> **Phase 1** (this repo): text + image, running on SQLite with zero infrastructure.
-> Audio/video and the WhatsApp/PWA surfaces are wired at the interface level and land in Phase 2.
+Works in Hindi, Marathi, Tamil, Bengali and English. Mobile-first, no app to install.
+
+> Status: text, image and audio/video all work end-to-end, with a mobile web page
+> and a semantic claim cache. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly
+> where things stand and what's next.
 
 ## Why the design looks the way it does
 
-- **The trusted-source whitelist is enforced by the model, not by us.** The engine uses
-  Claude's native `web_search_20260209` tool with `allowed_domains`, so search is
-  restricted to the whitelist server-side. No scraping, no result-filtering code.
-- **Every LLM boundary returns a validated Pydantic object** (`messages.parse`). The
-  output of this system is a public accusation of falsehood — "the model returned
-  malformed JSON and we rendered it anyway" is not an acceptable failure mode.
-- **The rating scale can abstain** (`UNVERIFIED`). Silence in the trusted sources is not
-  evidence of falsehood; forcing a true/false call on a novel claim is how a fact-checker
-  manufactures confident wrong answers.
-- **A claim cache turns per-user cost into per-rumour cost.** One viral forward reaches
-  millions; each hit would otherwise re-run the pipeline. (Phase 1 = exact match;
-  Phase 2 = semantic via pgvector — see Roadmap.)
+- **The trusted-source whitelist is enforced, not suggested.** Web search is
+  restricted server-side via Claude's `allowed_domains`, and Google Fact Check
+  results are filtered through the same whitelist before they can reach the
+  adjudicator. The engine cannot wander the open web — that restraint *is* the
+  product.
+- **Every LLM boundary returns a validated Pydantic object** (`messages.parse`).
+  The output of this system is a public accusation of falsehood; "the model
+  returned malformed JSON and we rendered it anyway" is not an acceptable
+  failure mode.
+- **The rating scale can abstain** (`UNVERIFIED`). Silence in the trusted sources
+  is not evidence of falsehood; forcing a true/false call on a novel claim is how
+  a fact-checker manufactures confident wrong answers.
+- **A claim cache turns per-user cost into per-rumour cost.** One viral forward
+  reaches millions. Exact re-forwards are free; paraphrases are matched
+  semantically — but a cached verdict is *never* served on embedding similarity
+  alone, because claims differing by a single token can embed closer than genuine
+  paraphrases. A cheap LLM check confirms every match first.
+- **We show you what we heard.** Speech-to-text and OCR are guesses. The
+  transcript is displayed above the verdict, so a mis-hear is visible instead of
+  becoming a confident answer to a question you never asked.
 
-## Models
+## Quick start
 
-| Task | Model | Why |
-|---|---|---|
-| Adjudication, extraction, image OCR | `claude-opus-4-8` | Correctness and citation fidelity |
-| Language detect + translation | `claude-haiku-4-5` | High-volume, cheap |
-
-## Pipeline
-
-```
-normalize (Haiku)  ->  extract claims (Opus)  ->  per claim, in parallel:
-    cache gate  ->  retrieve (web_search whitelist + Fact Check API)  ->  adjudicate (Opus)
-->  aggregate  ->  persist  ->  Truth Report
-```
-
-## Setup
-
-```bash
+```powershell
 python -m venv .venv
-# Windows PowerShell:  .venv\Scripts\Activate.ps1
-# bash:                source .venv/bin/activate
-
-pip install -r requirements.txt
-cp .env.example .env          # then fill in ANTHROPIC_API_KEY (others optional)
-
-uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env      # then fill in ANTHROPIC_API_KEY
 ```
 
-Open http://127.0.0.1:8000/docs for interactive API docs.
+See it **free**, with simulated verdicts and no API key:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\serve_demo.py    # http://127.0.0.1:8000
+```
+
+Run it for real:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md).
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/verify/text` | Submit text → `{job_id, status}` (202) |
-| `POST` | `/api/v1/verify/image` | Submit an image (multipart `file`) → `{job_id, status}` |
+| `POST` | `/api/v1/verify/image` | Submit an image (multipart `file`) |
+| `POST` | `/api/v1/verify/media` | Submit audio or video (multipart `file`) |
 | `GET`  | `/api/v1/reports/{job_id}` | Poll for the Truth Report |
 | `GET`  | `/health` | Liveness |
+| `GET`  | `/` | The mobile web page |
 
-### Example
+Submit, get a `job_id`, poll. The web page and any future WhatsApp or Telegram
+bot use exactly this contract.
 
 ```bash
-# 1. Submit
 curl -s -X POST http://127.0.0.1:8000/api/v1/verify/text \
   -H "Content-Type: application/json" \
   -d '{"text": "WHO ne kaha hai ki 5G se coronavirus phailta hai."}'
 # -> {"job_id":"<id>","status":"QUEUED"}
-
-# 2. Poll
 curl -s http://127.0.0.1:8000/api/v1/reports/<id>
 ```
 
-## Layout
+## Stack
 
-```
-app/
-  main.py            FastAPI app + lifespan (init_db)
-  config.py          settings + model IDs
-  trusted_sources.py the whitelist (allowed_domains)
-  api/               routes + wire DTOs
-  models/            Pydantic contracts: Claim, Verdict, Evidence, TruthReport
-  engine/            normalize, extract, retrieve, adjudicate, aggregate, pipeline, prompts
-  providers/         llm (Anthropic), vision (OCR), factcheck (Google), asr (Sarvam Protocol)
-  store/             SQLite db + repository (reports + claim cache)
+Python 3.12 · FastAPI · Pydantic v2 · SQLite + sqlite-vec · ffmpeg
+Claude Opus 4.8 (extraction, adjudication, vision OCR) · Claude Haiku 4.5
+(language detection, retrieval, cache confirmation) · Sarvam Saaras v3 (Indic
+speech-to-text) · EmbeddingGemma-300m (local embeddings, $0) · Google Fact Check
+Tools API. No Node, no Docker, no build step.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-## Roadmap (Phase 2+)
+114 tests, always free — every paid API is faked, including a test that proves
+the "free" demo mode cannot reach a paid provider.
 
-- **Semantic claim cache**: embed claims → pgvector similarity so paraphrased
-  re-forwards also hit. (Anthropic has no embeddings API — needs an embedding model.)
-- **Postgres + pgvector + ARQ/Redis** replacing SQLite + BackgroundTasks.
-- **Audio/video**: wire `providers/asr.py` (Sarvam) into a `/verify/media` route;
-  add keyframe extraction (needs `ffmpeg`).
-- **Localization**: back-translate the summary into the user's input language.
-- **Delivery surfaces**: WhatsApp Business Cloud API webhook; Next.js PWA.
-```
+## Documentation
+
+- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** — source of truth: status, roadmap,
+  cost model, and the decisions log explaining why things are the way they are.
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** — step-by-step, for humans.
+- **[CLAUDE.md](CLAUDE.md)** — conventions and invariants for AI sessions.
