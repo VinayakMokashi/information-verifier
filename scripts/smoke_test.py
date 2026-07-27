@@ -19,7 +19,7 @@ from app.engine.pipeline import run_pipeline  # noqa: E402
 from app.models.report import JobStatus, TruthReport  # noqa: E402
 from app.store.db import init_db  # noqa: E402
 from app.store.repository import ReportRepository  # noqa: E402
-from scripts.render import render_report  # noqa: E402
+from scripts.render import print_report  # noqa: E402
 
 
 async def main() -> None:
@@ -40,7 +40,7 @@ async def main() -> None:
     repo.save(report)
 
     await run_pipeline(report.job_id, claim, repo)
-    print(render_report(repo.get(report.job_id)))
+    print_report(repo.get(report.job_id))
 
 
 if __name__ == "__main__":

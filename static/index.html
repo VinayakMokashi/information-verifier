@@ -73,6 +73,15 @@
   .heard .label { color: var(--muted); display: block; font-size: .8rem; }
   .cites { margin-top: 8px; font-size: .9rem; }
   .cites a { color: var(--accent); word-break: break-all; }
+  .langbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 10px; font-size: .82rem; color: var(--muted);
+  }
+  .langbar button {
+    font: inherit; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  }
+  .untranslated { color: var(--muted); font-size: .8rem; font-style: italic; }
   footer { color: var(--muted); font-size: .8rem; text-align: center; margin: 22px 0 10px; }
   .hidden { display: none; }
   .error { color: var(--false); font-weight: 600; }
@@ -117,6 +126,25 @@ const RATING_LABELS = {
   UNVERIFIED: "UNVERIFIED — pushti nahi ho saki",
 };
 
+// Endonyms, not English names: someone who needs the Hindi answer is not
+// well served by a button labelled "Hindi". Keyed by tag AND by English name
+// because the detector may return either; unknown tags show as-is.
+const LANG_NAMES = {
+  hi: "हिंदी", mr: "मराठी", bn: "বাংলা", ta: "தமிழ்", te: "తెలుగు",
+  kn: "ಕನ್ನಡ", ml: "മലയാളം", gu: "ગુજરાતી", pa: "ਪੰਜਾਬੀ", or: "ଓଡ଼ିଆ",
+  as: "অসমীয়া", ur: "اردو", ne: "नेपाली", sa: "संस्कृतम्", kok: "कोंकणी",
+  mai: "मैथिली", sd: "سنڌي", si: "සිංහල",
+  hindi: "हिंदी", marathi: "मराठी", bengali: "বাংলা", tamil: "தமிழ்",
+  telugu: "తెలుగు", kannada: "ಕನ್ನಡ", malayalam: "മലയാളം",
+  gujarati: "ગુજરાતી", punjabi: "ਪੰਜਾਬੀ", odia: "ଓଡ଼ିଆ", urdu: "اردو",
+  assamese: "অসমীয়া", nepali: "नेपाली", konkani: "कोंकणी", maithili: "मैथिली",
+};
+
+function langLabel(tag) {
+  const t = String(tag || "").trim().toLowerCase().replace(/_/g, "-").split("-")[0];
+  return LANG_NAMES[t] || tag;
+}
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -139,28 +167,57 @@ function safeUrl(u) {
   return null;
 }
 
+let lastReport = null;
+let showEnglish = false;
+
 function renderReport(r) {
+  lastReport = r;
+  showEnglish = false;   // the reader's own language is the point; default to it
+  drawReport();
+}
+
+function drawReport() {
+  const r = lastReport;
   const el = $("report");
   el.classList.remove("hidden");
   if (r.status === "FAILED") {
     el.innerHTML = `<p class="error">Check failed.</p><p class="meta">${esc(r.error || "Unknown error")}</p>`;
     return;
   }
+  // The English is what was actually adjudicated, so it stays one tap away.
+  const loc = (!showEnglish && r.localized) ? r.localized : null;
   const parts = [];
+
+  if (r.localized) {
+    const name = langLabel(r.localized.language);
+    parts.push(`<div class="langbar">
+      <button id="langToggle" type="button">${showEnglish ? esc(name) : "English"}</button>
+      <span>${showEnglish
+        ? "This is the English we checked."
+        : "Translated automatically. The English is what we checked."}</span>
+    </div>`);
+  }
   if (r.source_text) {
     // Speech-to-text and OCR can drop a key word, which would mean we
     // checked a different claim than the one sent. Show it so it's visible.
+    // Never translated — this is what a machine heard, not what we concluded.
     parts.push(`<div class="heard"><span class="label">We read this from your file — if it's wrong, retype it above:</span>${esc(r.source_text)}</div>`);
   }
   if (r.overall_rating) {
     parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
   }
-  if (r.summary) parts.push(`<p style="margin-top:8px">${esc(r.summary)}</p>`);
-  if (r.input_language && r.input_language !== "en") {
+  const summary = (loc && loc.summary) || r.summary;
+  if (summary) parts.push(`<p style="margin-top:8px">${esc(summary)}</p>`);
+  if (!r.localized && r.input_language && r.input_language !== "en") {
     parts.push(`<p class="meta">Detected language: ${esc(r.input_language)}</p>`);
   }
-  for (const cv of r.claim_verdicts || []) {
+
+  (r.claim_verdicts || []).forEach((cv, i) => {
     const v = cv.verdict;
+    // Index-aligned with claim_verdicts, and null where that one claim's
+    // translation failed — so a hole falls back to English here rather than
+    // sliding the next claim's answer into this slot.
+    const lc = loc && loc.claims ? loc.claims[i] : null;
     const cites = (v.citations || []).map((c) => {
       const u = safeUrl(c.url);
       const label = `${esc(c.publisher)}: ${esc(c.title)}`;
@@ -168,15 +225,22 @@ function renderReport(r) {
     }).join("");
     parts.push(`
       <div class="claim">
-        <h3>“${esc(cv.claim.text)}”</h3>
+        <h3>“${esc(lc ? lc.claim : cv.claim.text)}”</h3>
         <p><span class="badge b-${esc(v.rating)}">${esc(v.rating)}</span>
            <span class="meta"> confidence ${esc(v.confidence)}%${cv.cache_hit ? " · answered from cache" : ""}</span></p>
-        <p style="margin-top:6px">${esc(v.reasoning)}</p>
-        ${v.correction ? `<div class="correction"><strong>Sach yeh hai:</strong> ${esc(v.correction)}</div>` : ""}
+        ${loc && !lc ? `<p class="untranslated">Shown in English — this one could not be translated.</p>` : ""}
+        <p style="margin-top:6px">${esc(lc ? lc.reasoning : v.reasoning)}</p>
+        ${(lc ? lc.correction : v.correction)
+          ? `<div class="correction"><strong>Sach yeh hai:</strong> ${esc(lc ? lc.correction : v.correction)}</div>`
+          : ""}
         ${cites ? `<div class="cites"><strong>Sources:</strong><ul>${cites}</ul></div>` : ""}
       </div>`);
-  }
+  });
+
   el.innerHTML = parts.join("") || "<p>No checkable factual claims were found in this message.</p>";
+  // Re-attached every draw: innerHTML above discards the previous element.
+  const toggle = $("langToggle");
+  if (toggle) toggle.addEventListener("click", () => { showEnglish = !showEnglish; drawReport(); });
 }
 
 async function poll(jobId) {

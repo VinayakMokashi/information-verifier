@@ -24,7 +24,7 @@ from app.models.report import JobStatus, TruthReport  # noqa: E402
 from app.store.db import init_db  # noqa: E402
 from app.store.repository import ReportRepository  # noqa: E402
 from scripts.fake_stages import CALLS, apply_fake_stages  # noqa: E402
-from scripts.render import render_report  # noqa: E402
+from scripts.render import print_report  # noqa: E402
 
 apply_fake_stages()
 
@@ -48,13 +48,13 @@ async def main() -> None:
     print("\n########## RUN 1  (cold - simulated adjudication runs) ##########")
     j1 = new_job()
     await P.run_pipeline(j1.job_id, text, repo)
-    print(render_report(repo.get(j1.job_id)))
+    print_report(repo.get(j1.job_id))
     print(f"[simulated adjudication calls so far: {CALLS['adjudicate']}]")
 
     print("\n########## RUN 2  (same claims - should hit the cache) ##########")
     j2 = new_job()
     await P.run_pipeline(j2.job_id, text, repo)
-    print(render_report(repo.get(j2.job_id)))
+    print_report(repo.get(j2.job_id))
     print(f"[simulated adjudication calls so far: {CALLS['adjudicate']}]"
           "  <- unchanged => cache served the verdicts, no new work")
 
