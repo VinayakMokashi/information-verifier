@@ -85,13 +85,21 @@ async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
     return ClaimVerdict(claim=claim, verdict=verdict, cache_hit=False)
 
 
-async def run_pipeline(job_id: str, raw_text: str, repo: ReportRepository) -> None:
+async def run_pipeline(
+    job_id: str,
+    raw_text: str,
+    repo: ReportRepository,
+    derived_text: str | None = None,
+) -> None:
+    """`derived_text` is set when a machine produced the text (ASR/OCR), so the
+    report can show the user what was actually read."""
     report = repo.get(job_id)
     if report is None:  # defensive: job row should already exist
         return
 
     try:
         report.status = JobStatus.PROCESSING
+        report.source_text = derived_text
         repo.save(report)
 
         norm = await normalize(raw_text)

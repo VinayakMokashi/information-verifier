@@ -81,6 +81,17 @@ def test_voice_note_flow(media_client, tmp_path):
     report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
     assert report["status"] == "COMPLETE"
     assert report["overall_rating"] == "FALSE"
+    # The transcript must be shown back: ASR can drop a claim's key term
+    # (measured: "5जी" vanished from a real Hindi clip), and a silent
+    # mis-hear means checking a different claim than the one sent.
+    assert report["source_text"] == "WHO ne kaha 5G se corona hota hai"
+
+
+def test_text_submissions_have_no_derived_text(client):
+    """Nothing was machine-read, so there is nothing to show back."""
+    accepted = client.post("/api/v1/verify/text", json={"text": "some claim"})
+    report = client.get(f"/api/v1/reports/{accepted.json()['job_id']}").json()
+    assert report["source_text"] is None
 
 
 def test_long_audio_is_chunked(media_client, tmp_path, monkeypatch):

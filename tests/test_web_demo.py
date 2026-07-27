@@ -53,6 +53,9 @@ def test_image_flow_with_simulated_ocr(client):
     report = client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
     assert report["status"] == "COMPLETE"
     assert report["overall_rating"] == "FALSE"
+    # OCR text is machine-derived, so it is shown back for the same reason
+    # a transcript is.
+    assert "simulated OCR" in report["source_text"]
 
 
 def test_image_flow_rejects_unsupported_type(client):

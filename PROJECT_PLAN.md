@@ -119,16 +119,23 @@ tests/               pytest suite — always free, every paid seam faked
       upload, 300 s duration (protects credits), checked BEFORE any spend.
       WhatsApp OGG/Opus accepted. **Verified live:** a Windows-TTS spoken
       sentence transcribed verbatim (en-IN) for ₹0.04 of free credits.
-- [ ] **Hindi audio still unproven end-to-end.** Everything on OUR side is
-      verified free: WhatsApp PTT opus / m4a / mp3 / webm / amr all normalize, a
-      90 s note chunks correctly, the exact Sarvam request (endpoint, auth
-      header, `saaras:v3`, multipart fields) is pinned by a mock-transport test,
-      and Devanagari/Tamil/Bengali round-trip through SQLite → JSON → page
-      unchanged. What is NOT proven is Sarvam's transcription *accuracy* on real
-      Hindi speech — no Hindi TTS voice exists on this machine (only en-US
-      David/Zira), so it needs either a real recorded voice note
-      (`scripts\asr_probe.py clip.ogg`, a fraction of a rupee) or a paid Sarvam
-      TTS call to synthesize one. **Awaiting the user's choice.**
+- [x] **Hindi audio tested end-to-end (2026-07-27, ~₹0.11 authorized spend).**
+      Sarvam TTS (`bulbul:v2`, hi-IN) synthesized a Hindi claim, re-encoded to a
+      WhatsApp-style OGG/Opus voice note, and POSTed to the real `/verify/media`.
+      Route, ffmpeg, ASR and Devanagari handling all worked — **but the
+      transcription was not exact**:
+      spoken `डब्ल्यूएचओ ने कहा कि 5जी से कोरोना फैलता है।`
+      heard  `डब्ल्यूएचओ ने कहा कि जिसे कोरोना फैलता है।`
+      The entity `डब्ल्यूएचओ` (WHO) survived; the alphanumeric **`5जी` (5G) — the
+      subject of the claim — was lost**. A second call with an explicit
+      `language_code=hi-IN` hint produced the identical output, so it is not our
+      parameter. Unresolved whether the fault is Sarvam's ASR or the synthetic
+      voice's pronunciation; a human-recorded note would settle it.
+      **Consequence, now mitigated:** a mangled key term means confidently
+      fact-checking a DIFFERENT claim. Reports carry `source_text` (the ASR
+      transcript / OCR text) and the page shows it back — "We read this from
+      your file — if it's wrong, retype it above" — so a mis-hear is visible
+      instead of silent. See Decisions log.
 - [ ] ARQ/Redis queue replacing BackgroundTasks — needs Redis (Docker or Memurai);
       lowest priority while traffic is one user at a time
 - [ ] Back-translate the Truth Report summary into the user's input language
@@ -164,6 +171,15 @@ tests/               pytest suite — always free, every paid seam faked
   hit; confirmed phrasings are written back as exact-cache aliases so repeats are
   free. When the embedding model or dim changes, `init_db()` wipes vectors
   (verdicts survive; vectors re-learn on the next put).
+- **2026-07-27 — Machine-read text is now shown back to the user.** The Hindi
+  audio test lost `5जी` from a claim about 5G (see Phase 2 checklist). Speech and
+  image text are *guesses*, and a wrong guess means the engine confidently checks
+  a claim the person never made — which is precisely the harm this project
+  exists to reduce. So `TruthReport.source_text` carries whatever a machine read
+  (ASR transcript or OCR text) and the page displays it above the verdict, with
+  an invitation to retype. Text submissions leave it unset — nothing was guessed.
+  Open question for Phase 3: whether to ask for confirmation *before* spending on
+  a check when the input came from audio.
 - **2026-07-27 — Re-checking the review's UNVERIFIED findings found 3 more real
   holes.** The first review run lost 10 verification agents to a session limit;
   those findings were fixed on judgment alone, and that judgment was wrong in

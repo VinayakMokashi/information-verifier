@@ -65,6 +65,12 @@
     background: color-mix(in srgb, var(--true) 8%, transparent);
     border-radius: 0 6px 6px 0; font-size: .95rem;
   }
+  .heard {
+    border-left: 3px solid var(--muted); padding: 6px 10px; margin: 0 0 10px;
+    background: color-mix(in srgb, var(--muted) 8%, transparent);
+    border-radius: 0 6px 6px 0; font-size: .9rem;
+  }
+  .heard .label { color: var(--muted); display: block; font-size: .8rem; }
   .cites { margin-top: 8px; font-size: .9rem; }
   .cites a { color: var(--accent); word-break: break-all; }
   footer { color: var(--muted); font-size: .8rem; text-align: center; margin: 22px 0 10px; }
@@ -137,6 +143,11 @@ function renderReport(r) {
     return;
   }
   const parts = [];
+  if (r.source_text) {
+    // Speech-to-text and OCR can drop a key word, which would mean we
+    // checked a different claim than the one sent. Show it so it's visible.
+    parts.push(`<div class="heard"><span class="label">We read this from your file — if it's wrong, retype it above:</span>${esc(r.source_text)}</div>`);
+  }
   if (r.overall_rating) {
     parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
   }

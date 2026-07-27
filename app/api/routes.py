@@ -75,7 +75,7 @@ async def verify_image(
         raise HTTPException(422, "No text or visual claim could be read from the image.")
 
     report = _new_job()
-    background.add_task(run_pipeline, report.job_id, extracted, _repo)
+    background.add_task(run_pipeline, report.job_id, extracted, _repo, extracted)
     return JobAccepted(job_id=report.job_id, status=report.status)
 
 
@@ -132,7 +132,10 @@ async def verify_media(
         raise HTTPException(422, "No speech could be transcribed from this audio.")
 
     report = _new_job()
-    background.add_task(run_pipeline, report.job_id, text, _repo)
+    # Pass the transcript through so the report can show it: speech-to-text
+    # can drop a claim's key term, and a silent mis-hear would mean checking
+    # a different claim than the one the person sent.
+    background.add_task(run_pipeline, report.job_id, text, _repo, text)
     return JobAccepted(job_id=report.job_id, status=report.status)
 
 
