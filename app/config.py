@@ -42,10 +42,15 @@ class Settings(BaseSettings):
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
 
-    # Spending guard — every check costs money and the share link is public
+    # Spending guard — every check costs money and the share link is public.
+    # Rate limits count REQUESTS, so the per-request caps below are what
+    # actually bound the worst case: one submission fans out to one paid
+    # retrieval + adjudication per claim.
     rate_limit_enabled: bool = True
     max_checks_per_hour: int = 10   # per visitor IP
     max_checks_per_day: int = 100   # across the whole deployment
+    max_input_chars: int = 5000     # a forwarded message, not a book
+    max_claims_per_report: int = 8  # hard ceiling on paid fan-out per submission
 
 
 @lru_cache

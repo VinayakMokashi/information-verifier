@@ -11,6 +11,7 @@ sink the whole report.
 import asyncio
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.engine.adjudicate import adjudicate
 from app.engine.aggregate import build_summary, overall_rating
 from app.engine.equivalence import claims_equivalent
@@ -99,6 +100,15 @@ async def run_pipeline(job_id: str, raw_text: str, repo: ReportRepository) -> No
         claims = await extract_claims(norm.english_text)
         checkworthy = [c for c in claims if c.checkworthy]
 
+        # Each claim costs a paid retrieval + adjudication and they all run
+        # concurrently, so one submission's spend is bounded here. Never drop
+        # claims silently — the report says what was left unchecked.
+        dropped = 0
+        if len(checkworthy) > settings.max_claims_per_report:
+            dropped = len(checkworthy) - settings.max_claims_per_report
+            checkworthy = checkworthy[: settings.max_claims_per_report]
+            print(f"[pipeline] {dropped} claim(s) over the per-report cap were not checked")
+
         results = await asyncio.gather(
             *(_process_claim(c, repo) for c in checkworthy),
             return_exceptions=True,
@@ -108,6 +118,11 @@ async def run_pipeline(job_id: str, raw_text: str, repo: ReportRepository) -> No
         report.claim_verdicts = verdicts
         report.overall_rating = overall_rating(verdicts)
         report.summary = build_summary(verdicts, report.overall_rating)
+        if dropped:
+            report.summary += (
+                f" Note: this message contained more checkable claims than this "
+                f"service checks at once, so {dropped} were not verified."
+            )
         report.status = JobStatus.COMPLETE
     except Exception as exc:  # noqa: BLE001 — surface any failure into the report
         report.status = JobStatus.FAILED

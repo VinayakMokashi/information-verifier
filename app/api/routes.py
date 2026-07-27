@@ -12,13 +12,13 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 
-from app.api.limits import check_and_count
+from app.api.limits import check_limit, count as count_check
 from app.api.schemas import JobAccepted, VerifyTextRequest
 from app.config import settings
 from app.engine.pipeline import run_pipeline
 from app.models.report import JobStatus, TruthReport
 from app.providers.asr import get_asr_provider
-from app.providers.media import MediaError, normalize_to_wav, split_wav
+from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.vision import ocr_image
 from app.store.repository import ReportRepository
 
@@ -46,7 +46,14 @@ def _new_job() -> TruthReport:
 async def verify_text(
     req: VerifyTextRequest, background: BackgroundTasks, request: Request
 ) -> JobAccepted:
-    check_and_count(request)
+    check_limit(request)
+    if len(req.text) > settings.max_input_chars:
+        raise HTTPException(
+            413,
+            f"That message is {len(req.text)} characters; the limit is "
+            f"{settings.max_input_chars}. Send the part you want checked.",
+        )
+    count_check(request)
     report = _new_job()
     background.add_task(run_pipeline, report.job_id, req.text, _repo)
     return JobAccepted(job_id=report.job_id, status=report.status)
@@ -56,9 +63,10 @@ async def verify_text(
 async def verify_image(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    check_and_count(request)
+    check_limit(request)
     if file.content_type not in _ALLOWED_IMAGE_TYPES:
         raise HTTPException(415, f"Unsupported image type: {file.content_type}")
+    count_check(request)  # OCR is the first paid step
     image_bytes = await file.read()
     # OCR is quick; do it inline so extracted text is captured even if the
     # heavier verification pipeline is deferred to the background.
@@ -75,7 +83,7 @@ async def verify_image(
 async def verify_media(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    check_and_count(request)
+    check_limit(request)
     ctype = (file.content_type or "").lower()
     if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
         raise HTTPException(415, f"Unsupported media type: {file.content_type}")
@@ -87,15 +95,20 @@ async def verify_media(
         raise HTTPException(413, "File too large. Please send a shorter clip.")
 
     try:
-        wav, duration = await asyncio.to_thread(normalize_to_wav, data, file.filename or "media")
+        # The duration cap is passed IN so it is enforced from the source
+        # header, before a low-bitrate hour of audio is decoded into RAM.
+        wav, duration = await asyncio.to_thread(
+            normalize_to_wav, data, file.filename or "media", settings.max_media_seconds
+        )
+    except MediaTooLong as exc:
+        raise HTTPException(413, f"Audio is {exc.seconds:.0f}s long; the limit is "
+                                 f"{settings.max_media_seconds}s. Send a shorter clip.")
     except MediaError as exc:
         raise HTTPException(422, f"Could not read audio from this file ({exc}).")
-    if duration > settings.max_media_seconds:
-        raise HTTPException(413, f"Audio is {duration:.0f}s long; the limit is "
-                                 f"{settings.max_media_seconds}s. Send a shorter clip.")
 
     # Transcribe inline (like OCR): the transcript is the claim text, and a
     # transcription failure should be a clear 4xx/5xx, not a FAILED job.
+    count_check(request)  # first paid step for this route
     try:
         if duration <= settings.asr_chunk_seconds:
             chunks = [wav]

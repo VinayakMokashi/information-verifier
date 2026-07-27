@@ -25,7 +25,7 @@ from typing import NamedTuple
 from app.config import settings
 from app.models.report import TruthReport
 from app.models.verdict import Verdict
-from app.store.db import VEC_AVAILABLE, get_conn
+from app.store.db import get_conn, vec_enabled
 
 try:
     from sqlite_vec import serialize_float32
@@ -62,11 +62,7 @@ class ClaimCache:
 
     # -- embedding helpers ---------------------------------------------------
     def _semantic_on(self) -> bool:
-        return (
-            settings.semantic_cache_enabled
-            and VEC_AVAILABLE
-            and self._embed_failures < _MAX_EMBED_FAILURES
-        )
+        return vec_enabled() and self._embed_failures < _MAX_EMBED_FAILURES
 
     def _embed(self, text: str) -> list[float] | None:
         if not self._semantic_on():

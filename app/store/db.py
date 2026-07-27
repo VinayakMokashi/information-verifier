@@ -26,6 +26,33 @@ except ImportError:  # semantic cache off; exact-match cache still works
     VEC_AVAILABLE = False
 
 _BUSY_TIMEOUT_S = 30.0
+_vec_broken = False  # set if loading the extension ever fails at runtime
+
+
+def vec_enabled() -> bool:
+    """Whether the semantic tier can actually be used right now."""
+    return VEC_AVAILABLE and settings.semantic_cache_enabled and not _vec_broken
+
+
+def _load_vec(conn: sqlite3.Connection) -> None:
+    """Load sqlite-vec, degrading the semantic tier rather than the whole app.
+
+    get_conn() is the only door to the database, so an exception here would
+    500 every request — including reading a finished report. Extension
+    loading is absent on some CPython builds (SQLITE_OMIT_LOAD_EXTENSION)
+    and can fail on a wheel mismatch, so it must never be fatal.
+    """
+    global _vec_broken
+    if not vec_enabled():
+        return
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        _vec_broken = True
+        print(f"[db] sqlite-vec unavailable, semantic cache off: "
+              f"{type(exc).__name__}: {exc}")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -57,10 +84,7 @@ def get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(f"PRAGMA busy_timeout={int(_BUSY_TIMEOUT_S * 1000)}")
-    if VEC_AVAILABLE:
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+    _load_vec(conn)
     return conn
 
 
@@ -72,7 +96,7 @@ def init_db() -> None:
     os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
     with get_conn() as conn:
         conn.executescript(_SCHEMA)
-        if not VEC_AVAILABLE:
+        if not vec_enabled():
             return
 
         sig = _embedding_signature()

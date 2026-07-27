@@ -45,3 +45,28 @@ def test_disabled_by_default_for_local_use(client):
     # The `client` fixture leaves rate_limit_enabled False (see conftest).
     for _ in range(15):
         assert _check(client).status_code == 202
+
+
+def test_rejected_submissions_do_not_burn_quota(limited, monkeypatch):
+    """A too-long paste costs nothing, so it must not consume a check."""
+    monkeypatch.setattr(settings, "max_input_chars", 10)
+    for _ in range(5):
+        assert limited.post("/api/v1/verify/text",
+                            json={"text": "x" * 100}).status_code == 413
+    # Quota untouched: all 3 real checks still available.
+    for _ in range(3):
+        assert _check(limited).status_code == 202
+
+
+def test_visitor_table_does_not_grow_without_bound(limited, monkeypatch):
+    """Many one-off visitors must not leak memory on a long-running server."""
+    from starlette.requests import Request
+
+    monkeypatch.setattr(settings, "max_checks_per_day", 10_000)
+
+    def fake_request(ip):
+        return Request({"type": "http", "client": (ip, 1234), "headers": []})
+
+    for i in range(600):
+        limits.count(fake_request(f"10.0.{i // 256}.{i % 256}"))
+    assert len(limits._per_client) <= 512
