@@ -75,6 +75,17 @@ def test_console_states_an_untranslated_claim_instead_of_skipping_it():
     assert "CLAIM 2" in localized_block
 
 
+def test_console_numbers_by_claim_even_if_the_translation_list_is_short():
+    """A truncated list must not renumber — claim 2's answer relabelled as
+    claim 1's is the same harm as serving a cached verdict for another claim."""
+    report = _report()
+    report.localized.claims = report.localized.claims[:1]
+
+    block = render_report(report).split("IN THE READER'S LANGUAGE")[1]
+    assert "CLAIM 1" in block
+    assert "CLAIM 2  (not translated" in block
+
+
 def test_console_omits_the_block_entirely_for_an_english_report():
     report = _report()
     report.localized = None
@@ -164,3 +175,18 @@ def test_language_button_uses_the_endonym():
     assert 'hi: "हिंदी"' in _PAGE
     assert 'ta: "தமிழ்"' in _PAGE
     assert "langLabel" in _PAGE
+
+
+def test_the_language_lookup_cannot_return_an_inherited_property():
+    """`constructor` passes the server's tag check, and a plain object lookup
+    would render Object's constructor as the button label."""
+    assert "hasOwnProperty.call(LANG_NAMES" in _PAGE
+
+
+def test_reader_language_text_is_direction_aware():
+    """Urdu and Sindhi are right-to-left; without dir="auto" their punctuation
+    lands on the wrong end inside this LTR page."""
+    for anchor in ['<h3 dir="auto">', 'style="margin-top:6px" dir="auto"',
+                   '<div class="correction" dir="auto">',
+                   '<div class="heard" dir="auto">']:
+        assert anchor in _PAGE, anchor

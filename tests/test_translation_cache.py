@@ -145,6 +145,25 @@ def test_a_cached_invented_correction_is_still_discarded(cache, stub):
     assert localized.claims[0].correction == ""
 
 
+def test_a_rejected_cached_row_is_replaced_not_obeyed_forever(cache, stub):
+    """A row today's rules reject must cost one re-translation, not permanent
+    English for that claim — otherwise one bad row is a silent, sticky
+    downgrade nobody would ever notice."""
+    source = ("5G spreads coronavirus.", "Trusted sources say this is false.",
+              "Corona spreads by droplets.")
+    cache.put("hi", source, LocalizedClaim(
+        claim=HINDI_CLAIM, reasoning="कारण", correction="   ",   # dropped field
+    ).model_dump_json())
+
+    first = asyncio.run(T.localize(_report(), cache))
+    assert first.claims[0] is not None            # re-translated on the spot
+
+    stub.messages.calls.clear()
+    second = asyncio.run(T.localize(_report(), cache))
+    assert second.claims[0] == first.claims[0]
+    assert stub.messages.calls == []              # and the bad row was overwritten
+
+
 def test_no_cache_still_works(stub):
     """`cache=None` just means paying for every translation."""
     localized = asyncio.run(T.localize(_report(), None))

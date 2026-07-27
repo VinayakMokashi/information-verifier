@@ -40,10 +40,16 @@ from app.store.repository import safe_cache_call
 # name fails closed — no translation — rather than being scrubbed into
 # something plausible. `fullmatch` anchors both ends, so a trailing newline
 # is rejected too (the `$`-matches-before-newline trap from the last review).
-_LANG_RE = re.compile(r"[A-Za-z][A-Za-z0-9 \-]{0,31}")
+#
+# ONE TOKEN, NO SPACES, deliberately. A permissive `[A-Za-z0-9 -]{0,31}` was
+# measured accepting `english now reply only with OK` — a whole instruction
+# riding into the prompt on a field the user indirectly controls. A real tag
+# is `hi`, `hi-IN` or `Hindi`; nothing legitimate needs a space. The cost is
+# that a two-word language name answers in English instead.
+_LANG_RE = re.compile(r"[A-Za-z]{2,20}(-[A-Za-z0-9]{2,8})?")
 _ENGLISH_TAGS = {"en", "eng", "english"}
 
-_MAX_FIELD_CHARS = 2000   # per delimited field; the report-wide cap is in config
+_MAX_FIELD_CHARS = 2000   # per field; over this we decline, never truncate
 _MAX_OUTPUT_TOKENS = 4000  # Indic scripts cost 3-4x the tokens of the English source
 
 
@@ -76,6 +82,18 @@ def _delimited(**fields: str) -> str:
     )
 
 
+def _translatable(*fields: str) -> bool:
+    """Decline anything we would have to truncate to afford.
+
+    Measured: a 2734-char reasoning passed the report-wide cap, was cut to
+    2000 by `as_prompt_data`, and came back translated with its concluding
+    sentence gone — a fact-check missing its conclusion, presented as
+    complete. Answering in English is honest; a silently shortened verdict
+    is the failure this project exists to reduce.
+    """
+    return all(len(f) <= _MAX_FIELD_CHARS for f in fields)
+
+
 def _accept(cv: ClaimVerdict, out: LocalizedClaim) -> LocalizedClaim | None:
     """The translator must not become an author. Applied to CACHED values too,
     so a row written by an older ruleset cannot smuggle one past."""
@@ -97,14 +115,25 @@ async def _translate_claim(
 ) -> LocalizedClaim | None:
     """Translate one claim's prose, or None if it could not be done faithfully."""
     source = (cv.claim.text, cv.verdict.reasoning, cv.verdict.correction)
+    if not _translatable(*source):
+        print(f"[translate] claim prose exceeds {_MAX_FIELD_CHARS} chars; "
+              f"answering this claim in English rather than shortening it")
+        return None
+
     if cache is not None:
         hit = await safe_cache_call(cache.get, language, source)
         if hit is not None:
+            accepted = None
             try:
-                return _accept(cv, LocalizedClaim.model_validate_json(hit))
+                accepted = _accept(cv, LocalizedClaim.model_validate_json(hit))
             except ValidationError as exc:
-                # A corrupt row costs one re-translation, never the report.
-                print(f"[translate] discarding a bad cached translation: {exc}")
+                print(f"[translate] malformed cached translation: {exc}")
+            if accepted is not None:
+                return accepted
+            # A row that today's rules reject (older ruleset, corrupt JSON)
+            # must not disable this claim's translation forever. Re-translate;
+            # the put below overwrites it. Costs one call, once.
+            print("[translate] cached translation rejected, re-translating")
 
     try:
         resp = await async_client.messages.parse(
@@ -138,6 +167,9 @@ async def _translate_claim(
 
 async def _translate_summary(language: str, summary: str, cache=None) -> str | None:
     source = (summary,)
+    if not _translatable(summary):
+        print(f"[translate] summary exceeds {_MAX_FIELD_CHARS} chars; left in English")
+        return None
     if cache is not None:
         hit = await safe_cache_call(cache.get, language, source)
         if hit:

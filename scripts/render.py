@@ -30,7 +30,11 @@ def _localized_block(report: TruthReport) -> list[str]:
          "=" * 66]
     if loc.summary:
         L.append(f"Summary           : {loc.summary}")
-    for i, lc in enumerate(loc.claims, 1):
+    # Walk the CLAIMS and index into the translations, the same way the web
+    # page does. Enumerating loc.claims on its own would renumber everything
+    # after a short list, quietly relabelling claim 3's answer as claim 2's.
+    for i in range(1, len(report.claim_verdicts) + 1):
+        lc = loc.claims[i - 1] if i <= len(loc.claims) else None
         L.append("")
         if lc is None:
             # An untranslated claim is stated, not skipped: a reader scanning

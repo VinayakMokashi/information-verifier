@@ -44,6 +44,20 @@ def test_full_text_flow_and_cache(client):
     assert F.CALLS["adjudicate"] == 2
 
 
+def test_the_answer_comes_back_in_the_readers_language(client):
+    """The whole point, over the real HTTP contract a bot would also use."""
+    report = _submit_and_fetch(client, {"text": "WHO ne kaha 5G se corona hota hai"})
+    loc = report["localized"]
+
+    assert loc["language"] == "hi"
+    assert len(loc["claims"]) == len(report["claim_verdicts"])   # index-aligned
+    assert loc["claims"][0]["claim"].startswith("विश्व स्वास्थ्य संगठन")
+    # The English is still there underneath — it is what was adjudicated.
+    assert report["claim_verdicts"][0]["verdict"]["reasoning"].isascii()
+    # Citations belong to the English verdict and have no translated twin.
+    assert "citations" not in loc["claims"][0]
+
+
 def test_image_flow_with_simulated_ocr(client):
     resp = client.post(
         "/api/v1/verify/image",

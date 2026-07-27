@@ -142,7 +142,10 @@ const LANG_NAMES = {
 
 function langLabel(tag) {
   const t = String(tag || "").trim().toLowerCase().replace(/_/g, "-").split("-")[0];
-  return LANG_NAMES[t] || tag;
+  // hasOwnProperty, not `LANG_NAMES[t]`: the tag reaches here from the
+  // detector, and "constructor" passes the server's tag check — a plain
+  // lookup would return Object's constructor and render it as the button.
+  return Object.prototype.hasOwnProperty.call(LANG_NAMES, t) ? LANG_NAMES[t] : tag;
 }
 
 function esc(s) {
@@ -201,13 +204,15 @@ function drawReport() {
     // Speech-to-text and OCR can drop a key word, which would mean we
     // checked a different claim than the one sent. Show it so it's visible.
     // Never translated — this is what a machine heard, not what we concluded.
-    parts.push(`<div class="heard"><span class="label">We read this from your file — if it's wrong, retype it above:</span>${esc(r.source_text)}</div>`);
+    parts.push(`<div class="heard" dir="auto"><span class="label">We read this from your file — if it's wrong, retype it above:</span>${esc(r.source_text)}</div>`);
   }
   if (r.overall_rating) {
     parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
   }
   const summary = (loc && loc.summary) || r.summary;
-  if (summary) parts.push(`<p style="margin-top:8px">${esc(summary)}</p>`);
+  // dir="auto" throughout: Urdu and Sindhi are right-to-left, and their
+  // punctuation lands on the wrong end inside an LTR container without it.
+  if (summary) parts.push(`<p style="margin-top:8px" dir="auto">${esc(summary)}</p>`);
   if (!r.localized && r.input_language && r.input_language !== "en") {
     parts.push(`<p class="meta">Detected language: ${esc(r.input_language)}</p>`);
   }
@@ -225,13 +230,13 @@ function drawReport() {
     }).join("");
     parts.push(`
       <div class="claim">
-        <h3>“${esc(lc ? lc.claim : cv.claim.text)}”</h3>
+        <h3 dir="auto">“${esc(lc ? lc.claim : cv.claim.text)}”</h3>
         <p><span class="badge b-${esc(v.rating)}">${esc(v.rating)}</span>
            <span class="meta"> confidence ${esc(v.confidence)}%${cv.cache_hit ? " · answered from cache" : ""}</span></p>
         ${loc && !lc ? `<p class="untranslated">Shown in English — this one could not be translated.</p>` : ""}
-        <p style="margin-top:6px">${esc(lc ? lc.reasoning : v.reasoning)}</p>
+        <p style="margin-top:6px" dir="auto">${esc(lc ? lc.reasoning : v.reasoning)}</p>
         ${(lc ? lc.correction : v.correction)
-          ? `<div class="correction"><strong>Sach yeh hai:</strong> ${esc(lc ? lc.correction : v.correction)}</div>`
+          ? `<div class="correction" dir="auto"><strong>Sach yeh hai:</strong> ${esc(lc ? lc.correction : v.correction)}</div>`
           : ""}
         ${cites ? `<div class="cites"><strong>Sources:</strong><ul>${cites}</ul></div>` : ""}
       </div>`);
