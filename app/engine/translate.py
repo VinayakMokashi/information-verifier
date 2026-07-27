@@ -51,7 +51,12 @@ _LANG_RE = re.compile(r"[A-Za-z]{2,20}(-[A-Za-z0-9]{2,8})?")
 _ENGLISH_TAGS = {"en", "eng", "english"}
 
 _MAX_FIELD_CHARS = 2000   # per field; over this we decline, never truncate
-_MAX_OUTPUT_TOKENS = 4000  # Indic scripts cost 3-4x the tokens of the English source
+# Must clear what _MAX_FIELD_CHARS can produce, by this file's own arithmetic:
+# 3 fields x 2000 chars is ~1500 English tokens, and Indic script costs 3-4x
+# that, so ~6000 output tokens. At 4000 the model was capped below its own
+# worst legal input — output paid for, truncated, discarded at parse, and not
+# even cached. Unused headroom is free; only generated tokens are billed.
+_MAX_OUTPUT_TOKENS = 8000
 
 
 class _LocalizedSummary(BaseModel):
@@ -175,11 +180,22 @@ async def _translate_claim(
             }],
             output_format=LocalizedClaim,
         )
+        # Read INSIDE the guard. `parsed_output` is Optional in the SDK and is
+        # a property, so it can be None or raise on an odd reply (a refusal, a
+        # stop on max_tokens). Dereferencing it one line below the guard meant
+        # a single strange response raised through gather() and threw away
+        # EVERY already-paid translation in the report — the exact opposite of
+        # the per-claim isolation this whole design exists to provide.
+        parsed = resp.parsed_output
     except Exception as exc:  # noqa: BLE001 — the English report is already complete
         print(f"[translate] claim translation failed: {type(exc).__name__}: {exc}")
         return None
 
-    out = _accept(cv, resp.parsed_output)
+    if parsed is None:
+        print("[translate] response carried no parsed output; English for this claim")
+        return None
+
+    out = _accept(cv, parsed)
     if out is not None and cache is not None:
         await safe_cache_call(cache.put, language, source, out.model_dump_json())
     return out
@@ -213,10 +229,13 @@ async def _translate_summary(language: str, summary: str, cache=None) -> str | N
             }],
             output_format=_LocalizedSummary,
         )
+        parsed = resp.parsed_output     # inside the guard — see _translate_claim
     except Exception as exc:  # noqa: BLE001 — see _translate_claim
         print(f"[translate] summary translation failed: {type(exc).__name__}: {exc}")
         return None
-    text = resp.parsed_output.summary.strip()
+    if parsed is None:
+        return None
+    text = parsed.summary.strip()
     if not text:
         return None
     if cache is not None:
@@ -255,10 +274,23 @@ async def localize(report: TruthReport, cache=None) -> LocalizedReport | None:
               f"{settings.max_translate_chars} cap; answering in English")
         return None
 
-    summary, *claims = await asyncio.gather(
+    # return_exceptions: without it one raising task cancels its siblings and
+    # discards every translation already paid for in this report. The helpers
+    # above guard themselves, so this is the belt to that brace — the claim
+    # fan-out in pipeline.py is written the same way for the same reason.
+    results = await asyncio.gather(
         _translate_summary(language, report.summary or "", cache),
         *(_translate_claim(language, cv, cache) for cv in report.claim_verdicts),
+        return_exceptions=True,
     )
+
+    def _survived(r):
+        if isinstance(r, BaseException):
+            print(f"[translate] a translation task raised: {type(r).__name__}: {r}")
+            return None
+        return r
+
+    summary, *claims = [_survived(r) for r in results]
 
     # Nothing landed — don't hand the page an empty shell it has to reason
     # about; absent means "use the English", which is already true.

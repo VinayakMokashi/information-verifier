@@ -33,19 +33,43 @@ _ALLOWED_MEDIA_PREFIXES = ("audio/", "video/")
 _ALLOWED_MEDIA_TYPES = {"application/ogg", "application/octet-stream"}
 
 
+class _Spend:
+    """Whether this request has already cost money."""
+
+    __slots__ = ("started",)
+
+    def __init__(self) -> None:
+        self.started = False
+
+    def begin(self) -> None:
+        """Call immediately BEFORE the first paid call of the request."""
+        self.started = True
+
+
 @contextmanager
 def _quota(request: Request):
-    """Claim a check up front; hand it back if we reject before doing work.
+    """Claim a check up front; hand it back only if we never spent anything.
 
     Reserving first is what makes the cap real — checking now and consuming
     after an upload has been read leaves a window where any number of
     concurrent requests pass the same empty counter.
+
+    The `started` flag is load-bearing, not bookkeeping. Refunding on ANY
+    HTTPException looks generous and is a hole: /verify/media raises 422
+    ("no speech") and 502 (ASR down) AFTER every chunk has been posted to
+    Sarvam and billed by the second, and /verify/image raises 422 ("no text")
+    AFTER a paid Opus vision call. Each refund handed the slot back, so a
+    loop of silent audio could burn ASR credit all day with the daily counter
+    still reading zero — and the error message tells the caller which inputs
+    trigger it. A refund is only honest when nothing was bought.
     """
     reserve(request)
+    spend = _Spend()
     try:
-        yield
+        yield spend
     except HTTPException:
-        refund(request)
+        if not spend.started:
+            refund(request)
         raise
 
 
@@ -81,12 +105,13 @@ async def verify_text(
 async def verify_image(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    with _quota(request):
+    with _quota(request) as spend:
         if file.content_type not in _ALLOWED_IMAGE_TYPES:
             raise HTTPException(415, f"Unsupported image type: {file.content_type}")
         image_bytes = await file.read()
         # OCR is quick; do it inline so extracted text is captured even if the
         # heavier verification pipeline is deferred to the background.
+        spend.begin()          # everything past here has been paid for
         extracted = await ocr_image(image_bytes, file.content_type)
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
@@ -100,7 +125,7 @@ async def verify_image(
 async def verify_media(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    with _quota(request):
+    with _quota(request) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, f"Unsupported media type: {file.content_type}")
@@ -132,6 +157,7 @@ async def verify_media(
                 chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
             asr = get_asr_provider()
             parts = []
+            spend.begin()      # Sarvam bills per second from the first chunk
             for chunk in chunks:
                 transcript = await asr.transcribe(chunk)
                 parts.append(transcript.text)

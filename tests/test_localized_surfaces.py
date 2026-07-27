@@ -186,7 +186,22 @@ def test_the_language_lookup_cannot_return_an_inherited_property():
 def test_reader_language_text_is_direction_aware():
     """Urdu and Sindhi are right-to-left; without dir="auto" their punctuation
     lands on the wrong end inside this LTR page."""
-    for anchor in ['<h3 dir="auto">', 'style="margin-top:6px" dir="auto"',
-                   '<div class="correction" dir="auto">',
-                   '<div class="heard" dir="auto">']:
+    for anchor in ['<h3 dir="auto">', 'style="margin-top:6px" dir="auto"']:
         assert anchor in _PAGE, anchor
+
+
+def test_dir_auto_is_not_defeated_by_a_hardcoded_english_label():
+    """dir="auto" resolves from the first STRONG character in the element. On
+    the two blocks that carry an English label first, putting it on the block
+    made it inert — it must sit on a span wrapping only the reader's text."""
+    for label, wrapper in [
+        ('<span class="label">We read this from your file',
+         '<span dir="auto">${esc(r.source_text)}</span>'),
+        ('<strong>Sach yeh hai:</strong>',
+         '<span dir="auto">${esc(lc ? lc.correction : v.correction)}</span>'),
+    ]:
+        assert label in _PAGE, label
+        assert wrapper in _PAGE, wrapper
+    # And the inert form must not come back.
+    assert '<div class="heard" dir="auto">' not in _PAGE
+    assert '<div class="correction" dir="auto">' not in _PAGE

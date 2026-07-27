@@ -1,6 +1,7 @@
 """Shared fixtures: a fully-offline app client with every paid stage faked."""
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 import scripts.fake_stages as F
 from app.api import limits, routes as R
@@ -36,7 +37,10 @@ class _Messages:
         result = self.handler(kw)
         if isinstance(result, Exception):     # a handler may return one to raise it
             raise result
-        return _Resp(result)
+        # A handler normally returns the parsed model and we wrap it. Returning
+        # a non-model lets a test hand back a whole anomalous RESPONSE object
+        # (no parsed_output, or one that raises) without affecting siblings.
+        return _Resp(result) if isinstance(result, BaseModel) else result
 
 
 class StubClient:
@@ -77,6 +81,12 @@ def client(tmp_path, monkeypatch):
     # make real Anthropic calls on every test that runs the pipeline.
     monkeypatch.setattr(P, "localize", F.fake_localize)
     monkeypatch.setattr(R, "ocr_image", F.fake_ocr)
+    # Every paid seam the routes can reach, faked HERE rather than per-test.
+    # Individual tests were patching this one themselves, which meant the
+    # suite's freedom depended on each new /verify/media test remembering to
+    # — and "a seam nobody remembered" is exactly how demo mode billed real
+    # money once already (PROJECT_PLAN §7, 2026-07-26).
+    monkeypatch.setattr(R, "get_asr_provider", lambda: F.FakeASR())
     F.CALLS["adjudicate"] = 0
 
     from app.main import app

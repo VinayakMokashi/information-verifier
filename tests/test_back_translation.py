@@ -169,6 +169,39 @@ def test_one_failed_claim_leaves_a_hole_not_a_shift(stub):
     assert localized.claims[0] and localized.claims[2]
 
 
+@pytest.mark.parametrize("bad", ["none_parsed", "raises_late"])
+def test_one_anomalous_response_cannot_discard_the_others(stub, bad):
+    """The isolation this design is FOR. A response with no parsed output was
+    dereferenced one line outside the guard, so a single odd reply raised
+    through gather() and threw away every already-paid translation."""
+    class NoParsedOutput:
+        parsed_output = None
+
+    class Exploding:
+        @property
+        def parsed_output(self):
+            raise AttributeError("nothing parsed")
+
+    def handler(kw):
+        if kw["output_format"] is LocalizedClaim and "(1)" in kw["messages"][0]["content"]:
+            return NoParsedOutput() if bad == "none_parsed" else Exploding()
+        if kw["output_format"] is LocalizedClaim:
+            return LocalizedClaim(claim=HINDI_CLAIM, reasoning=HINDI_REASONING,
+                                  correction=HINDI_CORRECTION)
+        return T._LocalizedSummary(summary=HINDI_SUMMARY)
+
+    # Returning a non-model hands back a whole anomalous RESPONSE object; the
+    # good claims still return models and are wrapped normally.
+    stub.messages.handler = handler
+
+    localized = asyncio.run(T.localize(_report(n=3)))
+
+    assert localized is not None                  # not wiped out
+    assert len(localized.claims) == 3
+    assert localized.claims[1] is None            # only the bad one is missing
+    assert localized.claims[0] and localized.claims[2]
+
+
 def test_total_failure_yields_no_block_at_all(stub):
     stub.messages.handler = lambda kw: RuntimeError("api down")
     assert asyncio.run(T.localize(_report(n=2))) is None

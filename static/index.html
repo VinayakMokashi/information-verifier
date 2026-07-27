@@ -204,7 +204,10 @@ function drawReport() {
     // Speech-to-text and OCR can drop a key word, which would mean we
     // checked a different claim than the one sent. Show it so it's visible.
     // Never translated — this is what a machine heard, not what we concluded.
-    parts.push(`<div class="heard" dir="auto"><span class="label">We read this from your file — if it's wrong, retype it above:</span>${esc(r.source_text)}</div>`);
+    // dir="auto" goes on the INNER span, not the block: it resolves from the
+    // first strong character in the element, and the English label would
+    // otherwise always win and force LTR on Urdu/Sindhi text.
+    parts.push(`<div class="heard"><span class="label">We read this from your file — if it's wrong, retype it above:</span><span dir="auto">${esc(r.source_text)}</span></div>`);
   }
   if (r.overall_rating) {
     parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
@@ -236,7 +239,7 @@ function drawReport() {
         ${loc && !lc ? `<p class="untranslated">Shown in English — this one could not be translated.</p>` : ""}
         <p style="margin-top:6px" dir="auto">${esc(lc ? lc.reasoning : v.reasoning)}</p>
         ${(lc ? lc.correction : v.correction)
-          ? `<div class="correction" dir="auto"><strong>Sach yeh hai:</strong> ${esc(lc ? lc.correction : v.correction)}</div>`
+          ? `<div class="correction"><strong>Sach yeh hai:</strong> <span dir="auto">${esc(lc ? lc.correction : v.correction)}</span></div>`
           : ""}
         ${cites ? `<div class="cites"><strong>Sources:</strong><ul>${cites}</ul></div>` : ""}
       </div>`);
