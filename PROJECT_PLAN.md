@@ -119,6 +119,16 @@ tests/               pytest suite — always free, every paid seam faked
       upload, 300 s duration (protects credits), checked BEFORE any spend.
       WhatsApp OGG/Opus accepted. **Verified live:** a Windows-TTS spoken
       sentence transcribed verbatim (en-IN) for ₹0.04 of free credits.
+- [ ] **Hindi audio still unproven end-to-end.** Everything on OUR side is
+      verified free: WhatsApp PTT opus / m4a / mp3 / webm / amr all normalize, a
+      90 s note chunks correctly, the exact Sarvam request (endpoint, auth
+      header, `saaras:v3`, multipart fields) is pinned by a mock-transport test,
+      and Devanagari/Tamil/Bengali round-trip through SQLite → JSON → page
+      unchanged. What is NOT proven is Sarvam's transcription *accuracy* on real
+      Hindi speech — no Hindi TTS voice exists on this machine (only en-US
+      David/Zira), so it needs either a real recorded voice note
+      (`scripts\asr_probe.py clip.ogg`, a fraction of a rupee) or a paid Sarvam
+      TTS call to synthesize one. **Awaiting the user's choice.**
 - [ ] ARQ/Redis queue replacing BackgroundTasks — needs Redis (Docker or Memurai);
       lowest priority while traffic is one user at a time
 - [ ] Back-translate the Truth Report summary into the user's input language
@@ -154,6 +164,25 @@ tests/               pytest suite — always free, every paid seam faked
   hit; confirmed phrasings are written back as exact-cache aliases so repeats are
   free. When the embedding model or dim changes, `init_db()` wipes vectors
   (verdicts survive; vectors re-learn on the next put).
+- **2026-07-27 — Re-checking the review's UNVERIFIED findings found 3 more real
+  holes.** The first review run lost 10 verification agents to a session limit;
+  those findings were fixed on judgment alone, and that judgment was wrong in
+  three places — a reminder that "looks obviously right" is not verification.
+  (1) **Decode amplification:** a 3.26 MB Opus upload (an hour at 6 kbps) passed
+  the 25 MB byte cap and expanded to 110 MB of PCM in RAM — **34×**, measured —
+  before the duration cap rejected it; ~0.8 GB per request at the cap, on a
+  publicly shared link. Now the source duration is probed before decoding and
+  ffmpeg is capped with `-t`: rejected in 0.08 s holding no PCM.
+  (2) **Unbounded fan-out:** rate limits count *requests*, but one request could
+  carry any number of claims, each a paid retrieval + adjudication. Input is now
+  capped (5000 chars) and claims per report capped (8), with the count of
+  unchecked claims disclosed in the report rather than dropped silently.
+  (3) **sqlite-vec loaded on every connection, ungated and unguarded:** since
+  `get_conn` is the only door to the DB, a Python built without extension support
+  would have 500'd *every* request including report reads. Now gated on the
+  setting and degrades only the cache.
+  Also: the limiter no longer charges a visitor for a submission rejected before
+  any paid work, and its visitor table is hard-bounded against an IP flood.
 - **2026-07-26 — Adversarial review of the Phase 2/3 build found 7 real defects;
   all fixed.** Most important: **"free demo mode" could spend real money** — the
   fake stages never patched the ASR seam, so the Voice button on a public
