@@ -40,6 +40,20 @@ inherits back-translation for free: a bot calling the same two endpoints gets
 
 ---
 
+## 0a. MISSING REQUIREMENT — paste a reel / Shorts link
+
+**Vinayak asked for this early on and it was never captured here, so it was
+never built.** Recorded 2026-07-28 after he pointed out the gap; a search of
+all 35 commits and every doc found zero mention of it. Treat this section as
+part of the definition of done, not a nice-to-have.
+
+> **Paste an Instagram Reel or YouTube Shorts URL and have the engine pull the
+> claim out of it** — the way people actually receive misinformation.
+
+Today `/verify/media` takes an **uploaded file**. A link is not an accepted
+input on any endpoint; pasted into the text box it is treated as a string,
+finds no claim, and still costs ~$0.03. See §6 Phase 2 for the plan.
+
 ## 1. Mission
 
 Give any Indian with a phone a fast, trustworthy way to check whether a message,
@@ -189,6 +203,30 @@ tests/               pytest suite — always free, every paid seam faked
       transcript / OCR text) and the page shows it back — "We read this from
       your file — if it's wrong, retype it above" — so a mis-hear is visible
       instead of silent. See Decisions log.
+- [ ] **`/verify/link` — paste a Reel / Shorts URL (see §0a; NOT BUILT).** The
+      back half already exists: `/verify/media` does ffmpeg → chunk → Sarvam →
+      transcript → pipeline, with caps. What is missing is *fetching* the media
+      from a URL. Plan, cheapest step first:
+      1. **Free probe before any code** (`scripts/link_probe.py`, in the style
+         of `factcheck_probe.py`): `yt-dlp` metadata-only, no download, no paid
+         call. Answers the only question that matters — which platforms
+         actually resolve from this machine. **Expect YouTube Shorts to work
+         and Instagram to be flaky**: Reels usually need login cookies and
+         Instagram blocks aggressively. Do not design around Instagram until
+         measured.
+      2. **Prefer captions over ASR.** yt-dlp can pull existing/auto captions
+         without downloading video and without paying Sarvam at all — a link
+         check then costs only the pipeline. Fall back to audio + ASR when
+         there are none.
+      3. **Consider frame OCR.** A lot of Indian reel misinformation is burned
+         into the image, not spoken; we already have Opus vision. Adds cost per
+         frame, so make it opt-in or heuristic.
+      4. **SSRF is a real risk here.** §7 records deliberately hardening ffmpeg
+         so a crafted upload could not make the server fetch remote URLs — this
+         endpoint reopens that door on purpose. Needs a host allowlist plus
+         private-IP/redirect blocking, and the existing size/duration caps.
+      5. Note: downloading from these platforms is against their ToS. Vinayak's
+         call; recorded here so the decision is explicit rather than implied.
 - [ ] ARQ/Redis queue replacing BackgroundTasks — needs Redis (Docker or Memurai);
       lowest priority while traffic is one user at a time
 - [x] **Back-translated Truth Reports — LIVE (2026-07-27):** the summary, each
