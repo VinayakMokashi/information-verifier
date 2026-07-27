@@ -19,7 +19,7 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
     # apply_fake_stages assigns module attributes directly, so snapshot them
     # rather than reloading the modules (which would orphan routes' _repo).
     seams = [(P, "normalize"), (P, "extract_claims"), (P, "gather_evidence"),
-             (P, "adjudicate"), (P, "claims_equivalent"),
+             (P, "adjudicate"), (P, "claims_equivalent"), (P, "localize"),
              (R, "ocr_image"), (R, "get_asr_provider")]
     originals = [(mod, name, getattr(mod, name)) for mod, name in seams]
 
@@ -31,6 +31,7 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         assert P.gather_evidence is F.fake_gather
         assert P.adjudicate is F.fake_adjudicate
         assert P.claims_equivalent is F.fake_equivalent
+        assert P.localize is F.fake_localize
         assert R.ocr_image is F.fake_ocr
         assert not isinstance(R.get_asr_provider(), SarvamASR)
 

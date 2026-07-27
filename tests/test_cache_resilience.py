@@ -58,6 +58,8 @@ class BrokenRepo:
 def _fake_paid_stages(monkeypatch):
     monkeypatch.setattr(P, "gather_evidence", F.fake_gather)
     monkeypatch.setattr(P, "adjudicate", F.fake_adjudicate)
+    # run_pipeline reaches the translation stage, and FakeNorm says Hindi.
+    monkeypatch.setattr(P, "localize", F.fake_localize)
     F.CALLS["adjudicate"] = 0
 
 

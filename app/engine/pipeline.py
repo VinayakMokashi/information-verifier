@@ -18,6 +18,7 @@ from app.engine.equivalence import claims_equivalent
 from app.engine.extract import extract_claims
 from app.engine.normalize import normalize
 from app.engine.retrieve import gather_evidence
+from app.engine.translate import localize
 from app.models.claim import Claim
 from app.models.report import ClaimVerdict, JobStatus, TruthReport
 from app.models.verdict import Rating, Verdict
@@ -133,6 +134,17 @@ async def run_pipeline(
                 f" Note: this message contained more checkable claims than this "
                 f"service checks at once, so {dropped} were not verified."
             )
+
+        # Answer in the language it arrived in — last, so the summary above
+        # (including the dropped-claims note) is part of what gets translated.
+        # Guarded for the same reason cache calls are: the English report is
+        # complete and already paid for, and a translator being down must
+        # cost the reader a translation, never the verdict.
+        try:
+            report.localized = await localize(report)
+        except Exception as exc:  # noqa: BLE001 — see above
+            print(f"[translate] localization skipped: {type(exc).__name__}: {exc}")
+
         report.status = JobStatus.COMPLETE
     except Exception as exc:  # noqa: BLE001 — surface any failure into the report
         report.status = JobStatus.FAILED

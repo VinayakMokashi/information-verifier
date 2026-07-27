@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # paraphrases — a Haiku equivalence check confirms every candidate first.
     semantic_candidate_distance: float = 0.20
 
+    # Back-translation (Phase 2) — answer in the language the message arrived
+    # in. Additive: the English report is canonical, so turning this off (or a
+    # failure) costs the reader a translation, never a verdict.
+    translate_reports: bool = True
+    max_translate_chars: int = 12000  # source prose per report; bounds Haiku spend
+
     # Media (Phase 2) — audio/video via ffmpeg + Sarvam Saaras
     max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits

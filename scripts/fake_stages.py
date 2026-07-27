@@ -13,6 +13,7 @@ import os
 
 from app.models.claim import Claim
 from app.models.evidence import Evidence, Source
+from app.models.report import LocalizedClaim, LocalizedReport
 from app.models.verdict import Rating, Verdict
 
 _DUMMY_KEY = "demo-mode-not-a-real-key"
@@ -119,6 +120,58 @@ async def fake_equivalent(claim_a: str, claim_b: str) -> bool:
     return " ".join(claim_a.lower().split()) == " ".join(claim_b.lower().split())
 
 
+# Canned Hindi for the demo's 5G claims, so the free web demo actually shows
+# the feature instead of a translated-looking placeholder.
+_HINDI_CLAIMS = {
+    "The World Health Organization stated that 5G technology spreads the coronavirus.":
+        "विश्व स्वास्थ्य संगठन ने कहा कि 5जी तकनीक से कोरोना वायरस फैलता है।",
+    "5G radiation weakens the human immune system.":
+        "5जी विकिरण से इंसान की रोग प्रतिरोधक क्षमता कमज़ोर होती है।",
+}
+_HINDI_REASONING = (
+    "भरोसेमंद फैक्ट-चेकर्स और विश्व स्वास्थ्य संगठन की पुष्टि है कि 5जी और कोरोना "
+    "वायरस के बीच कोई संबंध नहीं है; वायरस रेडियो तरंगों पर सफ़र नहीं कर सकते।"
+)
+_HINDI_CORRECTION = (
+    "कोविड-19 सार्स-कोव-2 वायरस से होता है और साँस की बूँदों से फैलता है। 5जी "
+    "रेडियो-फ़्रीक्वेंसी तरंगें हैं और इसके फैलने में इनकी कोई भूमिका नहीं है।"
+)
+
+
+async def fake_localize(report):
+    """Offline stand-in for the back-translation stage.
+
+    Reproduces the real gating (English in, nothing to do) rather than always
+    returning Hindi, so a demo of an English submission behaves like
+    production instead of quietly claiming a translation happened.
+    """
+    from app.config import settings
+    from app.engine.translate import target_language
+
+    if not settings.translate_reports:
+        return None
+    language = target_language(report.input_language)
+    if language is None:
+        return None
+
+    claims = [
+        LocalizedClaim(
+            claim=_HINDI_CLAIMS.get(cv.claim.text, cv.claim.text),
+            reasoning=_HINDI_REASONING,
+            # Mirrors the real stage's rule: no English correction, no
+            # translated one — a translator must never invent a fact.
+            correction=_HINDI_CORRECTION if cv.verdict.correction else "",
+        )
+        for cv in report.claim_verdicts
+    ]
+    rating = report.overall_rating.value if report.overall_rating else "N/A"
+    return LocalizedReport(
+        language=language,
+        summary=f"{len(claims)} दावों की जाँच की गई। कुल नतीजा: {rating}।",
+        claims=claims,
+    )
+
+
 def apply_fake_stages() -> None:
     """Patch every paid seam and neutralize the API keys behind them."""
     from app.api import routes as R
@@ -130,6 +183,7 @@ def apply_fake_stages() -> None:
     P.gather_evidence = fake_gather
     P.adjudicate = fake_adjudicate
     P.claims_equivalent = fake_equivalent
+    P.localize = fake_localize
     R.ocr_image = fake_ocr
     R.get_asr_provider = lambda: FakeASR()
 

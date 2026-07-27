@@ -10,7 +10,7 @@ a full pipeline run) decides whether the cached verdict may be served.
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.engine.prompts import EQUIVALENCE_SYSTEM
+from app.engine.prompts import EQUIVALENCE_SYSTEM, as_prompt_data
 from app.providers.llm import async_client
 
 
@@ -25,14 +25,9 @@ _MAX_CLAIM_CHARS = 1000  # an atomic claim is a sentence, not an essay
 
 
 def _sanitize(claim: str) -> str:
-    """Make a claim safe to place inside XML-ish delimiters.
-
-    Claim text is attacker-influenced on BOTH sides (claim_b is the stored
-    text of a claim some earlier user got cached), and a literal `</claim_a>`
-    would close the block early, turning the remainder into free-floating
-    instructions. No genuine factual claim needs angle brackets.
-    """
-    return claim.replace("<", "‹").replace(">", "›")[:_MAX_CLAIM_CHARS]
+    # Attacker-influenced on BOTH sides: claim_b is the stored text of a claim
+    # some earlier user got cached.
+    return as_prompt_data(claim, _MAX_CLAIM_CHARS)
 
 
 async def claims_equivalent(claim_a: str, claim_b: str) -> bool:

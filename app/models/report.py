@@ -21,6 +21,36 @@ class ClaimVerdict(BaseModel):
     cache_hit: bool = False  # served from the claim cache without a fresh LLM call
 
 
+class LocalizedClaim(BaseModel):
+    """One claim's prose in the reader's language.
+
+    Carries no rating, confidence or citation on purpose. A rating is a
+    structured enum and must not survive a round-trip through a translator;
+    a citation's title and publisher are the strings a reader looks for on
+    the source page, so translating them makes the receipt unfindable.
+    """
+
+    claim: str = Field(description="The claim itself, in the target language.")
+    reasoning: str = Field(
+        description="Why this rating follows from the evidence, in the target language."
+    )
+    correction: str = Field(
+        description="The accurate information, in the target language. Empty "
+        "string if the English correction was empty — never invent one."
+    )
+
+
+class LocalizedReport(BaseModel):
+    """The English report's prose, restated in the reader's language."""
+
+    language: str
+    summary: str | None = None
+    # Index-aligned with TruthReport.claim_verdicts, same length, and `None`
+    # where that one claim's translation failed. A missing entry means "show
+    # the English for this claim", never "shift the next one up".
+    claims: list[LocalizedClaim | None] = Field(default_factory=list)
+
+
 class TruthReport(BaseModel):
     job_id: str
     status: JobStatus
@@ -36,4 +66,10 @@ class TruthReport(BaseModel):
     overall_rating: Rating | None = None
     summary: str | None = None
     claim_verdicts: list[ClaimVerdict] = Field(default_factory=list)
+    # The same report in the language the message arrived in. ADDITIVE: the
+    # English above stays canonical, so a bad translation can never overwrite
+    # what was actually adjudicated, and the claim cache keeps storing English
+    # verdicts. Absent when the input was English, when translation is off, or
+    # when it failed — clients must fall back to the English fields.
+    localized: LocalizedReport | None = None
     error: str | None = None

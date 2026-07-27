@@ -26,6 +26,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "gather_evidence", F.fake_gather)
     monkeypatch.setattr(P, "adjudicate", F.fake_adjudicate)
     monkeypatch.setattr(P, "claims_equivalent", F.fake_equivalent)
+    # Not optional: FakeNorm reports Hindi, so an unpatched localize() would
+    # make real Anthropic calls on every test that runs the pipeline.
+    monkeypatch.setattr(P, "localize", F.fake_localize)
     monkeypatch.setattr(R, "ocr_image", F.fake_ocr)
     F.CALLS["adjudicate"] = 0
 
