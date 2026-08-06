@@ -14,11 +14,15 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 
 from app.api.limits import refund, reserve
-from app.api.schemas import JobAccepted, VerifyTextRequest
+from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.engine.pipeline import run_pipeline
 from app.models.report import JobStatus, TruthReport
 from app.providers.asr import get_asr_provider
+from app.providers.links import (
+    LinkError, LinkInfo, allowed_link_host, download_link_audio, resolve_link,
+    subtitle_text,
+)
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.vision import ocr_image
 from app.store.repository import ReportRepository
@@ -178,6 +182,139 @@ async def verify_media(
         # can drop a claim's key term, and a silent mis-hear would mean checking
         # a different claim than the one the person sent.
         background.add_task(run_pipeline, report.job_id, text, _repo, text)
+        return JobAccepted(job_id=report.job_id, status=report.status)
+
+
+# LinkError.kind -> HTTP status. Everything the user can fix is 422; only a
+# platform we could not reach is the server's fault (502).
+_LINK_HTTP = {"network": 502}
+
+# The post's own caption text is a supplement, not the main source — cap its
+# contribution so a stuffed caption cannot inflate the extract call. (The
+# spoken text is bounded by max_media_seconds already.)
+_MAX_CAPTION_CHARS = 2000
+
+
+async def gather_link_text(info: LinkInfo) -> str:
+    """Everything readable from the post: caption + (subtitles | audio->ASR).
+
+    Cost order is the point (measured, §0a): the caption is already in hand
+    ($0); a subtitle track replaces ASR outright ($0 — YouTube's '-orig'
+    auto-captions ARE the speech recognition we would otherwise buy); and
+    only when neither covers the speech is audio downloaded (byte/wall-capped
+    stream), ffprobe'd against the duration cap, and sent to Sarvam.
+    """
+    caption = " ".join((info.caption or "").split())[:_MAX_CAPTION_CHARS]
+
+    spoken: str | None = None
+    if info.subtitle is not None:
+        spoken = await asyncio.to_thread(subtitle_text, info.subtitle)
+    if spoken is None and info.has_media:
+        data, ext = await asyncio.to_thread(
+            download_link_audio, info.url, settings.max_media_bytes
+        )
+        wav, duration = await asyncio.to_thread(
+            normalize_to_wav, data, f"media{ext}", settings.max_media_seconds
+        )
+        if duration <= settings.asr_chunk_seconds:
+            chunks = [wav]
+        else:
+            chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
+        asr = get_asr_provider()
+        parts = []
+        for chunk in chunks:
+            transcript = await asr.transcribe(chunk)
+            parts.append(transcript.text)
+        spoken = " ".join(p.strip() for p in parts if p and p.strip())
+
+    combined = "\n\n".join(t for t in (caption, spoken) if t and t.strip())
+    if not combined.strip():
+        raise LinkError("other", "No speech or text could be read from that post.")
+    return combined
+
+
+def _friendly_link_failure(exc: Exception) -> str:
+    """A FAILED report's error is rendered to the user — no raw internals."""
+    if isinstance(exc, MediaTooLong):
+        return (f"That video's audio is {exc.seconds:.0f}s long; the limit is "
+                f"{settings.max_media_seconds}s. Try a shorter clip.")
+    if isinstance(exc, LinkError):
+        return str(exc)
+    if isinstance(exc, MediaError):
+        return "The audio in that post could not be read."
+    if isinstance(exc, (httpx.HTTPError, RuntimeError)):
+        return ("The transcription service is unavailable right now. "
+                "Please try again in a minute.")
+    print(f"[link] unexpected failure: {type(exc).__name__}: {exc}")
+    return "Something went wrong reading that link. Please try again."
+
+
+async def _run_link_job(job_id: str, info: LinkInfo, repo: ReportRepository) -> None:
+    """Background half: fetch the text, then run the normal pipeline.
+
+    A failure here becomes a FAILED report with a readable error (the page
+    renders those), never a silent PROCESSING-forever. run_pipeline guards
+    itself; this guard covers the fetch/ASR work before it.
+    """
+    try:
+        text = await gather_link_text(info)
+    except Exception as exc:  # noqa: BLE001 — every failure must reach the report
+        report = await asyncio.to_thread(repo.get, job_id)
+        if report is not None:
+            report.status = JobStatus.FAILED
+            report.error = _friendly_link_failure(exc)
+            report.completed_at = datetime.now(timezone.utc)
+            await asyncio.to_thread(repo.save, report)
+        return
+    await run_pipeline(job_id, text, repo, derived_text=text)
+
+
+@router.post("/verify/link", response_model=JobAccepted, status_code=202)
+async def verify_link(
+    req: VerifyLinkRequest, background: BackgroundTasks, request: Request
+) -> JobAccepted:
+    """Paste a public Instagram Reel / YouTube (Shorts) URL.
+
+    Resolve runs INLINE because it is free and bad links are the common
+    failure — a typo'd or private link deserves an immediate readable 4xx
+    (refunded: nothing was spent). The download + ASR run in the BACKGROUND:
+    fetching from a platform is slower and less bounded than reading an
+    upload, and a 202-then-poll contract survives a proxy cutting a long
+    request. The cost of that split: a slot accepted here stays consumed
+    even if the background half later fails — a refund cannot be issued from
+    a background task, and of the two errors, over-counting is the one the
+    wallet survives.
+    """
+    with _quota(request):
+        url = req.url.strip()
+        if allowed_link_host(url) is None:
+            raise HTTPException(
+                422,
+                "Only public Instagram and YouTube links can be checked "
+                "(https://www.instagram.com/reel/…, https://youtube.com/shorts/…).",
+            )
+        try:
+            info = await asyncio.to_thread(resolve_link, url)
+        except LinkError as exc:
+            raise HTTPException(_LINK_HTTP.get(exc.kind, 422), str(exc))
+
+        # Everything knowable for free is checked before the job exists.
+        if info.duration is not None and info.duration > settings.max_media_seconds:
+            raise HTTPException(
+                413,
+                f"That video is {info.duration:.0f}s long; the limit is "
+                f"{settings.max_media_seconds}s. Try a shorter clip.",
+            )
+        needs_asr = info.subtitle is None and info.has_media
+        if needs_asr and not settings.sarvam_api_key:
+            raise HTTPException(
+                503, "Audio checking is not configured (SARVAM_API_KEY missing)."
+            )
+        if not info.has_media and not info.caption.strip():
+            raise HTTPException(422, "That post has no video and no caption to check.")
+
+        report = await _new_job()
+        background.add_task(_run_link_job, report.job_id, info, _repo)
         return JobAccepted(job_id=report.job_id, status=report.status)
 
 

@@ -15,6 +15,7 @@ from app.models.claim import Claim
 from app.models.evidence import Evidence, Source
 from app.models.report import LocalizedClaim, LocalizedReport
 from app.models.verdict import Rating, Verdict
+from app.providers.links import LinkInfo
 
 _DUMMY_KEY = "demo-mode-not-a-real-key"
 
@@ -120,6 +121,28 @@ async def fake_equivalent(claim_a: str, claim_b: str) -> bool:
     return " ".join(claim_a.lower().split()) == " ".join(claim_b.lower().split())
 
 
+def fake_resolve_link(url: str) -> LinkInfo:
+    """Offline stand-in for yt-dlp resolve — no network, any allowlisted URL
+    'resolves' to a small reel with a caption and no subtitles."""
+    return LinkInfo(
+        url=url,
+        platform="Instagram (simulated)",
+        video_id="FAKE-REEL-1",
+        title="Video by demo",
+        uploader="demo",
+        duration=None,        # mirrors the real Instagram finding: unknown
+        caption="(simulated caption) WHO ne kaha 5G se corona phailta hai",
+        has_media=True,
+        subtitle=None,
+    )
+
+
+async def fake_gather_link_text(info) -> str:
+    """Offline stand-in for the whole fetch half (subtitles/download/ASR)."""
+    return ("(simulated caption) WHO ne kaha 5G se corona phailta hai\n\n"
+            "WHO ne kaha hai ki 5G se coronavirus phailta hai. (simulated reel)")
+
+
 # Canned Hindi for the demo's 5G claims, so the free web demo actually shows
 # the feature instead of a translated-looking placeholder.
 _HINDI_CLAIMS = {
@@ -186,6 +209,10 @@ def apply_fake_stages() -> None:
     P.localize = fake_localize
     R.ocr_image = fake_ocr
     R.get_asr_provider = lambda: FakeASR()
+    # The link path: resolve touches the network (free but online — a demo
+    # must be fully offline) and gather can reach paid Sarvam. Both faked.
+    R.resolve_link = fake_resolve_link
+    R.gather_link_text = fake_gather_link_text
 
     # Belt and braces: with dummy keys, any seam that slips through fails
     # auth instead of spending. (Non-empty so routes' "not configured"

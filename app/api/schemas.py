@@ -15,6 +15,13 @@ class VerifyTextRequest(BaseModel):
     )
 
 
+class VerifyLinkRequest(BaseModel):
+    url: str = Field(
+        min_length=12, max_length=2048,
+        description="A public Instagram Reel or YouTube (Shorts) URL to fact-check.",
+    )
+
+
 class JobAccepted(BaseModel):
     """Returned immediately; the report is built in the background."""
 

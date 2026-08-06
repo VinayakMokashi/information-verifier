@@ -87,6 +87,10 @@ def client(tmp_path, monkeypatch):
     # — and "a seam nobody remembered" is exactly how demo mode billed real
     # money once already (PROJECT_PLAN §7, 2026-07-26).
     monkeypatch.setattr(R, "get_asr_provider", lambda: F.FakeASR())
+    # Link seams: resolve is $0 but ONLINE (tests must never touch the
+    # network), and gather reaches Sarvam when a post has no subtitles.
+    monkeypatch.setattr(R, "resolve_link", F.fake_resolve_link)
+    monkeypatch.setattr(R, "gather_link_text", F.fake_gather_link_text)
     F.CALLS["adjudicate"] = 0
 
     from app.main import app

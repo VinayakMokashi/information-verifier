@@ -20,7 +20,8 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
     # rather than reloading the modules (which would orphan routes' _repo).
     seams = [(P, "normalize"), (P, "extract_claims"), (P, "gather_evidence"),
              (P, "adjudicate"), (P, "claims_equivalent"), (P, "localize"),
-             (R, "ocr_image"), (R, "get_asr_provider")]
+             (R, "ocr_image"), (R, "get_asr_provider"),
+             (R, "resolve_link"), (R, "gather_link_text")]
     originals = [(mod, name, getattr(mod, name)) for mod, name in seams]
 
     F.apply_fake_stages()
@@ -33,6 +34,8 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         assert P.claims_equivalent is F.fake_equivalent
         assert P.localize is F.fake_localize
         assert R.ocr_image is F.fake_ocr
+        assert R.resolve_link is F.fake_resolve_link
+        assert R.gather_link_text is F.fake_gather_link_text
         assert not isinstance(R.get_asr_provider(), SarvamASR)
 
         # Backstop: even a seam we forgot would fail auth, not spend.
