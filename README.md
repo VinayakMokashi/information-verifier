@@ -1,7 +1,8 @@
 # Information Verifier
 
 A multi-modal fact-checking engine built to combat fake news and propaganda in India.
-Send **text, a screenshot, or a voice note** — the engine extracts the verifiable
+Send **text, a screenshot, a voice note, or a pasted Instagram Reel / YouTube
+Shorts link** — the engine extracts the verifiable
 claims, checks each against a **whitelist of trusted sources** (Indian fact-checkers,
 government portals, wire services), and returns a **Truth Report** with a rating,
 reasoning, the correction, and clickable citations.
@@ -9,8 +10,9 @@ reasoning, the correction, and clickable citations.
 Works in Hindi, Marathi, Tamil, Bengali and English — and **answers in the language
 the rumour arrived in**. Mobile-first, no app to install.
 
-> Status: text, image and audio/video all work end-to-end, with a mobile web page,
-> a semantic claim cache, and back-translated Truth Reports. See
+> Status: text, image, audio/video and pasted Reel/Shorts links all work
+> end-to-end, with a mobile web page, a semantic claim cache, and
+> back-translated Truth Reports. See
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand and what's next.
 
 ## Why the design looks the way it does
@@ -70,6 +72,7 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md).
 | `POST` | `/api/v1/verify/text` | Submit text → `{job_id, status}` (202) |
 | `POST` | `/api/v1/verify/image` | Submit an image (multipart `file`) |
 | `POST` | `/api/v1/verify/media` | Submit audio or video (multipart `file`) |
+| `POST` | `/api/v1/verify/link` | Submit a public Instagram Reel / YouTube URL |
 | `GET`  | `/api/v1/reports/{job_id}` | Poll for the Truth Report |
 | `GET`  | `/health` | Liveness |
 | `GET`  | `/` | The mobile web page |
@@ -99,7 +102,7 @@ Tools API. No Node, no Docker, no build step.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-114 tests, always free — every paid API is faked, including a test that proves
+266 tests, always free — every paid API is faked, including a test that proves
 the "free" demo mode cannot reach a paid provider.
 
 ## Documentation

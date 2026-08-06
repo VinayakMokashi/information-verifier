@@ -78,7 +78,8 @@ Secrets live only in `.env` (git-ignored): `ANTHROPIC_API_KEY`,
 
 ## Shape of the code
 
-`app/api/` routes → `app/engine/pipeline.py` orchestrates →
+`app/api/` routes (text / image / media / **link** — a pasted Reel or Shorts
+URL) → `app/engine/pipeline.py` orchestrates →
 `normalize → extract → (cache | retrieve → adjudicate) → aggregate → translate` →
 `app/store/` persists. Providers (`app/providers/`) wrap every external service.
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` → poll

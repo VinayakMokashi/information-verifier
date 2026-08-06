@@ -2,19 +2,19 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-27** (back-translation).
+> Keep it updated as the project moves. Last updated: **2026-07-28** (/verify/link).
 
 ---
 
 ## 0. Where we are right now (read this first)
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**194 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
+**266 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
 paid API is faked).
 
 Working end-to-end, verified against live APIs:
-- **Text, image and voice/video fact-checking** through one pipeline, with a
-  mobile web page at `/` and a REST API underneath.
+- **Text, image, voice/video AND pasted Reel/Shorts links** through one
+  pipeline, with a mobile web page at `/` and a REST API underneath.
 - **Bounded trust**: verdicts can only cite a curated whitelist; Google Fact Check
   results are filtered to it too.
 - **Two-tier claim cache**: exact match, then semantic nomination confirmed by a
@@ -40,24 +40,25 @@ inherits back-translation for free: a bot calling the same two endpoints gets
 
 ---
 
-## 0a. MISSING REQUIREMENT — paste a reel / Shorts link
+## 0a. Paste a reel / Shorts link — ✅ BUILT (2026-07-28)
 
-**Vinayak asked for this early on and it was never captured here, so it was
-never built.** Recorded 2026-07-28 after he pointed out the gap; a search of
-all 35 commits and every doc found zero mention of it. Treat this section as
-part of the definition of done, not a nice-to-have.
+**History matters here:** Vinayak asked for this early on, it was never
+captured in this file, and so it was never built until he pointed out the gap
+— a search of all 35 commits and every doc found zero mention. It is part of
+the definition of done. It now exists:
 
-> **Paste an Instagram Reel or YouTube Shorts URL and have the engine pull the
-> claim out of it** — the way people actually receive misinformation.
+> **Paste a public Instagram Reel or YouTube (Shorts) URL into the same box
+> as everything else** — the page routes it to `POST /api/v1/verify/link`,
+> which pulls the claim out of the post (caption + subtitles, or capped
+> audio download → Sarvam ASR) and runs the normal pipeline. Same
+> submit → job_id → poll contract as every other surface.
 
-Today `/verify/media` takes an **uploaded file**. A link is not an accepted
-input on any endpoint; pasted into the text box it is treated as a string,
-finds no claim, and still costs ~$0.03.
-
-**Feasibility settled 2026-07-28 (free probe, real URLs):** Instagram Reels
-and YouTube Shorts both resolve anonymously via yt-dlp. The blocker is not
-access — it is that Instagram advertises neither duration nor filesize, so
-the spend caps must move after the (free) download. See §6 Phase 2.
+**Live-verified free ($0), 2026-07-28:** the real provider resolved a Hindi
+YouTube video and pulled 1,294 chars of `hi-orig` subtitles (the spoken claim
+for ₹0 of ASR), and resolved + downloaded a real Reel (0.42 MB audio),
+ffprobe'd 70.1 s against the 300 s cap, and stopped before the ₹0.58 ASR
+purchase. **The paid tail (Sarvam on a real reel + the check itself) has not
+run yet** — see §11.
 
 ## 1. Mission
 
@@ -89,8 +90,9 @@ is: mobile, and ultimately WhatsApp.
 | Reasoning / vision / extraction / adjudication | Claude **Opus 4.8** (`claude-opus-4-8`) |
 | Language detect + translation + retrieval + cache confirm | Claude **Haiku 4.5** (`claude-haiku-4-5`) |
 | Retrieval | Native `web_search_20260209` (allowed_domains) + Google Fact Check API |
+| Link ingestion | **yt-dlp** (Instagram/YouTube extractors only, generic disabled) |
 | OCR | Opus 4.8 vision (no Tesseract) |
-| ASR | **Sarvam Saaras v3** (`saaras:v3`) — live, wired to `/verify/media` |
+| ASR | **Sarvam Saaras v3** (`saaras:v3`) — live, wired to `/verify/media` + `/verify/link` |
 | Audio/video handling | ffmpeg (normalize to 16 kHz mono WAV, chunk, probe) |
 | Embeddings | **EmbeddingGemma-300m** local on CPU, 256-dim ($0/lookup) |
 | Storage | **SQLite + sqlite-vec** (Postgres + pgvector deferred to deployment) |
@@ -107,6 +109,8 @@ INPUT
   /verify/text   raw text
   /verify/image  → OCR (Opus vision)            ─┐  machine-read text is kept in
   /verify/media  → ffmpeg → Sarvam ASR (chunked) ┘  report.source_text and shown back
+  /verify/link   → yt-dlp resolve (inline, free) → background:
+                   caption + (subtitles | capped download → ffmpeg → ASR)
 
 normalize (Haiku: detect language + English pivot)
   → extract claims (Opus)   → capped at max_claims_per_report
@@ -131,13 +135,13 @@ app/
   main.py            FastAPI app + lifespan (init_db) + static mount at "/"
   config.py          settings + model IDs + cache/media knobs
   trusted_sources.py SEARCH_DOMAINS (crawlable) + FACTCHECK_ONLY_DOMAINS + trust matching
-  api/               routes (text/image/media/reports) + wire DTOs
+  api/               routes (text/image/media/link/reports) + wire DTOs
   models/            Pydantic contracts: Claim, Verdict, Evidence, TruthReport
   engine/            normalize, extract, retrieve, adjudicate, equivalence,
                      aggregate, translate (back-translation), pipeline, prompts
   providers/         llm (Anthropic), vision (OCR), factcheck (Google),
                      asr (Sarvam Saaras v3), embeddings (EmbeddingGemma),
-                     media (ffmpeg helpers)
+                     media (ffmpeg helpers), links (yt-dlp: Reels/Shorts)
   store/             SQLite + sqlite-vec db, repository (reports + 2-tier claim
                      cache + content-addressed translation cache)
 static/
@@ -209,7 +213,8 @@ tests/               pytest suite — always free, every paid seam faked
       transcript / OCR text) and the page shows it back — "We read this from
       your file — if it's wrong, retype it above" — so a mis-hear is visible
       instead of silent. See Decisions log.
-- [ ] **`/verify/link` — paste a Reel / Shorts URL (see §0a; NOT BUILT).** The
+- [x] **`/verify/link` — BUILT & live-verified free (2026-07-28), see §0a and §7.**
+      The measurement trail that shaped it: The
       back half already exists: `/verify/media` does ffmpeg → chunk → Sarvam →
       transcript → pipeline, with caps. What is missing is *fetching* the media
       from a URL. Plan, cheapest step first:
@@ -295,6 +300,40 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+- **2026-07-28 — /verify/link: resolve inline, spend in the background, caps
+  by ordering.** The §0a requirement is built. Design decisions worth keeping:
+  (1) **Resolve runs inline, fetch+ASR in the background.** A bad link (typo,
+  private, deleted) is the common failure and gets an immediate readable 4xx
+  with the quota refunded — nothing was spent, since resolve is metadata-only.
+  The download and transcription then run behind a 202, because the audit
+  showed proxies cutting long inline requests while the server kept spending.
+  Consequence, documented in the route: a slot accepted at 202 stays consumed
+  even if the background half fails — refunds cannot be issued from a
+  background task, and over-counting is the error the wallet survives.
+  (2) **Instagram forces the caps to move.** It advertises neither duration
+  nor filesize (measured), so invariant 5 holds by ORDER: byte- and
+  wall-clock-capped download as the stream arrives (free — bandwidth), then
+  ffprobe against `max_media_seconds` (the existing normalize_to_wav path),
+  and only then Sarvam. YouTube DOES advertise duration, so an over-cap video
+  is 413'd before a single byte.
+  (3) **Subtitles replace ASR when honest.** Manual tracks in any language
+  win; auto tracks only with the `-orig` suffix — non-orig auto tracks are
+  machine TRANSLATIONS, and feeding one to normalize() would pivot a
+  translation of a translation. json3 preferred over YouTube's rolling VTT
+  (which repeats most lines; the fallback parser collapses them).
+  (4) **Three independent SSRF fences**, because this endpoint deliberately
+  reopens the door §7 closed for uploads: exact-host https-only allowlist with
+  trusted_sources-grade parsing; yt-dlp pinned to the Instagram/YouTube
+  extractors so its generic extractor (which fetches ANY url) cannot run; and
+  the download function re-checks the allowlist rather than trusting callers.
+  (5) The post caption rides along capped at 2000 chars — measured carrying a
+  full quoted claim on one real reel and pure promo on another; the
+  checkworthy filter sorts that out downstream.
+  **Live-verified free:** 1,294 chars of `hi-orig` subtitles from a Hindi
+  YouTube video (₹0 of ASR), and a real Reel resolved → 0.42 MB audio
+  downloaded under cap → 70.1 s ffprobe'd → stopped before the ₹0.58 ASR
+  spend. ToS note: fetching from these platforms is against their terms;
+  Vinayak decided to proceed for personal/testing use.
 - **2026-07-28 — First live Devanagari run, and an audit that found a critical
   spend hole.** A real `smoke_test.py` run on a Hindi ₹2000-note rumour went
   end to end: 3 claims extracted from one compound sentence, rated separately
@@ -555,7 +594,11 @@ obvious-looking design.*
   of the check it rides on. **$0 for English input** (the stage is skipped
   before any call) and **$0 on a translation-cache hit**, which is the common
   case for a forward that has been seen before in the same language.
-- Sarvam ASR: **₹30/hour**, billed per second (~₹0.50/min). Sarvam TTS (only used
+- Sarvam ASR: **₹30/hour**, billed per second (~₹0.50/min).
+- A **link check** adds: $0 when the post has subtitles or the claim is in
+  the caption (YouTube Hindi auto-captions measured present) — otherwise the
+  reel's audio duration × ASR rate (a 70 s reel ≈ ₹0.58) on top of the
+  normal per-claim cost. Resolve/download are bandwidth, not API spend. Sarvam TTS (only used
   for testing): bulbul:v2 ₹15 / 10K chars.
 - **Per real single-claim check: ~$0.12–0.26** (revised 2026-07-28 from the
   actual call structure — retrieval reads full page text on Haiku, and Opus
@@ -637,7 +680,11 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    voice: record a 5-second Hindi voice note on a phone, save the file, and run
    `.venv\Scripts\python.exe scripts\asr_probe.py path\to\clip.opus` (a fraction
    of a rupee). If real speech transcribes cleanly, the concern was synthetic.
-4. **Back-translation quality is untested against the live API.** The plumbing
+4. **The /verify/link paid tail has not run.** The free half is live-verified
+   (resolve, subtitles, capped download, ffprobe). One real reel end-to-end
+   — Sarvam on ~70 s of audio (~₹0.58) plus a normal check ($0.15–0.40
+   depending on claims) — would close it. Needs your go-ahead.
+5. **Back-translation quality is untested against the live API.** The plumbing
    is pinned by 194 free tests, but no real Haiku translation has been read yet.
    One `smoke_test.py` run on a Hindi claim (~$0.06–0.13, a cent or so of which
    is the translation) would show the actual Hindi prose and whether it reads
