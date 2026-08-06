@@ -57,8 +57,10 @@ the definition of done. It now exists:
 YouTube video and pulled 1,294 chars of `hi-orig` subtitles (the spoken claim
 for ₹0 of ASR), and resolved + downloaded a real Reel (0.42 MB audio),
 ffprobe'd 70.1 s against the 300 s cap, and stopped before the ₹0.58 ASR
-purchase. **The paid tail (Sarvam on a real reel + the check itself) has not
-run yet** — see §11.
+purchase. **Paid tail verified 2026-07-28** (`scripts/link_smoke.py`, Vinayak-approved):
+a real Reel went link → download → Sarvam → 6 claims → verdicts → Hindi
+back-translation, end to end, for **$0.279 measured** (the project's first
+measured cost figure — see §8).
 
 ## 1. Mission
 
@@ -300,6 +302,31 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+- **2026-07-28 — First paid link run: $0.279 measured, and four §11 questions
+  moved.** `scripts/link_smoke.py` wraps the shared Anthropic client and the
+  ffmpeg boundary so every run reports measured spend — the audit's top gap.
+  The PEEK TV reel (70.1 s, Hinglish speech): Haiku 14 calls (98k in / 3k
+  out — retrieval reading pages dominates), Opus 7 calls (1 extract + 6
+  adjudicate), 5 web searches, ₹0.58 ASR ⇒ **$0.279 total**, under the $0.39
+  modelled for 3 claims despite carrying 6 — UNVERIFIED claims are cheap.
+  What the run proved: **(a)** bounded trust found the ONE whitelisted source
+  covering a niche story (BOOM's report on the same protester, incl. that the
+  viral spread was partly AI fakes) and rated that claim MOSTLY_TRUE 58%,
+  while abstaining honestly on the 5 claims no trusted source addressed —
+  exactly the designed behaviour on fresh, local news. **(b)** Sarvam on REAL
+  Hindi speech preserved every alphanumeric — ₹140, "27th", "5 तारीख", एफआईआर
+  — so the 5जी loss from the synthetic-TTS test (§11 open decision 3) was the
+  robot voice, not Sarvam. Effectively settled. **(c)** Live back-translation
+  read well; residual rough edges recorded: terminology still drifts between
+  claims (वक्ता vs स्पीकर, भरोसेमंद vs विश्वसनीय — one call per claim is the
+  cause and the alignment guarantee is worth the price), the summary
+  translates the rating word ("सत्यापित नहीं") while the badge stays English
+  (already backlog item 19), UNVERIFIED confidence renders inconsistently (0
+  for "no context", 95 for "sources don't address it"), and extraction left
+  "the speaker" unresolved even though the caption names her — social-post
+  extraction could hint that the caption may name the first-person speaker.
+  Also fixed: the console renderer never printed `source_text` — invariant 4
+  had a hole on that surface, found the moment a real transcript existed.
 - **2026-07-28 — /verify/link: resolve inline, spend in the background, caps
   by ordering.** The §0a requirement is built. Design decisions worth keeping:
   (1) **Resolve runs inline, fetch+ASR in the background.** A bad link (typo,
@@ -600,11 +627,12 @@ obvious-looking design.*
   reel's audio duration × ASR rate (a 70 s reel ≈ ₹0.58) on top of the
   normal per-claim cost. Resolve/download are bandwidth, not API spend. Sarvam TTS (only used
   for testing): bulbul:v2 ₹15 / 10K chars.
-- **Per real single-claim check: ~$0.12–0.26** (revised 2026-07-28 from the
-  actual call structure — retrieval reads full page text on Haiku, and Opus
-  adjudication with adaptive thinking bills thinking tokens as output). The
-  older "$0.05–0.12" figure appears to have been optimistic. **Neither number
-  is measured**: we do not log token usage, so every figure here is a model.
+- **Per real single-claim check: ~$0.12–0.26 modelled.** First MEASURED
+  anchor (2026-07-28, `scripts/link_smoke.py`): a 6-claim reel report cost
+  **$0.279 all-in** ($0.22 LLM + $0.05 search + ₹0.58 ASR) — cheaper per
+  claim than the model because UNVERIFIED claims skip heavy adjudication.
+  The meter lives in the smoke script; promoting per-report usage logging
+  into the app itself is the top follow-up.
 - A submission is priced per CLAIM, not per message, and one ordinary compound
   sentence becomes several claims — a single Hindi sentence about ₹2000 notes
   extracted into **three**. Budget per sentence, not per submission.

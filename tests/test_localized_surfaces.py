@@ -92,6 +92,19 @@ def test_console_omits_the_block_entirely_for_an_english_report():
     assert "IN THE READER'S LANGUAGE" not in render_report(report)
 
 
+def test_console_shows_machine_read_text_back():
+    """Invariant 4 on the console surface — found missing when the first real
+    reel run produced a transcript nowhere in the printed report."""
+    report = _report()
+    report.source_text = "यू गाइज़ से कि ये वो लड़की है (transcript)"
+    out = render_report(report)
+    assert "WHAT THE MACHINE READ" in out
+    assert "यू गाइज़ से" in out
+
+    report.source_text = None
+    assert "WHAT THE MACHINE READ" not in render_report(report)
+
+
 def _cp1252_stdout():
     buf = io.BytesIO()
     return buf, io.TextIOWrapper(buf, encoding="cp1252", errors="strict")

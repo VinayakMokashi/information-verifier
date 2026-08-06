@@ -63,6 +63,16 @@ def render_report(report: TruthReport) -> str:
         L.append(f"ERROR             : {report.error}")
     L.append("=" * 66)
 
+    if report.source_text:
+        # Invariant 4 on this surface too: ASR/OCR output is a GUESS, and a
+        # mis-hear means the verdicts below answer different words than the
+        # ones that were actually said. The web page shows this; the console
+        # did not until the first real reel run made the gap obvious.
+        L.append("")
+        L.append("WHAT THE MACHINE READ (if this is wrong, the check below is")
+        L.append("about the wrong words):")
+        L.append(f"  {report.source_text}")
+
     for i, cv in enumerate(report.claim_verdicts, 1):
         v = cv.verdict
         tag = "  (served from cache)" if cv.cache_hit else ""
