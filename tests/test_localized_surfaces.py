@@ -195,7 +195,7 @@ def test_dir_auto_is_not_defeated_by_a_hardcoded_english_label():
     the two blocks that carry an English label first, putting it on the block
     made it inert — it must sit on a span wrapping only the reader's text."""
     for label, wrapper in [
-        ('<span class="label">We read this from your file',
+        ('<span class="label">We read this from what you sent',
          '<span dir="auto">${esc(r.source_text)}</span>'),
         ('<strong>Sach yeh hai:</strong>',
          '<span dir="auto">${esc(lc ? lc.correction : v.correction)}</span>'),

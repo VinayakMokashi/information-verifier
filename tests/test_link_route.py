@@ -259,3 +259,42 @@ def test_an_accepted_job_keeps_its_quota_slot_even_if_the_fetch_fails(client, mo
 
     assert report["status"] == "FAILED"
     assert len(limits._day) == 1
+
+
+# -- the page routes a pasted link ---------------------------------------------
+
+def _page() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent / "static" / "index.html"
+            ).read_text(encoding="utf-8")
+
+
+def test_the_page_sends_a_bare_link_to_verify_link():
+    page = _page()
+    assert "api/v1/verify/link" in page
+    assert "LINK_RE" in page
+    # Anchored (^…$): a forward that merely CONTAINS a link stays a text check.
+    assert "const LINK_RE = /^https:" in page
+    assert page.index("LINK_RE.test(text)") < page.index('fetch("api/v1/verify/text"')
+
+
+def test_the_page_link_regex_matches_what_the_server_accepts():
+    """The page's quick test and the server's strict gate must agree on the
+    happy path, or a valid reel would be sent as text and billed for nothing."""
+    import re as _re
+
+    page = _page()
+    m = _re.search(r"const LINK_RE = /(.+)/i;", page)
+    assert m, "LINK_RE not found in the page"
+    link_re = _re.compile(m.group(1), _re.I)
+
+    from app.providers.links import allowed_link_host
+
+    for url in [REEL, SHORT, "https://youtu.be/UiR55MZnzu0",
+                "https://m.youtube.com/watch?v=x"]:
+        assert link_re.match(url), url
+        assert allowed_link_host(url) is not None, url
+    # And both reject a message that merely contains a link.
+    mixed = "Dekho yeh! https://youtu.be/x sach hai kya?"
+    assert not link_re.match(mixed)

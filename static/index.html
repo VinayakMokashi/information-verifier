@@ -95,7 +95,8 @@
 </header>
 
 <div class="card">
-  <textarea id="text" placeholder="Example: WHO ne kaha hai ki 5G se coronavirus phailta hai…"></textarea>
+  <textarea id="text" placeholder="Paste a message — ya Instagram Reel / YouTube Shorts ka link.
+Example: WHO ne kaha hai ki 5G se coronavirus phailta hai…"></textarea>
   <div class="row">
     <button id="check">Check it</button>
     <button id="pickImage" class="ghost" type="button">📷 Image</button>
@@ -117,8 +118,16 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const POLL_MS = 2500, POLL_MAX = 60;  // up to ~2.5 minutes
+// Link jobs download and transcribe the video before the check even starts,
+// so they run longer than a text check — poll up to ~4 minutes.
+const POLL_MS = 2500, POLL_MAX = 96;
 let busy = false;
+
+// A pasted link goes to /verify/link, which pulls the claim OUT of the reel.
+// Sent to /verify/text it would be treated as a string, find nothing, and
+// still cost money. Only a bare URL counts — a forward that merely contains
+// a link is still a text check. The server re-validates with a stricter gate.
+const LINK_RE = /^https:\/\/(www\.|m\.)?(instagram\.com|youtube\.com|youtu\.be)\/\S+$/i;
 
 const RATING_LABELS = {
   TRUE: "TRUE — sach hai", MOSTLY_TRUE: "MOSTLY TRUE",
@@ -207,7 +216,7 @@ function drawReport() {
     // dir="auto" goes on the INNER span, not the block: it resolves from the
     // first strong character in the element, and the English label would
     // otherwise always win and force LTR on Urdu/Sindhi text.
-    parts.push(`<div class="heard"><span class="label">We read this from your file — if it's wrong, retype it above:</span><span dir="auto">${esc(r.source_text)}</span></div>`);
+    parts.push(`<div class="heard"><span class="label">We read this from what you sent — if it's wrong, retype it above:</span><span dir="auto">${esc(r.source_text)}</span></div>`);
   }
   if (r.overall_rating) {
     parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
@@ -297,7 +306,15 @@ async function submit(makeRequest) {
 
 $("check").addEventListener("click", () => {
   const text = $("text").value.trim();
-  if (!text) { setStatus("Type or paste a message first."); return; }
+  if (!text) { setStatus("Type or paste a message — ya reel ka link."); return; }
+  if (LINK_RE.test(text)) {
+    submit(() => fetch("api/v1/verify/link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: text }),
+    }));
+    return;
+  }
   submit(() => fetch("api/v1/verify/text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
