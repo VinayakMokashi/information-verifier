@@ -52,7 +52,12 @@ part of the definition of done, not a nice-to-have.
 
 Today `/verify/media` takes an **uploaded file**. A link is not an accepted
 input on any endpoint; pasted into the text box it is treated as a string,
-finds no claim, and still costs ~$0.03. See §6 Phase 2 for the plan.
+finds no claim, and still costs ~$0.03.
+
+**Feasibility settled 2026-07-28 (free probe, real URLs):** Instagram Reels
+and YouTube Shorts both resolve anonymously via yt-dlp. The blocker is not
+access — it is that Instagram advertises neither duration nor filesize, so
+the spend caps must move after the (free) download. See §6 Phase 2.
 
 ## 1. Mission
 
@@ -209,24 +214,41 @@ tests/               pytest suite — always free, every paid seam faked
       transcript → pipeline, with caps. What is missing is *fetching* the media
       from a URL. Plan, cheapest step first:
       1. ✅ **Free probe built and run** (`scripts/link_probe.py`, yt-dlp
-         2026.07.04, metadata only, $0). **Measured 2026-07-28:**
-         - **YouTube works, all three URL forms**: `/shorts/<id>`,
-           `/watch?v=<id>`, `youtu.be/<id>` all resolved with title, uploader,
-           duration and formats.
-         - **Instagram refused anonymous access** — "Instagram sent an empty
-           media response … use --cookies-from-browser". ⚠️ The probe used an
-           **invented** Reel ID, so this is *consistent with* login-gating but
-           does not prove it; that error is indistinguishable from "no such
-           post". **A real public Reel URL is still needed to settle it.**
-           `--cookies-from <browser>` exists in the probe for that test, and
-           lends yt-dlp Vinayak's real Instagram session — fine locally, not
-           for a public service.
-      2. **Prefer captions over ASR — measured, and it is the big lever.**
-         Two Hindi fact-check videos both carried auto-captions in
-         `hi` and `hi-orig` (plus mr/ta/bn/te/kn/ml/gu/pa/or/as/ur), so the
-         claim can be read for **₹0 of ASR**. But the 14 s PIB *Short* had
-         **none** — short-form is likelier to lack them, so the ASR fallback
-         is not optional. Sarvam on a 250 s video would have been ~₹2.08.
+         2026.07.04, metadata only, $0). **Measured 2026-07-28 on three real
+         Reel URLs Vinayak supplied, plus YouTube:**
+         - **Instagram Reels resolve ANONYMOUSLY — no cookies needed.** All
+           three (narendramodi, bharatjodo, peektv_in) returned metadata.
+           ⚠️ **An earlier probe run said the opposite and was wrong**: it used
+           an invented Reel ID, and Instagram's "empty media response … use
+           cookies" error is indistinguishable from "no such post". The run was
+           correctly labelled unsettled at the time; the lesson is that a
+           fabricated test input can produce a confident wrong conclusion about
+           a whole platform.
+         - **YouTube works on all three URL forms**: `/shorts/<id>`,
+           `/watch?v=<id>`, `youtu.be/<id>`.
+      1b. ⚠️ **Instagram reports NO duration and NO filesize** (`duration:
+         None`, every format `filesize: None`). Both pre-spend caps
+         (`max_media_seconds`, `max_media_bytes`) are therefore unenforceable
+         from metadata for Reels. **Invariant 5 still holds, but only if the
+         order is right**: cap the download as bytes stream (free —
+         bandwidth), then `ffprobe` duration and reject, and only then call
+         Sarvam. `normalize_to_wav` already probes duration before decoding,
+         so the existing media path is the correct shape to reuse.
+         *(The probe itself had this bug and it is fixed: it printed an unknown
+         duration as "0s, within the cap" — announcing that a spend guard had
+         passed when it was never applied.)*
+      2. **Two free text sources, and neither is sufficient alone:**
+         - **Post caption** (`description`) is present and substantial on both
+           platforms — 599 chars on the PEEK TV reel, carrying a full quoted
+           assertion that is checkable with **no download and no ASR**. But the
+           PIB Short's 492 chars were pure promo ("Join our official
+           channel…"). So captions are a cheap *supplement*, not a replacement;
+           the `checkworthy` filter already discards the promotional ones.
+         - **Subtitles**: YouTube Hindi videos carry auto-captions in `hi` and
+           `hi-orig` (plus mr/ta/bn/te/kn/ml/gu/pa/or/as/ur) → the spoken claim
+           for **₹0 of ASR**. **Instagram has none at all**, and the 14 s PIB
+           Short had none either. Sarvam fallback is not optional. A 250 s
+           video would cost ~₹2.08 to transcribe.
       3. **Consider frame OCR.** A lot of Indian reel misinformation is burned
          into the image, not spoken; we already have Opus vision. Adds cost per
          frame, so make it opt-in or heuristic.

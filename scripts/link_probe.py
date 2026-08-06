@@ -147,15 +147,34 @@ def probe(url: str, cookies_from: str | None = None) -> None:
     if info.get("entries"):          # a search or playlist result
         info = info["entries"][0]
 
-    duration = info.get("duration") or 0
+    duration = info.get("duration")
     print("RESOLVES  : YES")
     print(f"Title     : {(info.get('title') or '')[:80]}")
     print(f"Uploader  : {info.get('uploader') or info.get('channel') or '?'}")
-    print(f"Duration  : {duration}s", end="")
-    if duration > settings.max_media_seconds:
-        print(f"   OVER the {settings.max_media_seconds}s cap -> would be rejected")
+    if duration is None:
+        # Do NOT fall back to 0. Reporting an unknown duration as "0s, within
+        # the cap" announces that a spend guard passed when it was never
+        # applied — wrong in the one direction that costs money. Instagram
+        # returns no duration at all, so the cap has to move after download.
+        print("Duration  : UNKNOWN — platform did not report it")
+        print(f"            !! the {settings.max_media_seconds}s cap CANNOT be "
+              f"enforced before downloading; it must be probed post-download")
+    elif duration > settings.max_media_seconds:
+        print(f"Duration  : {duration}s   OVER the {settings.max_media_seconds}s "
+              f"cap -> would be rejected")
     else:
-        print(f"   (within the {settings.max_media_seconds}s cap)")
+        print(f"Duration  : {duration}s   (within the {settings.max_media_seconds}s cap)")
+
+    # The post's own caption text. On Instagram this is the ONLY free text
+    # source (there are no subtitles), and it frequently carries the claim
+    # outright — measured: a PEEK TV reel's caption held a full quoted
+    # assertion, checkable with no download and no ASR at all.
+    desc = " ".join((info.get("description") or "").split())
+    print()
+    print(f"Post caption text           : {len(desc)} chars"
+          f"{'  <- FREE claim source, no download, no ASR' if len(desc) > 40 else ''}")
+    if desc:
+        print(f'   "{desc[:160]}{"..." if len(desc) > 160 else ""}"')
 
     manual, auto = _captions(info)
     print()
@@ -172,14 +191,21 @@ def probe(url: str, cookies_from: str | None = None) -> None:
     # What the audio path would cost if we had to take it.
     audio = [f for f in (info.get("formats") or [])
              if f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")]
-    if audio:
-        smallest = min(audio, key=lambda f: f.get("filesize") or f.get("filesize_approx") or 1 << 60)
-        size = smallest.get("filesize") or smallest.get("filesize_approx")
-        print()
-        print(f"Audio-only formats          : {len(audio)}"
-              f"   smallest ~{(size / 1e6):.1f} MB" if size else
-              f"Audio-only formats          : {len(audio)}")
-    print(f"ASR cost if transcribed     : ~Rs {duration * _ASR_RUPEES_PER_SECOND:.2f}")
+    sizes = [f.get("filesize") or f.get("filesize_approx") for f in audio]
+    sizes = [s for s in sizes if s]
+    print()
+    print(f"Audio-only formats          : {len(audio)}", end="")
+    if sizes:
+        print(f"   smallest ~{min(sizes) / 1e6:.1f} MB")
+    else:
+        # Same hazard as the duration: no advertised size means the byte cap
+        # cannot be applied up front either, so the download itself must be
+        # what enforces it.
+        print("   size NOT advertised — cap the download as it streams")
+    if duration is None:
+        print("ASR cost if transcribed     : UNKNOWN (no duration) — probe after download")
+    else:
+        print(f"ASR cost if transcribed     : ~Rs {duration * _ASR_RUPEES_PER_SECOND:.2f}")
     print("=" * 70)
 
 
