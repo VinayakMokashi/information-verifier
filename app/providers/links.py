@@ -16,12 +16,16 @@ scripts/link_probe.py on real URLs Vinayak supplied):
   a full quoted assertion) and is often pure promo; it is a supplement the
   extract stage can discard, never a replacement.
 
+- Facebook (added after its own probe, same day): three public government
+  /videos/ URLs resolved anonymously, WITH duration advertised, and its auto
+  captions are named '<lang>_FB' — one track, the recognized speech.
+
 SSRF: this module deliberately fetches remote URLs — the very door §7 records
 closing for uploads (ffmpeg's protocol whitelist). Three fences, each
 independent: `allowed_link_host` fails closed with the same parser discipline
-as trusted_sources.trusted_domain_of; yt-dlp is pinned to the Instagram and
-YouTube extractors so its generic extractor (which would fetch ANY url) can
-never run; and noplaylist keeps one link meaning one video.
+as trusted_sources.trusted_domain_of; yt-dlp is pinned to the Instagram,
+YouTube and Facebook extractors so its generic extractor (which would fetch
+ANY url) can never run; and noplaylist keeps one link meaning one video.
 """
 import json
 import os
@@ -38,6 +42,11 @@ import httpx
 _ALLOWED_HOSTS = {
     "instagram.com", "www.instagram.com", "m.instagram.com",
     "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
+    # Facebook measured 2026-07-28: three public /videos/ URLs (PIB, I&B and
+    # Defence ministry pages) all resolved anonymously, WITH duration — so
+    # unlike Instagram, an over-cap FB video is rejected before any download.
+    "facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com",
+    "fb.watch",
 }
 
 # yt-dlp extractor allowlist. Names are matched as regexes anchored at the
@@ -45,7 +54,7 @@ _ALLOWED_HOSTS = {
 # and playlist results are rejected after resolve). What matters is that
 # "generic" is NOT here: without it yt-dlp will not fall back to fetching
 # arbitrary pages, which is the SSRF path this list exists to close.
-_ALLOWED_EXTRACTORS = ["Instagram", "Youtube"]
+_ALLOWED_EXTRACTORS = ["Instagram", "Youtube", "Facebook"]
 
 _RESOLVE_TIMEOUT_S = 30      # per socket op inside yt-dlp
 _DOWNLOAD_WALL_S = 180.0     # a trickling stream must not pin a worker
@@ -223,7 +232,11 @@ def _pick_subtitle(info: dict) -> SubtitleRef | None:
             return SubtitleRef(lang=lang, url=found[1], ext=found[0])
     autos = info.get("automatic_captions") or {}
     for lang in sorted(autos):
-        if lang.endswith("-orig"):
+        # YouTube marks the recognized source speech '-orig' (everything else
+        # is a machine TRANSLATION). Facebook names its single auto track
+        # '<lang>_FB' and does not serve translated auto tracks — measured on
+        # a Hindi I&B ministry video carrying exactly one track, 'hi_FB'.
+        if lang.endswith("-orig") or lang.endswith("_FB"):
             found = usable(autos[lang])
             if found:
                 return SubtitleRef(lang=lang, url=found[1], ext=found[0])

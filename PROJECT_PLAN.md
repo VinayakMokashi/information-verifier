@@ -57,7 +57,15 @@ the definition of done. It now exists:
 YouTube video and pulled 1,294 chars of `hi-orig` subtitles (the spoken claim
 for ₹0 of ASR), and resolved + downloaded a real Reel (0.42 MB audio),
 ffprobe'd 70.1 s against the 300 s cap, and stopped before the ₹0.58 ASR
-purchase. **Paid tail verified 2026-07-28** (`scripts/link_smoke.py`, Vinayak-approved):
+purchase. **Facebook added 2026-07-28** after its own free probe: three public
+government /videos/ URLs (PIB, I&B, Defence ministry pages) all resolved
+anonymously, WITH duration advertised (so over-cap FB videos are rejected
+free, unlike Instagram), and FB's auto captions are named `<lang>_FB` — one
+track, the recognized speech, accepted as an ASR substitute. fb.watch short
+links included. FB Reels URL-form (`/reel/<id>`) is allowlisted but untested
+against a live reel — worth one probe when a real one comes along.
+
+**Paid tail verified 2026-07-28** (`scripts/link_smoke.py`, Vinayak-approved):
 a real Reel went link → download → Sarvam → 6 claims → verdicts → Hindi
 back-translation, end to end, for **$0.279 measured** (the project's first
 measured cost figure — see §8).

@@ -40,6 +40,8 @@ _ASR_RUPEES_PER_SECOND = 30.0 / 3600.0
 _ALLOWED_HOSTS = {
     "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
     "instagram.com", "www.instagram.com",
+    "facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com",
+    "fb.watch",
 }
 
 
@@ -62,6 +64,8 @@ def _platform(url: str) -> str:
         return "Instagram Reel"
     if "instagram.com" in u:
         return "Instagram"
+    if "facebook.com" in u or "fb.watch" in u:
+        return "Facebook video/reel"
     if u.startswith("ytsearch"):
         return "YouTube (search)"
     return "unknown"
@@ -85,7 +89,7 @@ def _captions(info: dict) -> tuple[list[str], list[str]]:
 def _indic(langs: list[str]) -> list[str]:
     """The languages this project exists for."""
     want = {"hi", "mr", "ta", "bn", "te", "kn", "ml", "gu", "pa", "ur", "or", "as"}
-    return [l for l in langs if l.split("-")[0] in want]
+    return [l for l in langs if l.split("-")[0].split("_")[0] in want]
 
 
 def _diagnose(message: str) -> str:

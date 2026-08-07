@@ -22,6 +22,11 @@ GOOD = [
     ("https://m.youtube.com/watch?v=x", "m.youtube.com"),
     ("  https://youtu.be/abc  ", "youtu.be"),          # paste-with-whitespace
     ("https://WWW.YOUTUBE.COM/shorts/x", "www.youtube.com"),
+    ("https://www.facebook.com/pibfactcheck/videos/287009708974916/", "www.facebook.com"),
+    ("https://facebook.com/reel/12345/", "facebook.com"),
+    ("https://m.facebook.com/watch/?v=1", "m.facebook.com"),
+    ("https://web.facebook.com/x/videos/1/", "web.facebook.com"),
+    ("https://fb.watch/abc123/", "fb.watch"),
 ]
 
 
@@ -44,6 +49,9 @@ EVIL = [
     "https://127.0.0.1/watch",
     "https://[::1]/watch",
     "https://youtube.com:8443@evil.com/",
+    "https://facebook.com.evil.com/videos/1",     # FB lookalikes fail the same way
+    "https://fb.watch.evil.com/x",
+    "https://fbwatch.com/x",
     "",
     "not a url at all",
     "https://" + "a" * 2050 + ".com/",            # length bound
@@ -119,6 +127,14 @@ def test_auto_captions_only_the_orig_track_is_acceptable():
     assert L._pick_subtitle({
         "automatic_captions": {"en": [_track()], "ta": [_track()]},
     }) is None
+
+
+def test_facebooks_auto_caption_naming_is_accepted():
+    """Facebook names its single auto track '<lang>_FB' (measured: an I&B
+    ministry Hindi video carried exactly 'hi_FB'). It is the recognized
+    speech, not a translation, so it may stand in for ASR."""
+    ref = L._pick_subtitle({"automatic_captions": {"hi_FB": [_track()]}})
+    assert ref.lang == "hi_FB"
 
 
 def test_no_tracks_means_none_not_error():

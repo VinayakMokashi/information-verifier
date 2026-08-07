@@ -127,7 +127,7 @@ let busy = false;
 // Sent to /verify/text it would be treated as a string, find nothing, and
 // still cost money. Only a bare URL counts — a forward that merely contains
 // a link is still a text check. The server re-validates with a stricter gate.
-const LINK_RE = /^https:\/\/(www\.|m\.)?(instagram\.com|youtube\.com|youtu\.be)\/\S+$/i;
+const LINK_RE = /^https:\/\/(www\.|m\.|web\.)?(instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)\/\S+$/i;
 
 const RATING_LABELS = {
   TRUE: "TRUE — sach hai", MOSTLY_TRUE: "MOSTLY TRUE",
