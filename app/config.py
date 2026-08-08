@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     google_factcheck_api_key: str = ""
     sarvam_api_key: str = ""
     hf_token: str = ""  # Hugging Face token — EmbeddingGemma is a gated repo
+    telegram_bot_token: str = ""  # from @BotFather; used only by scripts/telegram_bot.py
 
     # Model tiers  (see docs: $5/$25 vs $1/$5 per MTok)
     opus_model: str = "claude-opus-4-8"   # adjudication, extraction, vision OCR
