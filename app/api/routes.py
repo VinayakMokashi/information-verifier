@@ -59,14 +59,12 @@ def _quota(request: Request):
     after an upload has been read leaves a window where any number of
     concurrent requests pass the same empty counter.
 
-    The `started` flag is load-bearing, not bookkeeping. Refunding on ANY
-    HTTPException looks generous and is a hole: /verify/media raises 422
-    ("no speech") and 502 (ASR down) AFTER every chunk has been posted to
-    Sarvam and billed by the second, and /verify/image raises 422 ("no text")
-    AFTER a paid Opus vision call. Each refund handed the slot back, so a
-    loop of silent audio could burn ASR credit all day with the daily counter
-    still reading zero — and the error message tells the caller which inputs
-    trigger it. A refund is only honest when nothing was bought.
+    The `started` flag is load-bearing, not bookkeeping: /verify/image raises
+    422 ("no text in this image") AFTER a paid Opus vision call, and refunding
+    that rejection handed the slot back — a loop of blank images could burn
+    budget all day with the daily counter reading zero. A refund is only
+    honest when nothing was bought. (The media ASR spend that used to share
+    this trap now runs behind the 202, where no refund path exists at all.)
     """
     reserve(request)
     spend = _Spend()
@@ -88,6 +86,57 @@ async def _new_job() -> TruthReport:
     # so one contended write cannot stall every other request in the server.
     await asyncio.to_thread(_repo.save, report)
     return report
+
+
+async def _run_media_job(
+    job_id: str, wav: bytes, duration: float, repo: ReportRepository, meter: UsageMeter
+) -> None:
+    """Background half of /verify/media: chunk -> Sarvam -> pipeline.
+
+    A failure here becomes a FAILED report with a readable error — the page
+    renders those — never a silent PROCESSING-forever. The transcript passes
+    through as derived_text so the report shows what was heard (invariant 4):
+    ASR can drop a claim's key term, and a silent mis-hear would mean
+    checking a different claim than the one the person sent.
+    """
+    async def fail(message: str) -> None:
+        report = await asyncio.to_thread(repo.get, job_id)
+        if report is not None:
+            report.status = JobStatus.FAILED
+            report.error = message
+            report.usage = meter.snapshot()
+            report.completed_at = datetime.now(timezone.utc)
+            await asyncio.to_thread(repo.save, report)
+
+    try:
+        if duration <= settings.asr_chunk_seconds:
+            chunks = [wav]
+        else:
+            chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
+        asr = get_asr_provider()
+        parts = []
+        for chunk in chunks:
+            transcript = await asr.transcribe(chunk)
+            parts.append(transcript.text)
+    except MediaError as exc:
+        await fail(f"Could not process this audio ({exc}).")
+        return
+    except (httpx.HTTPError, RuntimeError) as exc:
+        # Sarvam down, key rejected, timeout — say so plainly.
+        print(f"[media] transcription failed: {type(exc).__name__}: {exc}")
+        await fail("The transcription service is unavailable right now. "
+                   "Please try again in a minute.")
+        return
+    except Exception as exc:  # noqa: BLE001 — nothing may die silently here
+        print(f"[media] unexpected failure: {type(exc).__name__}: {exc}")
+        await fail("Something went wrong reading this audio. Please try again.")
+        return
+
+    text = " ".join(p.strip() for p in parts if p and p.strip())
+    if not text:
+        await fail("No speech could be transcribed from this audio.")
+        return
+    await run_pipeline(job_id, text, repo, derived_text=text, meter=meter)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -159,37 +208,15 @@ async def verify_media(
         except MediaError as exc:
             raise HTTPException(422, f"Could not read audio from this file ({exc}).")
 
-        # Transcribe inline (like OCR): the transcript is the claim text, and a
-        # transcription failure should be a clear 4xx/5xx, not a FAILED job.
-        try:
-            if duration <= settings.asr_chunk_seconds:
-                chunks = [wav]
-            else:
-                chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
-            asr = get_asr_provider()
-            parts = []
-            spend.begin()      # Sarvam bills per second from the first chunk
-            for chunk in chunks:
-                transcript = await asr.transcribe(chunk)
-                parts.append(transcript.text)
-        except MediaError as exc:
-            raise HTTPException(422, f"Could not process this audio ({exc}).")
-        except (httpx.HTTPError, RuntimeError) as exc:
-            # Sarvam down, key rejected, timeout — say so plainly instead of a
-            # bare 500 the page can only render as "HTTP 500".
-            print(f"[media] transcription failed: {type(exc).__name__}: {exc}")
-            raise HTTPException(502, "The transcription service is unavailable right now. "
-                                     "Please try again in a minute.")
-        text = " ".join(p.strip() for p in parts if p and p.strip())
-        if not text:
-            raise HTTPException(422, "No speech could be transcribed from this audio.")
-
+        # Everything free and fast has now run: the type gate, the byte cap
+        # and the ffmpeg decode with its duration cap all reject with clear
+        # HTTP errors. The SLOW, PAID part — the Sarvam loop — runs in the
+        # background: the audit showed a proxy cutting long inline requests
+        # at ~100 s while the server kept spending, and a 202-then-poll
+        # contract survives that. Same trade as /verify/link, same documented
+        # cost: the quota slot stays consumed even if transcription fails.
         report = await _new_job()
-        # Pass the transcript through so the report can show it: speech-to-text
-        # can drop a claim's key term, and a silent mis-hear would mean checking
-        # a different claim than the one the person sent.
-        background.add_task(run_pipeline, report.job_id, text, _repo, text,
-                            meter=meter)
+        background.add_task(_run_media_job, report.job_id, wav, duration, _repo, meter)
         return JobAccepted(job_id=report.job_id, status=report.status)
 
 

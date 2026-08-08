@@ -177,7 +177,10 @@ def test_declared_oversize_rejected_before_buffering(media_client, monkeypatch):
     assert "too large" in resp.json()["detail"]
 
 
-def test_asr_outage_is_a_clean_502_not_a_500(media_client, tmp_path, monkeypatch):
+def test_asr_outage_is_a_readable_failed_report(media_client, tmp_path, monkeypatch):
+    """ASR runs BEHIND the 202 now (a proxy cut long inline requests at ~100 s
+    while the server kept spending), so an outage surfaces as a FAILED report
+    the page can render — with words, not a traceback."""
     import httpx
 
     class DownASR:
@@ -189,5 +192,26 @@ def test_asr_outage_is_a_clean_502_not_a_500(media_client, tmp_path, monkeypatch
         "/api/v1/verify/media",
         files={"file": ("note.ogg", _tone(tmp_path, 1.0), "audio/ogg")},
     )
-    assert resp.status_code == 502
-    assert "unavailable" in resp.json()["detail"]
+    assert resp.status_code == 202
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "FAILED"
+    assert "unavailable" in report["error"]
+    assert "ConnectError" not in report["error"]
+
+
+def test_silent_audio_is_a_readable_failed_report(media_client, tmp_path, monkeypatch):
+    class SilentASR:
+        async def transcribe(self, audio, language_hint=None):
+            from app.providers.asr import Transcript
+
+            return Transcript(text="   ", language="hi-IN")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: SilentASR())
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("note.ogg", _tone(tmp_path, 1.0), "audio/ogg")},
+    )
+    assert resp.status_code == 202
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "FAILED"
+    assert "No speech" in report["error"]

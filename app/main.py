@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
@@ -105,14 +104,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Open CORS for local dev; tighten to your PWA origin before deploying.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# No CORS grants, deliberately. The page is served BY this app (same origin),
+# bots are server-side, and every check spends money — the previous wildcard
+# let any website drive checks from its visitors' browsers against a shared
+# link. A future PWA on its own origin adds itself back explicitly.
 app.add_middleware(LimitUploadSize)
 
 app.include_router(router)

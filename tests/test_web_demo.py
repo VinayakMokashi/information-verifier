@@ -29,6 +29,24 @@ def test_api_routes_win_over_the_static_mount(client):
     assert client.get("/api/v1/reports/nonexistent").status_code == 404
 
 
+def test_no_cors_grants_are_issued(client):
+    """Every check spends money; a wildcard ACAO let any website drive checks
+    from its visitors' browsers. The page itself is same-origin."""
+    resp = client.post(
+        "/api/v1/verify/text",
+        json={"text": "hello"},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert "access-control-allow-origin" not in resp.headers
+
+    preflight = client.options(
+        "/api/v1/verify/text",
+        headers={"Origin": "https://evil.example",
+                 "Access-Control-Request-Method": "POST"},
+    )
+    assert "access-control-allow-origin" not in preflight.headers
+
+
 def test_full_text_flow_and_cache(client):
     report = _submit_and_fetch(client, {"text": "WHO ne kaha 5G se corona hota hai"})
     assert report["status"] == "COMPLETE"

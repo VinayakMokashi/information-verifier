@@ -183,6 +183,20 @@ def test_ratings_and_citations_are_never_taken_from_the_translation():
     assert "lc.confidence" not in _PAGE
 
 
+def test_a_long_check_is_never_orphaned():
+    """The audit found a paid report could become unreachable: the page gave
+    up polling and the job id was shown nowhere. The id now lives in the URL
+    hash and a reload resumes watching the same job."""
+    assert 'location.hash = "job=" + jobId' in _PAGE
+    assert "function jobFromHash()" in _PAGE
+    assert "resumeFromHash" in _PAGE
+    # The timeout message must carry the id and say a refresh resumes.
+    assert "refresh karke" in _PAGE
+    assert "jobId.slice(0, 12)" in _PAGE
+    # And a resumed COMPLETE job must render immediately, not after a sleep.
+    assert "if (i > 0) await new Promise" in _PAGE
+
+
 def test_language_button_uses_the_endonym():
     """A reader who needs the Hindi version cannot read a button saying 'Hindi'."""
     assert 'hi: "हिंदी"' in _PAGE
