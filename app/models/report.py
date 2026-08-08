@@ -21,6 +21,31 @@ class ClaimVerdict(BaseModel):
     cache_hit: bool = False  # served from the claim cache without a fresh LLM call
 
 
+class ModelUsage(BaseModel):
+    """Token totals for one model across a report, from the API's own usage."""
+
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
+
+
+class ReportUsage(BaseModel):
+    """What this report actually spent — measured, not modelled.
+
+    §8's numbers were models until the first metered run (2026-07-28);
+    this block makes every report carry its own bill. `estimated_usd`
+    applies list prices to measured tokens, so the tokens are facts and
+    only the dollar figure inherits pricing-table staleness.
+    """
+
+    models: dict[str, ModelUsage] = Field(default_factory=dict)
+    web_searches: int = 0
+    asr_seconds: float = 0.0
+    estimated_usd: float = 0.0
+
+
 class LocalizedClaim(BaseModel):
     """One claim's prose in the reader's language.
 
@@ -72,4 +97,6 @@ class TruthReport(BaseModel):
     # verdicts. Absent when the input was English, when translation is off, or
     # when it failed — clients must fall back to the English fields.
     localized: LocalizedReport | None = None
+    # Measured spend for this report (None for reports predating the meter).
+    usage: ReportUsage | None = None
     error: str | None = None

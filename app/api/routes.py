@@ -24,6 +24,7 @@ from app.providers.links import (
     subtitle_text,
 )
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
+from app.providers.usage import UsageMeter
 from app.providers.vision import ocr_image
 from app.store.repository import ReportRepository
 
@@ -116,12 +117,15 @@ async def verify_image(
         # OCR is quick; do it inline so extracted text is captured even if the
         # heavier verification pipeline is deferred to the background.
         spend.begin()          # everything past here has been paid for
-        extracted = await ocr_image(image_bytes, file.content_type)
+        meter = UsageMeter()   # starts at the first paid call, so the report's
+        with meter.activate():  # bill includes route-level OCR, not just the pipeline
+            extracted = await ocr_image(image_bytes, file.content_type)
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
 
         report = await _new_job()
-        background.add_task(run_pipeline, report.job_id, extracted, _repo, extracted)
+        background.add_task(run_pipeline, report.job_id, extracted, _repo, extracted,
+                            meter=meter)
         return JobAccepted(job_id=report.job_id, status=report.status)
 
 
@@ -140,12 +144,15 @@ async def verify_media(
         if len(data) > settings.max_media_bytes:
             raise HTTPException(413, "File too large. Please send a shorter clip.")
 
+        meter = UsageMeter()
         try:
             # The duration cap is passed IN so it is enforced from the source
             # header, before a low-bitrate hour of audio is decoded into RAM.
-            wav, duration = await asyncio.to_thread(
-                normalize_to_wav, data, file.filename or "media", settings.max_media_seconds
-            )
+            with meter.activate():   # normalize notes the billable ASR seconds
+                wav, duration = await asyncio.to_thread(
+                    normalize_to_wav, data, file.filename or "media",
+                    settings.max_media_seconds,
+                )
         except MediaTooLong as exc:
             raise HTTPException(413, f"Audio is {exc.seconds:.0f}s long; the limit is "
                                      f"{settings.max_media_seconds}s. Send a shorter clip.")
@@ -181,7 +188,8 @@ async def verify_media(
         # Pass the transcript through so the report can show it: speech-to-text
         # can drop a claim's key term, and a silent mis-hear would mean checking
         # a different claim than the one the person sent.
-        background.add_task(run_pipeline, report.job_id, text, _repo, text)
+        background.add_task(run_pipeline, report.job_id, text, _repo, text,
+                            meter=meter)
         return JobAccepted(job_id=report.job_id, status=report.status)
 
 
@@ -256,17 +264,20 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo: ReportRepository) -> 
     renders those), never a silent PROCESSING-forever. run_pipeline guards
     itself; this guard covers the fetch/ASR work before it.
     """
+    meter = UsageMeter()
     try:
-        text = await gather_link_text(info)
+        with meter.activate():   # the download's normalize notes ASR seconds
+            text = await gather_link_text(info)
     except Exception as exc:  # noqa: BLE001 — every failure must reach the report
         report = await asyncio.to_thread(repo.get, job_id)
         if report is not None:
             report.status = JobStatus.FAILED
             report.error = _friendly_link_failure(exc)
+            report.usage = meter.snapshot()   # a failed fetch still spent ASR
             report.completed_at = datetime.now(timezone.utc)
             await asyncio.to_thread(repo.save, report)
         return
-    await run_pipeline(job_id, text, repo, derived_text=text)
+    await run_pipeline(job_id, text, repo, derived_text=text, meter=meter)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)

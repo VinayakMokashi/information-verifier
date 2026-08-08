@@ -112,6 +112,12 @@ def normalize_to_wav(
         duration = _probe_duration(wav)
         if max_seconds is not None and duration > max_seconds:
             raise MediaTooLong(duration)  # the probe was wrong; -t caught it
+        # The produced WAV's duration is what Sarvam will bill by the second.
+        # Noted here — the one place both the upload and link paths pass
+        # through — into the ambient per-report meter, if one is active.
+        from app.providers.usage import note_asr
+
+        note_asr(duration)
         with open(wav, "rb") as f:
             return f.read(), duration
 
