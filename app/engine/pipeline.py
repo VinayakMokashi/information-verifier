@@ -24,12 +24,46 @@ from app.models.report import ClaimVerdict, JobStatus, TruthReport
 from app.models.verdict import Rating, Verdict
 from app.providers.usage import UsageMeter
 from app.store.repository import ReportRepository, safe_cache_call as _cache_call
+from app.trusted_sources import is_trusted_url
+
+
+def _enforce_trust(verdict: Verdict) -> Verdict:
+    """Invariant 1, enforced on the OUTPUT, not just retrieval inputs.
+
+    The adjudicator is PROMPTED to cite only the provided sources, but a
+    prompt is a request — until here nothing checked the verdict's own
+    citations, and `is_trusted_url` had no production caller at all (audit,
+    2026-07-28). This runs on EVERY serve path, cached ones included, which
+    is what makes whitelist curation real: remove a domain from
+    TRUSTED_DOMAINS and verdicts cached while it was trusted stop citing it
+    the next time they are served, with no migration.
+
+    If a decisive rating loses its last citation, the verdict degrades to
+    UNVERIFIED — "every verdict carries receipts" (§2) outranks preserving a
+    call we can no longer show sources for.
+    """
+    kept = [c for c in verdict.citations if is_trusted_url(c.url)]
+    if len(kept) == len(verdict.citations):
+        return verdict
+    dropped = [c.url for c in verdict.citations if not is_trusted_url(c.url)]
+    print(f"[trust] dropped {len(dropped)} untrusted citation(s): {dropped[:3]}")
+    if kept or verdict.rating is Rating.UNVERIFIED:
+        return verdict.model_copy(update={"citations": kept})
+    return Verdict(
+        rating=Rating.UNVERIFIED,
+        confidence=0,
+        reasoning=verdict.reasoning
+        + " [Note: this claim's sources are no longer on the trusted list, so "
+        "the earlier rating cannot be shown with receipts and is withdrawn.]",
+        correction="",
+        citations=[],
+    )
 
 
 async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
     cached = await _cache_call(repo.cache.get, claim.text)
     if cached is not None:
-        return ClaimVerdict(claim=claim, verdict=cached, cache_hit=True)
+        return ClaimVerdict(claim=claim, verdict=_enforce_trust(cached), cache_hit=True)
 
     # Semantic tier: the vector index only NOMINATES a near-neighbour; a
     # cheap Haiku check must confirm it is the same claim before the cached
@@ -42,14 +76,16 @@ async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
                 # index=False: aliases must never become nomination anchors,
                 # or hops would drift away from the adjudicated claim.
                 await _cache_call(repo.cache.put, claim.text, candidate.verdict, False)
-                return ClaimVerdict(claim=claim, verdict=candidate.verdict, cache_hit=True)
+                return ClaimVerdict(claim=claim,
+                                    verdict=_enforce_trust(candidate.verdict),
+                                    cache_hit=True)
         except Exception as exc:  # noqa: BLE001 — confirmation is an optimization
             print(f"[cache] equivalence check failed, doing a full check: "
                   f"{type(exc).__name__}: {exc}")
 
     try:
         evidence = await gather_evidence(claim)
-        verdict = await adjudicate(claim, evidence)
+        verdict = _enforce_trust(await adjudicate(claim, evidence))
     except Exception as exc:  # noqa: BLE001 — a claim failure must stay visible
         # Surface the failure as an explicit UNVERIFIED verdict rather than
         # dropping the claim (which would masquerade as "no claims found").
