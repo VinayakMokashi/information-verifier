@@ -77,8 +77,9 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md).
 | `GET`  | `/health` | Liveness |
 | `GET`  | `/` | The mobile web page |
 
-Submit, get a `job_id`, poll. The web page and any future WhatsApp or Telegram
-bot use exactly this contract.
+Submit, get a `job_id`, poll. The web page and the Telegram bot
+(`scripts/telegram_bot.py` — long polling, no tunnel; needs a @BotFather
+token in `.env`) use exactly this contract.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/api/v1/verify/text \
@@ -102,7 +103,7 @@ Tools API. No Node, no Docker, no build step.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-266 tests, always free — every paid API is faked, including a test that proves
+320 tests, always free — every paid API is faked, including a test that proves
 the "free" demo mode cannot reach a paid provider.
 
 ## Documentation

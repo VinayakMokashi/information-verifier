@@ -2,14 +2,15 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-28** (/verify/link).
+> Keep it updated as the project moves. Last updated: **2026-07-28** (Facebook links, per-report spend metering,
+> public-link blockers closed, Telegram bot).
 
 ---
 
 ## 0. Where we are right now (read this first)
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**266 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
+**320 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
 paid API is faked).
 
 Working end-to-end, verified against live APIs:
@@ -30,13 +31,16 @@ Working end-to-end, verified against live APIs:
 .\.venv\Scripts\python.exe scripts\serve_demo.py     # then open http://127.0.0.1:8000
 ```
 
-**The next piece of work** is Phase 3 delivery — a WhatsApp bot (or Telegram),
-so people can check a forward without leaving the app they already use. It now
-inherits back-translation for free: a bot calling the same two endpoints gets
-`report.localized` and can reply in the sender's language. See §6 Phase 3 and
-§11 for what that needs.
+**Phase 3 delivery is BUILT**: a Telegram bot (`scripts/telegram_bot.py`,
+long polling, no tunnel) that takes text, links, voice notes and photos and
+replies in the sender's language. **It has not touched live Telegram yet** —
+it needs `TELEGRAM_BOT_TOKEN` in `.env` (2 minutes with @BotFather), then:
+app in one terminal, bot in the other. Every report now carries its own
+measured bill (`report.usage`), and the six audit blockers for a public link
+are closed (see §7 and §11).
 
-**Four things are waiting on your decision** — see §11 "Open decisions".
+**Waiting on Vinayak** — see §11 "Open decisions": AFP whitelist, public
+spend caps, the translation-quality judgment, and the BotFather token.
 
 ---
 
@@ -100,7 +104,7 @@ is: mobile, and ultimately WhatsApp.
 | Reasoning / vision / extraction / adjudication | Claude **Opus 4.8** (`claude-opus-4-8`) |
 | Language detect + translation + retrieval + cache confirm | Claude **Haiku 4.5** (`claude-haiku-4-5`) |
 | Retrieval | Native `web_search_20260209` (allowed_domains) + Google Fact Check API |
-| Link ingestion | **yt-dlp** (Instagram/YouTube extractors only, generic disabled) |
+| Link ingestion | **yt-dlp** (Instagram/YouTube/Facebook extractors only, generic disabled) |
 | OCR | Opus 4.8 vision (no Tesseract) |
 | ASR | **Sarvam Saaras v3** (`saaras:v3`) — live, wired to `/verify/media` + `/verify/link` |
 | Audio/video handling | ffmpeg (normalize to 16 kHz mono WAV, chunk, probe) |
@@ -298,8 +302,12 @@ tests/               pytest suite — always free, every paid seam faked
 - [ ] WhatsApp Cloud API: free **test number** covers exactly 5 verified
       recipients; user-initiated service replies are free (per-message billing
       since 2025-07). A real number needs Meta Business verification (2–7 days).
-- [ ] Telegram bot alternative: free, and long polling needs **no tunnel at
-      all** — lowest-friction chat demo; friends may need to install Telegram.
+- [x] **Telegram bot — BUILT (2026-07-28), not yet live.** Long polling, no
+      tunnel; consumes the same two REST calls as the page; localized-first
+      replies with English-receipt citations; handles text/link/voice/photo.
+      Needs `TELEGRAM_BOT_TOKEN` from @BotFather to go live. WhatsApp stays
+      deferred: Meta business verification + webhook tunnel + 5-recipient
+      test cap; when it happens it reuses `format_reply` unchanged.
 - [ ] Lightweight PWA (Next.js) — only if the static page outgrows itself
       (needs Node.js)
 - [ ] Localization UI (Hindi, Marathi, Tamil, Bengali…)
@@ -310,6 +318,31 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+- **2026-07-28 — The public-link blockers are closed, and reports now carry
+  their own bill.** One working session, six commits, each mutation-style
+  tested: **(1)** invariant 1 finally holds on OUTPUT — `_enforce_trust()`
+  filters every verdict's citations against the whitelist on every serve path
+  including cached ones, so removing a domain from TRUSTED_DOMAINS is now a
+  real curation act; a decisive rating that loses its last receipt is
+  withdrawn to UNVERIFIED ("every verdict carries receipts" outranks it).
+  **(2)** Evidence text — the last unsanitized prompt path, quoting pages
+  strangers wrote — reaches the adjudicator delimited as data; URLs stay
+  verbatim because the output filter now guards them. **(3)** The per-claim
+  search budget survives pause_turn: each response's measured search count
+  shrinks the next request's max_uses, so "4 per claim" is the code's cap
+  regardless of server resume semantics. **(4)** CORS wildcard removed
+  entirely — same-origin page, server-side bots, and an open ACAO let any
+  website spend the budget from its visitors' browsers. **(5)** /verify/media
+  ASR moved behind the 202 like links (proxies cut ~100 s inline requests
+  while the server kept spending); outages are FAILED reports in words, and
+  the image-OCR refund guard stays. **(6)** A long check is never orphaned:
+  the job id lives in the page's URL hash and a reload resumes the same job.
+  Plus: **per-report spend metering** (`report.usage` — tokens from the API's
+  own usage fields, searches, ASR seconds, and a list-price dollar estimate;
+  contextvar-ambient so the concurrent fan-out bills the right job; FAILED
+  reports keep their bill), **Facebook links** (probed first: three public
+  government videos resolve anonymously WITH duration; `<lang>_FB` auto
+  captions accepted as the recognized speech), and the **Telegram bot** (§6).
 - **2026-07-28 — First paid link run: $0.279 measured, and four §11 questions
   moved.** `scripts/link_smoke.py` wraps the shared Anthropic client and the
   ffmpeg boundary so every run reports measured spend — the audit's top gap.
@@ -734,28 +767,13 @@ separate agent instructed to *refute* it. 23 survived. Four are fixed (see the
 Decisions log); these are the rest, in the order I would take them. None is
 known to be actively causing harm today — the app is not publicly exposed.
 
-**Before sharing a public link (these are the blockers):**
-1. **Nothing checks the verdict's own citations against the whitelist.** Bounded
-   trust is enforced on retrieval *inputs* only (`retrieve.py` `allowed_domains`,
-   `factcheck.py` `trusted_domain_of`). `adjudicate()` returns the model's
-   `Verdict` verbatim and `is_trusted_url()` has *no* production caller — it is
-   dead code. Cached verdicts also keep citations from domains later removed
-   from the whitelist. Invariant 1 is currently a prompt request, not a guarantee.
-2. **`max_search_uses` is a per-REQUEST tool cap.** Whether the documented "4
-   billed searches per claim" holds across a `pause_turn` resume loop is
-   disputed — one agent argued up to 24, another refuted the mechanism. Needs
-   measuring, not arguing, and it is a direct multiplier on the cost model below.
-3. **Evidence text never passes through `as_prompt_data`.** It is the only
-   user-influenced string that reaches the adjudicator undelimited — and a Google
-   Fact Check `title` is attacker-influenced and unfiltered (only the URL is
-   trust-checked).
-4. **CORS is `allow_origins=["*"]` with no auth.** Any website could spend the
-   budget from its visitors' browsers.
-5. **`/verify/media` does ffmpeg + ASR inline before returning 202.** Cloudflare
-   cuts an idle connection at ~100 s while the server keeps spending.
-6. **A slow check becomes an unreachable paid report.** No client-side timeout
-   (SDK default 10 min), the page gives up at 150 s, and the `job_id` is never
-   shown — so the user cannot get back to a report they paid for.
+**Before sharing a public link — ALL SIX CLOSED 2026-07-28** (see §7):
+1. ~~Verdict citations unchecked~~ → `_enforce_trust()` on every serve path.
+2. ~~search cap per-request~~ → budget enforced across continuations in code.
+3. ~~evidence undelimited~~ → `as_prompt_data` in `adjudicate._render`.
+4. ~~CORS wildcard~~ → removed; no ACAO issued, pinned by test.
+5. ~~inline media ASR~~ → behind the 202, FAILED reports in words.
+6. ~~orphaned paid reports~~ → job id in the URL hash; reload resumes.
 
 **Correctness / trust:**
 7. `aggregate.py` has no test file and every fake verdict in the suite is FALSE,
