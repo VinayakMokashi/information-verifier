@@ -672,8 +672,9 @@ obvious-looking design.*
   anchor (2026-07-28, `scripts/link_smoke.py`): a 6-claim reel report cost
   **$0.279 all-in** ($0.22 LLM + $0.05 search + ₹0.58 ASR) — cheaper per
   claim than the model because UNVERIFIED claims skip heavy adjudication.
-  The meter lives in the smoke script; promoting per-report usage logging
-  into the app itself is the top follow-up.
+  Metering now lives IN THE APP: every report carries `report.usage`
+  (tokens per model from the API's own usage fields, searches, ASR seconds,
+  estimated USD), so future figures come from reports, not scripts.
 - A submission is priced per CLAIM, not per message, and one ordinary compound
   sentence becomes several claims — a single Hindi sentence about ₹2000 notes
   extracted into **three**. Budget per sentence, not per submission.
@@ -736,29 +737,50 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 
 ## 11. Open items
 
-### Open decisions — these need Vinayak, not code
+### THE TODO LIST (updated 2026-07-28, end of session — the authoritative one)
 
+**Needs Vinayak, not code:**
 1. **AFP Fact Check** (`factcheck.afp.com`, IFCN-certified) is the only publisher
    still being dropped by the trust filter on live queries. Add it to
    `FACTCHECK_ONLY_DOMAINS` or leave it out? Curating the whitelist is a trust
    decision, deliberately not an automatic one.
-2. **Spend caps before going public** — see §8. Lower `max_checks_per_day` (100)
-   and/or `max_claims_per_report` (8)?
-3. **Hindi ASR accuracy is unresolved.** A synthetic Hindi clip lost `5जी` (see
-   Phase 2). The cheap way to settle whether that is Sarvam's ASR or the robot
-   voice: record a 5-second Hindi voice note on a phone, save the file, and run
-   `.venv\Scripts\python.exe scripts\asr_probe.py path\to\clip.opus` (a fraction
-   of a rupee). If real speech transcribes cleanly, the concern was synthetic.
-4. **The /verify/link paid tail has not run.** The free half is live-verified
-   (resolve, subtitles, capped download, ffprobe). One real reel end-to-end
-   — Sarvam on ~70 s of audio (~₹0.58) plus a normal check ($0.15–0.40
-   depending on claims) — would close it. Needs your go-ahead.
-5. **Back-translation quality is untested against the live API.** The plumbing
-   is pinned by 194 free tests, but no real Haiku translation has been read yet.
-   One `smoke_test.py` run on a Hindi claim (~$0.06–0.13, a cent or so of which
-   is the translation) would show the actual Hindi prose and whether it reads
-   naturally to you — which is a judgment only you can make. Worth doing before
-   any bot goes in front of people.
+2. **Spend caps before going public** — see §8: the current ceiling is ~$99/day
+   typical, ~$211 worst case. Lower `max_checks_per_day` (100) and/or
+   `max_claims_per_report` (8)?
+3. **Judge the live Hindi translation quality.** Two real reports exist now
+   (the ₹2000-note check and the PEEK TV reel). The prose read well to the AI;
+   whether it reads *naturally* is Vinayak's call. Known rough edges are
+   recorded in §7 (terminology drift between claims, the summary translating
+   the rating word while the badge stays English).
+4. **Create the Telegram bot token** — @BotFather → `/newbot` → put the token
+   in `.env` as `TELEGRAM_BOT_TOKEN=...` (~2 minutes). Then: app in one
+   terminal (`uvicorn app.main:app`), `scripts\telegram_bot.py` in the other,
+   and message the bot. This is the only thing between Phase 3 and its first
+   live message.
+
+**Settled this session (kept for the record):**
+- ~~Hindi ASR accuracy~~ → settled 2026-07-28: real Hinglish speech from a reel
+  preserved every alphanumeric (₹140, "27th", एफआईआर) — the synthetic TTS voice
+  caused the old 5जी loss, not Sarvam.
+- ~~/verify/link paid tail~~ → verified 2026-07-28: $0.279 measured, one
+  MOSTLY_TRUE with a live BOOM citation + five honest abstentions.
+- ~~Back-translation never read live~~ → two real Hindi reports now exist
+  (item 3 above is what remains of this).
+
+**Cheap verifications pending (code is ready, needs a paid run or a URL):**
+- **Translation prompt fixes are unverified.** The 2026-07-28 fixes for
+  terminology drift and English-left-inside-Hindi are prompt changes; no paid
+  run has read their output. Cheap: the ₹2000 claims are cached, so a re-run
+  of `smoke_test.py` on that claim pays only normalize + extract + 4 Haiku
+  translations (~$0.04).
+- **Facebook `/reel/<id>` URL form is unprobed.** `/videos/` URLs are measured
+  working; when a real FB reel link comes along, one free
+  `scripts\link_probe.py` run settles the reel form.
+- **Telegram bot has never touched live Telegram** (blocked on item 4 above).
+  All 17 bot tests are offline; the first live message is the real test.
+- **WhatsApp bot: deferred, deliberately.** Meta business verification +
+  webhook tunnel + 5-recipient test cap. When it happens it reuses the
+  Telegram bot's `format_reply` unchanged.
 
 ### Known-defect backlog (from the 2026-07-28 adversarial audit)
 
