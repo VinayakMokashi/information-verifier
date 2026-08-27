@@ -104,6 +104,47 @@ def test_long_audio_is_chunked(media_client, tmp_path, monkeypatch):
     assert media_client.fake_asr.calls == 3
 
 
+def test_chunks_are_transcribed_concurrently_and_stay_in_order(monkeypatch):
+    """Sarvam bills audio seconds, not requests, so serial chunks bought
+    nothing but wall-clock — and an 11-chunk clip's minutes of network wait
+    pushed jobs past the poll windows, whose expiry invited a re-billed
+    resubmission. Order still comes from the index, not arrival."""
+    import asyncio
+
+    from app.api import routes as R
+
+    started, peak = 0, 0
+
+    class SlowASR:
+        async def transcribe(self, audio, language_hint=None):
+            nonlocal started, peak
+            started += 1
+            peak = max(peak, started)
+            await asyncio.sleep(0.05)          # a network round-trip
+            started -= 1
+            return Transcript(text=f"chunk{len(audio)}", language="hi-IN")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: SlowASR())
+    monkeypatch.setattr(
+        R, "split_wav", lambda wav, secs: [b"a", b"bb", b"ccc", b"dddd"])
+
+    text = asyncio.run(R.transcribe_wav(b"x" * 100, duration=999))
+
+    assert peak == 4, f"chunks ran {peak}-at-a-time, not concurrently"
+    assert text == "chunk1 chunk2 chunk3 chunk4"   # index order, not finish order
+
+
+def test_a_single_short_clip_is_not_split(monkeypatch):
+    import asyncio
+
+    from app.api import routes as R
+
+    monkeypatch.setattr(R, "split_wav", lambda *a: pytest.fail("must not split"))
+    monkeypatch.setattr(R, "get_asr_provider", lambda: FakeASR())
+    text = asyncio.run(R.transcribe_wav(b"wav", duration=1.0))
+    assert "5G" in text
+
+
 def test_unsupported_type_rejected(media_client):
     resp = media_client.post(
         "/api/v1/verify/media", files={"file": ("a.txt", b"hi", "text/plain")}

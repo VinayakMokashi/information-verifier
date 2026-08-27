@@ -197,6 +197,25 @@ def test_a_long_check_is_never_orphaned():
     assert "if (i > 0) await new Promise" in _PAGE
 
 
+def test_a_dead_job_link_does_not_trap_the_page():
+    """A bookmarked #job= from a reset database used to show 'Connection lost
+    — retrying…' for four minutes (wrong: the server ANSWERED), then invite a
+    refresh that restarted the identical doomed loop."""
+    assert "class GoneError" in _PAGE
+    assert "resp.status === 404" in _PAGE
+    assert "history.replaceState" in _PAGE          # the dead hash is cleared
+    assert "ab available nahi hai" in _PAGE
+
+
+def test_a_submission_while_busy_is_never_swallowed_silently():
+    """The file pickers clear their input BEFORE submitting, so a silent
+    early return discarded the user's pick with no feedback at all."""
+    busy_guard = _PAGE.split("async function submit(makeRequest)")[1][:400]
+    assert "if (busy)" in busy_guard
+    assert "setStatus(" in busy_guard.split("if (busy)")[1][:300], (
+        "the busy branch returns without telling the user anything")
+
+
 def test_language_button_uses_the_endonym():
     """A reader who needs the Hindi version cannot read a button saying 'Hindi'."""
     assert 'hi: "हिंदी"' in _PAGE

@@ -88,6 +88,28 @@ async def _new_job() -> TruthReport:
     return report
 
 
+async def transcribe_wav(wav: bytes, duration: float) -> str:
+    """16 kHz WAV -> transcript. The single ASR tail both audio paths use.
+
+    It was copy-pasted between the media route and the link path; a change
+    to chunking (overlap, a language hint, per-chunk retry) had to be made
+    twice or the two surfaces would transcribe the same audio differently.
+
+    Chunks are transcribed CONCURRENTLY and reassembled by index. Sarvam
+    bills audio seconds, not requests, so this costs nothing — but a 300 s
+    clip is ~11 chunks, and serially that is minutes of pure network wait
+    that pushed jobs past the page's and the bot's poll windows (whose
+    expiry used to invite a fully re-billed resubmission).
+    """
+    if duration <= settings.asr_chunk_seconds:
+        chunks = [wav]
+    else:
+        chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
+    asr = get_asr_provider()
+    transcripts = await asyncio.gather(*(asr.transcribe(c) for c in chunks))
+    return " ".join(t.text.strip() for t in transcripts if t.text and t.text.strip())
+
+
 async def _run_media_job(
     job_id: str, wav: bytes, duration: float, repo: ReportRepository, meter: UsageMeter
 ) -> None:
@@ -109,15 +131,7 @@ async def _run_media_job(
             await asyncio.to_thread(repo.save, report)
 
     try:
-        if duration <= settings.asr_chunk_seconds:
-            chunks = [wav]
-        else:
-            chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
-        asr = get_asr_provider()
-        parts = []
-        for chunk in chunks:
-            transcript = await asr.transcribe(chunk)
-            parts.append(transcript.text)
+        text = await transcribe_wav(wav, duration)
     except MediaError as exc:
         await fail(f"Could not process this audio ({exc}).")
         return
@@ -132,7 +146,6 @@ async def _run_media_job(
         await fail("Something went wrong reading this audio. Please try again.")
         return
 
-    text = " ".join(p.strip() for p in parts if p and p.strip())
     if not text:
         await fail("No speech could be transcribed from this audio.")
         return
@@ -251,16 +264,7 @@ async def gather_link_text(info: LinkInfo) -> str:
         wav, duration = await asyncio.to_thread(
             normalize_to_wav, data, f"media{ext}", settings.max_media_seconds
         )
-        if duration <= settings.asr_chunk_seconds:
-            chunks = [wav]
-        else:
-            chunks = await asyncio.to_thread(split_wav, wav, settings.asr_chunk_seconds)
-        asr = get_asr_provider()
-        parts = []
-        for chunk in chunks:
-            transcript = await asr.transcribe(chunk)
-            parts.append(transcript.text)
-        spoken = " ".join(p.strip() for p in parts if p and p.strip())
+        spoken = await transcribe_wav(wav, duration)
 
     combined = "\n\n".join(t for t in (caption, spoken) if t and t.strip())
     if not combined.strip():
