@@ -144,7 +144,7 @@ class StubApp:
         self.submissions.append((endpoint, filename, content_type))
         return "job123", ""
 
-    async def wait_for_report(self, job_id):
+    async def wait_for_report(self, job_id, attempts=None):
         return self.report
 
 
@@ -154,13 +154,14 @@ class StubTG:
 
     async def send(self, chat_id, text):
         self.sent.append((chat_id, text))
+        return True
 
     async def file_bytes(self, file_id):
         return b"OggS-fake", "voice/file_77.oga"
 
 
-def _handle(msg, app, tg):
-    asyncio.run(B.handle_message(msg, app, tg))
+def _handle(msg, app, tg, pending=None):
+    asyncio.run(B.handle_message(msg, app, tg, pending))
 
 
 def test_text_flow_submits_polls_and_replies():
@@ -212,3 +213,100 @@ def test_help_costs_nothing():
     _handle({"chat": {"id": 7}, "text": "/start"}, app, tg)
     assert app.submissions == []
     assert "Information Verifier" in tg.sent[0][1]
+
+
+# -- review fixes (2026-07-28) ------------------------------------------------
+
+def test_a_quote_in_a_citation_url_cannot_break_the_html():
+    """Citation URLs are adjudicator output; the trust filter checks the HOST,
+    not the query. One unescaped double quote closed the href early, Telegram
+    rejected the whole message, and the reader got silence after paying."""
+    report = _report()
+    report["claim_verdicts"][0]["verdict"]["citations"] = [
+        {"url": 'https://altnews.in/x?q="evil', "title": 'a "title"',
+         "publisher": "AltNews"}]
+    reply = B.format_reply(report)
+    assert 'href="https://altnews.in/x?q=&quot;evil"' in reply
+    # Exactly one opening and one closing anchor — the tag is not broken.
+    assert reply.count("<a href=") == 1 and reply.count("</a>") == 1
+
+
+def test_machine_read_text_is_not_silently_shortened():
+    """Invariant 4: a mis-hear in a hidden tail would silently become a
+    confident verdict on words the sender never said."""
+    long_heard = "क ख ग " * 900          # far past any inline budget
+    reply = B.format_reply(_report(source_text=long_heard))
+    assert "Humne yeh suna/padha" in reply
+    assert "more characters" in reply    # the cut is DISCLOSED, not hidden
+
+    short = "WHO ne kaha 5G se corona"
+    assert "more characters" not in B.format_reply(_report(source_text=short))
+
+
+def test_a_giant_head_never_yields_broken_html():
+    """The final slice used to be able to land inside a tag or an entity."""
+    reply = B.format_reply(_report(
+        summary="<b>&amp;</b> " * 900, source_text="x " * 900))
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert reply.count("<i>") == reply.count("</i>")
+    assert not reply.rstrip().endswith("<")
+
+
+def test_localized_fallback_is_per_claim_not_per_field():
+    """The engine guarantees a translation is all-or-nothing; mixing fields
+    would invent a half-English claim it refuses to produce."""
+    report = _report(localized={"language": "hi", "summary": "सारांश",
+                                "claims": [{"claim": "5जी दावा",
+                                            "reasoning": "कारण",
+                                            "correction": ""}]})
+    reply = B.format_reply(report)
+    assert "5जी दावा" in reply and "कारण" in reply
+    # The English correction must NOT be spliced in beside Hindi prose.
+    assert "Corona spreads by droplets." not in reply
+
+
+class _PendingApp(StubApp):
+    """Reports 'not ready' on the first wait, ready afterwards."""
+
+    def __init__(self):
+        super().__init__()
+        self.waits = 0
+
+    async def wait_for_report(self, job_id, attempts=None):
+        self.waits += 1
+        return None if self.waits == 1 else self.report
+
+
+def test_a_slow_check_is_resumed_not_re_bought():
+    """Telling a user to 'send it again' bought the whole check twice —
+    exactly for the slow, expensive jobs."""
+    app, tg, pending = _PendingApp(), StubTG(), {}
+
+    _handle({"chat": {"id": 7}, "text": "WHO ne kaha 5G"}, app, tg, pending)
+    assert pending == {7: "job123"}              # remembered for next time
+    assert "dobara paisa nahi lagega" in tg.sent[-1][1]
+
+    _handle({"chat": {"id": 7}, "text": "kya hua?"}, app, tg, pending)
+    assert len(app.submissions) == 1             # NOT resubmitted
+    assert "pichla check pura hua" in tg.sent[-2][1]
+    assert "❌ FALSE" in tg.sent[-1][1]
+    assert pending == {}
+
+
+def test_a_still_running_job_blocks_a_new_submission():
+    class NeverReady(StubApp):
+        async def wait_for_report(self, job_id, attempts=None):
+            return None
+
+    app, tg, pending = NeverReady(), StubTG(), {7: "old-job"}
+    _handle({"chat": {"id": 7}, "text": "naya rumour"}, app, tg, pending)
+
+    assert app.submissions == []                 # wallet protected
+    assert "abhi bhi chal raha hai" in tg.sent[-1][1]
+
+
+def test_help_still_works_while_a_job_is_pending():
+    app, tg, pending = StubApp(), StubTG(), {7: "old-job"}
+    _handle({"chat": {"id": 7}, "text": "/help"}, app, tg, pending)
+    assert "Information Verifier" in tg.sent[0][1]
+    assert app.submissions == []

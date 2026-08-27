@@ -18,6 +18,7 @@ setup instructions and exits at $0.
 import asyncio
 import html
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,6 +34,7 @@ _POLL_S = 3.0
 _POLL_MAX = 90            # ~4.5 min — link jobs download + transcribe first
 _TG_HARD_LIMIT = 4096     # Telegram's message cap
 _REPLY_BUDGET = 3900      # headroom under it for our own framing
+_MAX_HEARD_CHARS = 1200   # of source_text inline; any cut is disclosed
 
 _RATING_BADGE = {
     "TRUE": "✅ TRUE — sach hai",
@@ -79,7 +81,15 @@ def classify_message(msg: dict) -> tuple[str, str]:
 
 
 def _e(text) -> str:
-    return html.escape(str(text or ""), quote=False)
+    """Escape for Telegram HTML — INCLUDING quotes.
+
+    quote=False was wrong: this output also lands inside href="…", and a
+    citation URL is adjudicator output whose path/query nothing validates
+    (the trust filter checks the HOST). One double quote there closes the
+    attribute early, Telegram rejects the whole message with "can't parse
+    entities", and the reader gets silence after a paid check.
+    """
+    return html.escape(str(text or ""), quote=True)
 
 
 def format_reply(report: dict) -> str:
@@ -106,18 +116,33 @@ def format_reply(report: dict) -> str:
     if summary:
         parts.append(_e(summary))
     if report.get("source_text"):
-        parts.append(f"<i>Humne yeh suna/padha:</i> {_e(report['source_text'][:500])}")
+        # Invariant 4: machine-read text is SHOWN BACK, because a mis-hear
+        # silently becomes a confident verdict on words the sender never
+        # said. A hard [:500] slice hid most of the measured primary case
+        # (a 599-char caption plus a 70 s transcript) with no marker — the
+        # same hole §7 records fixing on the console. Any shortening is now
+        # disclosed, and the budget below protects the message length.
+        heard = " ".join(report["source_text"].split())
+        if len(heard) > _MAX_HEARD_CHARS:
+            heard = (heard[:_MAX_HEARD_CHARS]
+                     + f" […{len(heard) - _MAX_HEARD_CHARS} more characters — "
+                       "poora text web page par]")
+        parts.append(f"<i>Humne yeh suna/padha:</i> {_e(heard)}")
 
     claim_blocks: list[str] = []
     for i, cv in enumerate(report.get("claim_verdicts") or []):
         v = cv["verdict"]
         lc = loc_claims[i] if i < len(loc_claims) else None
-        claim_text = (lc or {}).get("claim") or cv["claim"]["text"]
-        reasoning = (lc or {}).get("reasoning") or v["reasoning"]
+        # Per-CLAIM fallback, matching the page and the console: the engine
+        # guarantees a LocalizedClaim is all-or-nothing (_accept rejects a
+        # half-translated one), so mixing fields would invent a state the
+        # engine refuses to produce — an English sentence spliced mid-claim.
+        claim_text = lc["claim"] if lc else cv["claim"]["text"]
+        reasoning = lc["reasoning"] if lc else v["reasoning"]
         block = [f"{i + 1}. “{_e(claim_text)}”",
                  f"{_RATING_BADGE.get(v['rating'], v['rating'])} ({v['confidence']}%)",
                  _e(reasoning)]
-        correction = (lc or {}).get("correction") or v.get("correction")
+        correction = lc["correction"] if lc else v.get("correction")
         if correction:
             block.append(f"✔️ Sach yeh hai: {_e(correction)}")
         for c in v.get("citations") or []:
@@ -125,7 +150,14 @@ def format_reply(report: dict) -> str:
                          f'{_e(c["title"])}</a>')
         claim_blocks.append("\n".join(block))
 
+    # Drop whole BLOCKS to fit, never slice: the string is HTML, and a cut
+    # landing inside a tag or an &entity; makes Telegram reject the entire
+    # message ("can't parse entities") — which, before send() started
+    # checking its response, meant total silence after a paid check.
     head = "\n\n".join(parts)
+    while len(head) > _REPLY_BUDGET and len(parts) > 1:
+        parts.pop()          # shed the heard-text block, then the summary
+        head = "\n\n".join(parts)
     reply = head
     shown = 0
     for block in claim_blocks:
@@ -137,7 +169,12 @@ def format_reply(report: dict) -> str:
     if shown < len(claim_blocks):
         reply += (f"\n\n…aur {len(claim_blocks) - shown} claim(s) — "
                   "poora report web page par dekhiye.")
-    return reply[:_TG_HARD_LIMIT] or "Koi checkable claim nahi mila."
+    if len(reply) > _TG_HARD_LIMIT:
+        # Unreachable via the budget above; if it ever happens, send
+        # something valid rather than something Telegram will refuse.
+        return ("Report bahut lamba hai — poora report web page par dekhiye. "
+                f"({_e(overall or 'done')})")
+    return reply or "Koi checkable claim nahi mila."
 
 
 class AppClient:
@@ -172,14 +209,28 @@ class AppClient:
             return None, str(detail)
         return resp.json()["job_id"], ""
 
-    async def wait_for_report(self, job_id: str) -> dict | None:
-        for _ in range(_POLL_MAX):
-            resp = await self._http.get(f"{self._base}/reports/{job_id}")
-            if resp.status_code == 200:
-                report = resp.json()
-                if report["status"] in ("COMPLETE", "FAILED"):
-                    return report
-            await asyncio.sleep(_POLL_S)
+    async def wait_for_report(self, job_id: str, attempts: int | None = None) -> dict | None:
+        """Poll until the report is done. Transient errors are survived.
+
+        One blip used to raise out of this loop and abandon a job that had
+        already been paid for — and the generic handler then told the user
+        to resubmit, buying the whole check a second time. A network error
+        here is never a reason to abandon money already spent.
+        """
+        for attempt in range(attempts if attempts is not None else _POLL_MAX):
+            try:
+                resp = await self._http.get(f"{self._base}/reports/{job_id}")
+                if resp.status_code == 200:
+                    report = resp.json()
+                    if report["status"] in ("COMPLETE", "FAILED"):
+                        return report
+                elif resp.status_code == 404:
+                    print(f"[bot] job {job_id} not found; giving up")
+                    return None
+            except (httpx.HTTPError, ValueError) as exc:
+                print(f"[bot] poll blip, retrying: {type(exc).__name__}: {exc}")
+            if attempt + 1 < (attempts if attempts is not None else _POLL_MAX):
+                await asyncio.sleep(_POLL_S)
         return None
 
 
@@ -189,22 +240,54 @@ class TelegramClient:
         self._api = f"https://api.telegram.org/bot{token}"
         self._files = f"https://api.telegram.org/file/bot{token}"
 
-    async def get_updates(self, offset: int) -> list[dict]:
+    async def get_updates(self, offset: int, confirm_only: bool = False) -> list[dict]:
+        """Long-poll for updates. `confirm_only` acknowledges `offset` and
+        returns immediately — used to mark a batch handled BEFORE the paid
+        work starts, so a crash cannot cause a redelivery that re-bills."""
         resp = await self._http.get(
             f"{self._api}/getUpdates",
-            params={"offset": offset, "timeout": 50},
-            timeout=60.0,
+            params={"offset": offset, "timeout": 0 if confirm_only else 50,
+                    **({"limit": 1} if confirm_only else {})},
+            timeout=30.0 if confirm_only else 60.0,
         )
         resp.raise_for_status()
         return resp.json().get("result", [])
 
-    async def send(self, chat_id: int, text: str) -> None:
-        await self._http.post(f"{self._api}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
+    async def send(self, chat_id: int, text: str) -> bool:
+        """Send, and NOTICE if Telegram refused.
+
+        The response used to be discarded, so a rejected reply — a broken
+        entity, an over-long message, a blocked bot — completed 'fine' and
+        the reader got silence after a paid check, with nothing logged.
+        On a parse-mode rejection we retry once as plain text: the verdict
+        matters more than its formatting.
+        """
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                   "disable_web_page_preview": True}
+        try:
+            resp = await self._http.post(f"{self._api}/sendMessage", json=payload)
+            if resp.status_code == 200:
+                return True
+            detail = resp.text[:200]
+            print(f"[bot] sendMessage rejected ({resp.status_code}): {detail}")
+        except httpx.HTTPError as exc:
+            print(f"[bot] sendMessage failed: {type(exc).__name__}: {exc}")
+            return False
+
+        plain = re.sub(r"<[^>]+>", "", text)
+        plain = html.unescape(plain)[:_TG_HARD_LIMIT]
+        try:
+            retry = await self._http.post(f"{self._api}/sendMessage", json={
+                "chat_id": chat_id, "text": plain,
+                "disable_web_page_preview": True,
+            })
+            if retry.status_code == 200:
+                print("[bot] recovered: sent as plain text")
+                return True
+            print(f"[bot] plain-text retry also rejected: {retry.text[:200]}")
+        except httpx.HTTPError as exc:
+            print(f"[bot] plain-text retry failed: {type(exc).__name__}: {exc}")
+        return False
 
     async def file_bytes(self, file_id: str) -> tuple[bytes, str]:
         meta = await self._http.get(f"{self._api}/getFile",
@@ -216,16 +299,41 @@ class TelegramClient:
         return data.content, path
 
 
-async def handle_message(msg: dict, app: AppClient, tg: TelegramClient) -> None:
-    """One message, end to end. Every failure becomes words in the chat."""
+async def handle_message(
+    msg: dict, app: AppClient, tg: TelegramClient,
+    pending: dict[int, str] | None = None,
+) -> None:
+    """One message, end to end. Every failure becomes words in the chat.
+
+    `pending` remembers a chat's in-flight job_id so a check that outran the
+    poll window is RESUMED rather than resubmitted. Telling a user to
+    "send it again" bought the whole check a second time — ASR, retrieval,
+    adjudication — precisely for the slow, expensive jobs.
+    """
     chat_id = msg.get("chat", {}).get("id")
     if chat_id is None:
         return
+    pending = pending if pending is not None else {}
     kind, payload = classify_message(msg)
 
     if kind == "help":
         await tg.send(chat_id, HELP)
         return
+
+    # A job already paid for comes first, whatever this message says.
+    stale_job = pending.get(chat_id)
+    if stale_job:
+        report = await app.wait_for_report(stale_job, attempts=2)
+        if report is not None:
+            pending.pop(chat_id, None)
+            await tg.send(chat_id, "Aapka pichla check pura hua:")
+            await tg.send(chat_id, format_reply(report))
+        else:
+            await tg.send(chat_id, "⏳ Aapka pichla check abhi bhi chal raha hai. "
+                                   "Wo pura hone ke baad naya bhejiye — "
+                                   "warna dobara paisa lagega.")
+        return
+
     if kind == "unsupported":
         await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
                                "text, link, voice note ya photo bhejiye.")
@@ -249,11 +357,16 @@ async def handle_message(msg: dict, app: AppClient, tg: TelegramClient) -> None:
         if job_id is None:
             await tg.send(chat_id, f"😕 {_e(err)}")
             return
+        # Remembered BEFORE the wait: if this process dies mid-poll, the job
+        # is still recoverable on the next message instead of being re-bought.
+        pending[chat_id] = job_id
         report = await app.wait_for_report(job_id)
         if report is None:
-            await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai — thodi der "
-                                   "baad wahi message dobara bhej dena.")
+            await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai. Mujhe koi "
+                                   "bhi message bhejiye aur main wahi report "
+                                   "dikha dunga — dobara paisa nahi lagega.")
             return
+        pending.pop(chat_id, None)
         await tg.send(chat_id, format_reply(report))
     except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
         print(f"[bot] handling failed: {type(exc).__name__}: {exc}")
@@ -281,6 +394,7 @@ async def main() -> None:
 
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0
+        pending: dict[int, str] = {}   # chat_id -> in-flight job_id
         while True:
             try:
                 updates = await tg.get_updates(offset)
@@ -288,13 +402,27 @@ async def main() -> None:
                 print(f"[bot] getUpdates failed, retrying: {type(exc).__name__}")
                 await asyncio.sleep(5)
                 continue
+            if not updates:
+                continue
+
+            # CONFIRM THE BATCH BEFORE DOING PAID WORK. Telegram redelivers
+            # anything not acknowledged by a later offset, and handling takes
+            # minutes — so a crash or Ctrl+C mid-check used to redeliver the
+            # same voice note on restart and pay for the whole transcription
+            # again. Of the two failure modes, losing a message the user can
+            # resend deliberately beats silently re-billing them.
+            offset = updates[-1]["update_id"] + 1
+            try:
+                await tg.get_updates(offset, confirm_only=True)
+            except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+                print(f"[bot] offset confirm failed: {type(exc).__name__}")
+
             for update in updates:
-                offset = update["update_id"] + 1
                 message = update.get("message") or update.get("channel_post")
                 if message:
                     # Sequential on purpose: one user at a time is the current
                     # scale, and it keeps the spend serialized.
-                    await handle_message(message, app, tg)
+                    await handle_message(message, app, tg, pending)
 
 
 if __name__ == "__main__":
