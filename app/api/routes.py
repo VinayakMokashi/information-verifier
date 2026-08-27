@@ -195,7 +195,10 @@ async def verify_image(
 async def verify_media(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    with _quota(request) as spend:
+    # No `as spend`: since the Sarvam loop moved behind the 202, this route
+    # spends nothing before returning, so every rejection here is honestly
+    # refundable. Binding it would advertise a boundary that is not there.
+    with _quota(request):
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, f"Unsupported media type: {file.content_type}")

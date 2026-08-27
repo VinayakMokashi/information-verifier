@@ -6,8 +6,9 @@ decisions log (the "why"), §11 is what's open. This file is how to work here.
 
 ## Money rules (the user is cost-conscious — this matters most)
 
-- **Never run a paid test without asking.** Real checks cost ~$0.05–0.12 per
-  claim; a report can hold 8 claims. Sarvam ASR is ~₹0.50/min.
+- **Never run a paid test without asking.** MEASURED: ~$0.12–0.26 per claim,
+  and $0.279 for a whole 6-claim reel. A report can hold 8 claims. Sarvam ASR
+  is ~₹0.50/min. Every report carries its own bill in `report.usage`.
 - **Prefer the free path, and there is almost always a free path:**
 
   | Command | Cost | Proves |

@@ -2,15 +2,14 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-28** (Facebook links, per-report spend metering,
-> public-link blockers closed, Telegram bot).
+> Keep it updated as the project moves. Last updated: **2026-07-28** (end-to-end review — see §7).
 
 ---
 
 ## 0. Where we are right now (read this first)
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**320 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
+**350 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
 paid API is faked).
 
 Working end-to-end, verified against live APIs:
@@ -318,6 +317,40 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+- **2026-07-28 (late) — End-to-end review before handoff: 11 more defects,
+  every one of them SILENT.** A 10-angle review of everything since `0389647`
+  (4 angles lost to a session limit; 6 reported). What it found had a theme —
+  each failure produced output that looked entirely plausible:
+  **(1) POSIX language tags disabled translation.** `target_language` stripped
+  underscores for the English check but then matched the RAW tag against a
+  regex with no underscore, so `hi_IN`/`mr_IN`/`ta_IN`/`bn_BD` silently
+  returned an English-only report — the mission failure the stage exists to
+  prevent, unlogged because None legitimately means "nothing to do".
+  **(2) Persisted reports kept a stale whitelist.** The trust filter ran when a
+  verdict was BUILT; a report saved last week carried last week's
+  TRUSTED_DOMAINS, and the URL-hash resume re-serves stored reports on every
+  reload. Now filtered on the way out of the store too.
+  **(3) The meter could have doubled every bill** if a future SDK routed
+  `parse` through `create` (the installed one calls `_post` — checked).
+  Re-entrancy guard added.
+  **(4) One translation per tag SPELLING**, not per language — `hi` and
+  `hi-IN` bought separate copies of identical prose (backlog item 12, closed).
+  **(5–10) The Telegram bot could take money and give silence** six ways:
+  `send()` discarded Telegram's response entirely; `quote=False` inside
+  `href="…"` broke the HTML on a citation URL with a quote in it; `source_text`
+  was cut at 500 chars with no marker (invariant 4); the final 4096-slice
+  could cut mid-tag; the getUpdates offset was confirmed AFTER minutes of paid
+  work, so a crash re-billed the whole check on restart; and a slow check told
+  the user to resend, buying it twice. In-flight jobs are remembered per chat
+  now and resumed instead.
+  **(11) The platform list had drifted the first time it was extended** —
+  Facebook was in the hosts, extractors and page regex, but all three
+  user-facing messages still said "Instagram and YouTube", and the agreement
+  test that should have caught it iterated four hand-picked non-Facebook URLs.
+  One definition now; the test walks every allowlisted host.
+  Also measured while validating the token Vinayak added: **Telegram timed out
+  twice before answering**, so every Telegram call retries. And the page no
+  longer dead-ends on a stale `#job=` link or swallow a file pick while busy.
 - **2026-07-28 — The public-link blockers are closed, and reports now carry
   their own bill.** One working session, six commits, each mutation-style
   tested: **(1)** invariant 1 finally holds on OUTPUT — `_enforce_trust()`
@@ -752,11 +785,15 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    whether it reads *naturally* is Vinayak's call. Known rough edges are
    recorded in §7 (terminology drift between claims, the summary translating
    the rating word while the badge stays English).
-4. **Create the Telegram bot token** — @BotFather → `/newbot` → put the token
-   in `.env` as `TELEGRAM_BOT_TOKEN=...` (~2 minutes). Then: app in one
-   terminal (`uvicorn app.main:app`), `scripts\telegram_bot.py` in the other,
-   and message the bot. This is the only thing between Phase 3 and its first
-   live message.
+4. ~~Create the Telegram bot token~~ **DONE by Vinayak 2026-07-28.** The
+   token is in `.env` and validates as `@Information_Verifier_bot`. Re-check
+   any time for $0:
+   `.venv\Scripts\python.exe scripts\telegram_bot.py --check-token`.
+   **The first live message is now the only step left**, and it was
+   deliberately NOT taken while Vinayak slept — anyone messaging the bot
+   spends real money and nobody was awake to supervise. To go live:
+   `uvicorn app.main:app` in one terminal, `scripts\telegram_bot.py` in the
+   other, then message the bot.
 
 **Settled this session (kept for the record):**
 - ~~Hindi ASR accuracy~~ → settled 2026-07-28: real Hinglish speech from a reel
@@ -776,8 +813,10 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 - **Facebook `/reel/<id>` URL form is unprobed.** `/videos/` URLs are measured
   working; when a real FB reel link comes along, one free
   `scripts\link_probe.py` run settles the reel form.
-- **Telegram bot has never touched live Telegram** (blocked on item 4 above).
-  All 17 bot tests are offline; the first live message is the real test.
+- **Telegram bot has never touched live Telegram.** Token validated ($0,
+  getMe only); 24 bot tests are offline. The first live message is the real
+  test — and worth watching, because Telegram was measured timing out twice
+  in three calls from this network (every call retries now).
 - **WhatsApp bot: deferred, deliberately.** Meta business verification +
   webhook tunnel + 5-recipient test cap. When it happens it reuses the
   Telegram bot's `format_reply` unchanged.
@@ -806,12 +845,13 @@ known to be actively causing harm today — the app is not publicly exposed.
 10. A claim adjudicated while the semantic tier is paused is stored with no
     vector and never re-indexed.
 
-**i18n (from this feature):**
+**i18n:**
 11. The verdict word itself is never localized — per-claim badges show the raw
     English enum, and `RATING_LABELS` is romanized *Hindi* shown to Tamil and
-    Bengali readers too.
-12. The translation cache keys on the detector's raw tag, so `hi`, `hi-IN` and
-    `Hindi` each buy a separate copy of the same translation.
+    Bengali readers too. Now in TWO places (the page and the bot's
+    `_RATING_BADGE`): fix once in the API payload, not per surface.
+12. ~~translation cache keyed on the raw tag~~ **CLOSED 2026-07-28** — the key
+    folds case and region. A language NAME ("Hindi") still keys separately.
 
 **Ops / hygiene:**
 13. Nothing is ever pruned: `created_at` is written and never read, so every
@@ -823,6 +863,33 @@ known to be actively causing harm today — the app is not publicly exposed.
 16. Two weak tests: `test_devanagari.py:97` asserts a property of a constant, not
     of the page; the embedding failure-budget tests neutralize `_FAILURE_WINDOW_S`
     and so hide whether the budget ever exhausts under production timing.
+
+**Deferred by the 2026-07-28 end-to-end review — real, but not worth the churn
+that night. Roughly in value order:**
+17. **No transcript cache for links.** One viral reel forwarded by many people
+    re-downloads and re-buys the whole ASR every time (~₹0.58 for a 70 s clip)
+    — the same "per-user pricing wearing a cache's clothes" inversion the
+    translation cache was built to fix, still open on the most expensive
+    input. `resolve_link` already returns a stable `(platform, video_id)` for
+    free, before any spend, so the key is already in hand. **Best value here.**
+18. **Duplication that has already drifted once.** The FAILED-report
+    finalization exists three times (media `fail()`, link `except`,
+    `run_pipeline`'s `finally`) — forgetting `report.usage` in one is exactly
+    how failed reports used to lose their bill; the fake-seam list is
+    hand-synced across three files; the localized-merge logic is
+    re-implemented in three renderers (and HAD diverged — fixed in the bot).
+19. **Two SSRF host parsers.** `links.allowed_link_host` re-implements
+    `trusted_sources.trusted_domain_of`'s fail-closed parsing and they already
+    disagree on the hostname charset — two security boundaries to patch when
+    the next parser-differential bypass appears.
+20. **ASR metering sits at the ffmpeg boundary**, not the ASR provider seam,
+    so a future path reaching `transcribe` without `normalize_to_wav` (Sarvam's
+    batch API for >30 s clips) would be silently unmetered — while the bill
+    still LOOKS complete.
+21. **Long downloads share asyncio's default thread pool** with every report
+    poll, so a few concurrent link jobs can make finished reports look stuck.
+22. **The bot handles messages sequentially**, so one user's 4-minute check
+    blocks every other chat, including `/help`.
 
 ### Prerequisites already in place
 

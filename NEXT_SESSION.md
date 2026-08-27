@@ -38,11 +38,16 @@ When editing docs by script, assert every replace matched — a silent no-op
 replace left §11 stale once.
 
 What I want to work on next: <PICK ONE, or tell me your own>
-  (a) Go live with the Telegram bot — I'll bring the @BotFather token.
-  (b) Burn down the §11 defect backlog.
-  (c) Verify the pending cheap items (translation prompt fixes ~$0.04;
+  (a) GO LIVE with the Telegram bot. The token is already in .env and
+      validated (@Information_Verifier_bot); the bot has just never been
+      started. I'll be at the keyboard — walk me through it and we fix
+      whatever the first real messages break.
+  (b) §11 item 17: a transcript cache for links, so the same reel forwarded
+      by many people is bought once, not once per person.
+  (c) Burn down the rest of the §11 backlog (items 7–22).
+  (d) Verify the cheap pending items (translation prompt fixes ~$0.04;
       I'll paste a real Facebook reel link for the free probe).
-  (d) Prepare for real public sharing: my cap decisions + observability
+  (e) Prepare for real public sharing: my cap decisions + observability
       + data pruning, then a supervised share_demo.ps1 session.
 ```
 
@@ -79,20 +84,58 @@ The authoritative copy lives in **PROJECT_PLAN.md §11**. Summary:
 1. AFP Fact Check whitelist — add `factcheck.afp.com` or not?
 2. Spend caps before going public (~$99/day ceiling today).
 3. Judge the live Hindi translation quality (two real reports exist).
-4. **Create the @BotFather token** → `TELEGRAM_BOT_TOKEN` in `.env`. This is
-   the only thing between the Telegram bot and its first live message.
+4. ~~Create the @BotFather token~~ **DONE** — validated, see §5 below.
 
 **Cheap verifications pending:**
+- **First live Telegram message** (needs you present; the bot is ready).
 - Translation prompt fixes unverified (~$0.04 — the claims are cached).
 - Facebook `/reel/<id>` URL form unprobed (free, needs one real link).
-- Telegram bot has never touched live Telegram (blocked on #4).
 
-**Defect backlog:** PROJECT_PLAN §11, plus anything left over from the
-review below.
+**Defect backlog:** PROJECT_PLAN §11 items 7–22 (17–22 were deferred by the
+end-to-end review; item 17, a transcript cache for repeat links, is the
+highest-value one).
 
 ---
 
-## 5. IN PROGRESS / NEXT (updated after every commit)
+## 5. WHERE THE LAST SESSION ENDED
 
-_Initialised before the review fixes began. See `git log --oneline` for the
-authoritative record of what actually landed._
+**The end-to-end review is COMPLETE and every fix is committed and pushed.**
+`main` is clean, 350 tests pass, working tree empty. Nothing is half-done.
+
+The review ran 10 angles over everything since `0389647` (4 died to a session
+limit; 6 reported). It found **11 defects, every one of them silent** — each
+produced output that looked entirely plausible. All were fixed in seven
+layered commits, each with tests, each pushed:
+
+| Commit | What |
+|---|---|
+| `3477f0c` | 4 engine defects (POSIX language tags disabled translation; persisted reports kept a stale whitelist; the meter could double every bill; one translation per tag *spelling*) |
+| `8f41dab` | 6 ways the bot could take money and give silence |
+| `9220bf2` | Telegram flakiness + free token validation |
+| `1a1f4c1` | one definition of "which platforms work", not four |
+| `86198da` | page dead-ends; concurrent ASR chunks |
+| `675961b`, this one | docs |
+
+**The single most important thing for you to know:** your `TELEGRAM_BOT_TOKEN`
+was found in `.env` and **validates as `@Information_Verifier_bot`**. I did
+**not** start the bot — anyone messaging it spends real money and nobody was
+awake to supervise. Re-check for $0 any time:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\telegram_bot.py --check-token
+```
+
+To go live (this is the whole remaining step for Phase 3):
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app     # terminal 1
+.\.venv\Scripts\python.exe scripts\telegram_bot.py     # terminal 2
+```
+…then message the bot. Watch it: Telegram was measured timing out twice in
+three calls from this network, so the retry logic gets its first real test.
+
+**Deferred deliberately** (recorded as §11 items 17–22, best value first):
+no transcript cache for repeat links (re-buys ASR on every forward of the
+same reel), three-way duplication that has drifted once already, two SSRF
+host parsers, ASR metering at the wrong seam, a shared thread pool, and the
+bot handling messages one at a time.

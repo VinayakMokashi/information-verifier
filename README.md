@@ -103,7 +103,7 @@ Tools API. No Node, no Docker, no build step.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-320 tests, always free — every paid API is faked, including a test that proves
+350 tests, always free — every paid API is faked, including a test that proves
 the "free" demo mode cannot reach a paid provider.
 
 ## Documentation
