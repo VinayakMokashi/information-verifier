@@ -75,10 +75,30 @@ def target_language(code: str | None) -> str | None:
     """
     if not code:
         return None
-    tag = code.strip()
-    if tag.lower().replace("_", "-").split("-")[0] in _ENGLISH_TAGS:
+    # Canonicalize the separator BEFORE the pattern check. The English branch
+    # below already anticipated POSIX-style tags (it strips underscores, and
+    # 'en_US' correctly skips) — but the raw tag then met a regex with no
+    # underscore in it, so 'hi_IN' failed the pattern and returned None.
+    # Measured: hi_IN / mr_IN / ta_IN / bn_BD all silently produced an
+    # English-only report — the exact mission failure this stage exists to
+    # prevent, and invisible because None legitimately means "nothing to do".
+    tag = code.strip().replace("_", "-")
+    if tag.lower().split("-")[0] in _ENGLISH_TAGS:
         return None
     return tag if _LANG_RE.fullmatch(tag) else None
+
+
+def cache_language_key(language: str) -> str:
+    """The language a cached translation is keyed under.
+
+    Folds case and region so 'hi', 'hi-IN' and 'HI' share one cached
+    translation instead of buying three copies of identical prose (backlog
+    item 12). The verbatim tag still goes to the prompt — only the key is
+    folded. A language NAME ('Hindi') folds to 'hindi' and so keeps its own
+    entry; mapping names to codes would need a lookup table, and the
+    normalize prompt asks for codes, so that residual is left alone.
+    """
+    return language.strip().lower().replace("_", "-").split("-")[0]
 
 
 def _delimited(**fields: str) -> str:
@@ -104,6 +124,14 @@ def _cache_source(*fields: str) -> tuple[str, ...]:
     than as a wipe: superseded rows simply stop being reachable.
     """
     return (_PROMPT_FINGERPRINT, settings.haiku_model, *fields)
+
+
+def _cache_get(cache, language: str, source: tuple[str, ...]):
+    return cache.get(cache_language_key(language), source)
+
+
+def _cache_put(cache, language: str, source: tuple[str, ...], payload: str) -> None:
+    cache.put(cache_language_key(language), source, payload)
 
 
 def _translatable(*fields: str) -> bool:
@@ -146,7 +174,7 @@ async def _translate_claim(
 
     source = _cache_source(*fields)
     if cache is not None:
-        hit = await safe_cache_call(cache.get, language, source)
+        hit = await safe_cache_call(_cache_get, cache, language, source)
         if hit is not None:
             accepted = None
             try:
@@ -197,7 +225,7 @@ async def _translate_claim(
 
     out = _accept(cv, parsed)
     if out is not None and cache is not None:
-        await safe_cache_call(cache.put, language, source, out.model_dump_json())
+        await safe_cache_call(_cache_put, cache, language, source, out.model_dump_json())
     return out
 
 
@@ -209,7 +237,7 @@ async def _translate_summary(language: str, summary: str, cache=None) -> str | N
         return None
     source = _cache_source(summary)
     if cache is not None:
-        hit = await safe_cache_call(cache.get, language, source)
+        hit = await safe_cache_call(_cache_get, cache, language, source)
         if hit:
             return hit
 
@@ -239,7 +267,7 @@ async def _translate_summary(language: str, summary: str, cache=None) -> str | N
     if not text:
         return None
     if cache is not None:
-        await safe_cache_call(cache.put, language, source, text)
+        await safe_cache_call(_cache_put, cache, language, source, text)
     return text
 
 

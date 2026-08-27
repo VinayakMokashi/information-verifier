@@ -37,6 +37,12 @@ _SEARCH_USD = 0.01                              # per web_search request
 _ASR_USD_PER_S = (30.0 / 3600.0) / 88.0         # Sarvam ₹30/hr at ~₹88/$
 
 _current: ContextVar["UsageMeter | None"] = ContextVar("usage_meter", default=None)
+# Guards against counting one API call twice if an SDK's parse() ever routes
+# through its own create(). The installed SDK's parse() calls _post() directly
+# (checked), so this is insurance, not a live fix — but a silently doubled
+# bill is exactly the error this meter exists to prevent, and it would look
+# entirely plausible in the report.
+_in_call: ContextVar[bool] = ContextVar("usage_in_call", default=False)
 
 
 class UsageMeter:
@@ -108,25 +114,23 @@ def instrument(client) -> None:
     if getattr(messages, "_usage_instrumented", False):
         return
 
-    real_parse = messages.parse
-    real_create = messages.create
+    def wrap(real):
+        async def metered(**kw):
+            if _in_call.get():          # nested: the outer wrapper will count it
+                return await real(**kw)
+            token = _in_call.set(True)
+            try:
+                resp = await real(**kw)
+            finally:
+                _in_call.reset(token)
+            try:
+                note_llm(kw.get("model", "?"), getattr(resp, "usage", None))
+            except Exception as exc:  # noqa: BLE001 — see docstring
+                print(f"[usage] metering failed: {type(exc).__name__}: {exc}")
+            return resp
 
-    async def parse(**kw):
-        resp = await real_parse(**kw)
-        try:
-            note_llm(kw.get("model", "?"), getattr(resp, "usage", None))
-        except Exception as exc:  # noqa: BLE001 — see docstring
-            print(f"[usage] metering failed: {type(exc).__name__}: {exc}")
-        return resp
+        return metered
 
-    async def create(**kw):
-        resp = await real_create(**kw)
-        try:
-            note_llm(kw.get("model", "?"), getattr(resp, "usage", None))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[usage] metering failed: {type(exc).__name__}: {exc}")
-        return resp
-
-    messages.parse = parse
-    messages.create = create
+    messages.parse = wrap(messages.parse)
+    messages.create = wrap(messages.create)
     messages._usage_instrumented = True

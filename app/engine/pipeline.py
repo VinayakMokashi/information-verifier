@@ -60,6 +60,31 @@ def _enforce_trust(verdict: Verdict) -> Verdict:
     )
 
 
+def enforce_trust_on_report(report: TruthReport) -> TruthReport:
+    """Re-check a PERSISTED report's citations before it is served.
+
+    `_enforce_trust` runs when a verdict is built, so nothing untrusted is
+    ever cached — but a report saved last week was filtered against last
+    week's whitelist. Remove a domain from TRUSTED_DOMAINS and every stored
+    report still cites it, and the page's URL-hash resume re-serves stored
+    reports on every reload. Filtering on the way OUT is what makes the
+    guarantee hold for reports too, not just for verdicts.
+
+    Cheap (a few URL parses) and returns the same object when nothing
+    changed, so the common path allocates nothing.
+    """
+    if not report.claim_verdicts:
+        return report
+    rebuilt = [
+        cv if (clean := _enforce_trust(cv.verdict)) is cv.verdict
+        else cv.model_copy(update={"verdict": clean})
+        for cv in report.claim_verdicts
+    ]
+    if all(new is old for new, old in zip(rebuilt, report.claim_verdicts)):
+        return report
+    return report.model_copy(update={"claim_verdicts": rebuilt})
+
+
 async def _process_claim(claim: Claim, repo: ReportRepository) -> ClaimVerdict:
     cached = await _cache_call(repo.cache.get, claim.text)
     if cached is not None:

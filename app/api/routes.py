@@ -16,7 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Up
 from app.api.limits import refund, reserve
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
-from app.engine.pipeline import run_pipeline
+from app.engine.pipeline import enforce_trust_on_report, run_pipeline
 from app.models.report import JobStatus, TruthReport
 from app.providers.asr import get_asr_provider
 from app.providers.links import (
@@ -361,4 +361,6 @@ async def get_report(job_id: str) -> TruthReport:
     report = await asyncio.to_thread(_repo.get, job_id)
     if report is None:
         raise HTTPException(404, "Report not found.")
-    return report
+    # Invariant 1 on the way out of the STORE, not just out of the engine: a
+    # report saved last week was filtered against last week's whitelist.
+    return enforce_trust_on_report(report)
