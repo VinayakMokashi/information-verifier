@@ -20,8 +20,8 @@ from app.engine.pipeline import enforce_trust_on_report, run_pipeline
 from app.models.report import JobStatus, TruthReport
 from app.providers.asr import get_asr_provider
 from app.providers.links import (
-    LinkError, LinkInfo, allowed_link_host, download_link_audio, resolve_link,
-    subtitle_text,
+    SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
+    download_link_audio, resolve_link, subtitle_text,
 )
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
@@ -326,11 +326,7 @@ async def verify_link(
     with _quota(request):
         url = req.url.strip()
         if allowed_link_host(url) is None:
-            raise HTTPException(
-                422,
-                "Only public Instagram and YouTube links can be checked "
-                "(https://www.instagram.com/reel/…, https://youtube.com/shorts/…).",
-            )
+            raise HTTPException(422, SUPPORTED_LINKS_MSG)
         try:
             info = await asyncio.to_thread(resolve_link, url)
         except LinkError as exc:

@@ -15,6 +15,11 @@ any of it is built (same idea as factcheck_probe.py):
 Nothing is downloaded and no paid API is called: yt-dlp runs metadata-only.
 The only traffic is to the platform itself.
 
+Unlike /verify/link, this WILL attempt a host that is not allowlisted — and
+says so loudly — because evaluating a new platform before adding it is the
+workflow that put Facebook on the list. It is an operator tool for URLs you
+typed yourself, never an endpoint.
+
     .venv\\Scripts\\python.exe scripts\\link_probe.py <url> [<url> ...]
     .venv\\Scripts\\python.exe scripts\\link_probe.py --self-test
     .venv\\Scripts\\python.exe scripts\\link_probe.py --cookies-from chrome <url>
@@ -30,6 +35,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings  # noqa: E402
+from app.providers.links import ALLOWED_HOSTS, _classified  # noqa: E402
 
 # Sarvam bills ~Rs 30/hour by the second (PROJECT_PLAN section 8).
 _ASR_RUPEES_PER_SECOND = 30.0 / 3600.0
@@ -37,21 +43,14 @@ _ASR_RUPEES_PER_SECOND = 30.0 / 3600.0
 # A real check would only ever fetch from an allowlist — this endpoint
 # deliberately reopens the SSRF door section 7 records closing, so the probe
 # reports the host and whether it is one we would be willing to fetch.
-_ALLOWED_HOSTS = {
-    "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
-    "instagram.com", "www.instagram.com",
-    "facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com",
-    "fb.watch",
-}
+# Imported, never copied: this list decides what the SERVER will fetch,
+# and the probe's whole job is to predict /verify/link's behaviour. A
+# local copy had already drifted (missing m.instagram.com), so the probe
+# mispredicted the very thing it exists to check.
+_ALLOWED_HOSTS = ALLOWED_HOSTS
 
 
-class _Silent:
-    """yt-dlp prints its own errors to stderr; we report them ourselves."""
-
-    def debug(self, m): pass
-    def info(self, m): pass
-    def warning(self, m): pass
-    def error(self, m): pass
+from app.providers.links import _Silent  # noqa: E402  (yt-dlp logger silencer)
 
 
 def _platform(url: str) -> str:
@@ -92,27 +91,29 @@ def _indic(langs: list[str]) -> list[str]:
     return [l for l in langs if l.split("-")[0].split("_")[0] in want]
 
 
-def _diagnose(message: str) -> str:
-    """Name the failure, because 'it did not work' is not a measurement.
+# Operator-facing gloss per LinkError.kind. The CLASSIFICATION itself comes
+# from links._classified — the probe exists to predict what /verify/link will
+# do, so a second keyword list here would (and did) drift: this copy lacked
+# the rate-limit branch and disagreed with the app about "unavailable".
+_KIND_HINT = {
+    "gated": ("GATED — the platform refused anonymous access. NOTE: for a "
+              "made-up ID this looks identical to 'no such post'. Only a real "
+              "public URL distinguishes the two."),
+    "private": "PRIVATE or REMOVED.",
+    "unsupported": "NOT A MEDIA URL — no extractor matched this address.",
+    "not_found": "NOT FOUND — bad ID, or deleted.",
+    "network": "NETWORK — the platform could not be reached (or rate-limited us).",
+    "too_large": "TOO LARGE — over the byte cap.",
+    "other": "UNCLASSIFIED — read the raw message below.",
+}
 
-    The distinction that matters for /verify/link: a platform that gates
-    anonymous access (fixable only with credentials, and a policy decision)
-    versus a URL that is simply wrong (the user's problem, fixable by them).
-    """
-    m = message.lower()
-    if "cookies" in m or "login" in m or "empty media response" in m:
-        return ("GATED — the platform refused anonymous access. NOTE: for a "
-                "made-up ID this looks identical to 'no such post'. Only a real "
-                "public URL distinguishes the two.")
-    if "unsupported url" in m:
-        return "NOT A MEDIA URL — no extractor matched this address."
-    if "private" in m or "not available" in m:
-        return "PRIVATE or REMOVED."
-    if "unavailable" in m or "404" in m or "not found" in m:
-        return "NOT FOUND — bad ID, or deleted."
-    if "timed out" in m or "timeout" in m or "connection" in m:
-        return "NETWORK — could not reach the platform from this machine."
-    return "UNCLASSIFIED — read the message above."
+
+def _diagnose(exc: Exception) -> str:
+    """Name the failure exactly as the app would, because 'it did not work'
+    is not a measurement — and a probe that disagrees with the endpoint it
+    models is worse than no probe."""
+    err = _classified(exc)
+    return f"[{err.kind}] {_KIND_HINT.get(err.kind, _KIND_HINT['other'])}"
 
 
 def probe(url: str, cookies_from: str | None = None) -> None:
@@ -141,10 +142,9 @@ def probe(url: str, cookies_from: str | None = None) -> None:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # noqa: BLE001 — the whole point is to see failures
-        msg = " ".join(str(exc).split())
         print("RESOLVES  : NO")
-        print(f"Diagnosis : {_diagnose(msg)}")
-        print(f"Raw       : {msg[:200]}")
+        print(f"Diagnosis : {_diagnose(exc)}")
+        print(f"Raw       : {' '.join(str(exc).split())[:200]}")
         print("=" * 70)
         return
 

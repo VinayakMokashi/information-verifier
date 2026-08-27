@@ -39,7 +39,7 @@ import httpx
 # Exact hosts, not suffix matching: the endpoint fetches whatever this allows,
 # so a lookalike (youtube.com.evil.com) must fail. m.instagram.com and short
 # youtu.be links are how phones actually share these.
-_ALLOWED_HOSTS = {
+ALLOWED_HOSTS = {
     "instagram.com", "www.instagram.com", "m.instagram.com",
     "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
     # Facebook measured 2026-07-28: three public /videos/ URLs (PIB, I&B and
@@ -48,6 +48,20 @@ _ALLOWED_HOSTS = {
     "facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com",
     "fb.watch",
 }
+_ALLOWED_HOSTS = ALLOWED_HOSTS   # historical private name, kept for callers
+
+# The one sentence users are told about which links work. Derived from the
+# platform list, because it had already drifted: Facebook was added to the
+# hosts, the extractors and the page regex, but all three user-facing
+# messages still said "Instagram and YouTube" — so someone whose valid
+# Facebook link failed for an unrelated reason was told the platform is not
+# supported at all.
+SUPPORTED_PLATFORMS = ("Instagram", "YouTube", "Facebook")
+SUPPORTED_LINKS_MSG = (
+    "Only public "
+    + ", ".join(SUPPORTED_PLATFORMS[:-1])
+    + f" and {SUPPORTED_PLATFORMS[-1]} links can be checked (https)."
+)
 
 # yt-dlp extractor allowlist. Names are matched as regexes anchored at the
 # start, so "Youtube" also admits YoutubeTab etc. (harmless — still YouTube,
@@ -112,8 +126,9 @@ class LinkInfo:
 class _Silent:
     """yt-dlp writes to stderr regardless of quiet; failures are OUR output.
 
-    (scripts/link_probe.py carries its own copy on purpose — scripts import
-    app, never the reverse, and the probe must stay standalone.)
+    scripts/link_probe.py imports this rather than copying it: the probe's
+    job is to predict what /verify/link does, and every copied constant
+    between the two has drifted at least once.
     """
 
     def debug(self, m): pass
@@ -248,10 +263,7 @@ def resolve_link(url: str) -> LinkInfo:
     import yt_dlp  # heavy import (~1 s); loaded only when a link is actually used
 
     if allowed_link_host(url) is None:
-        raise LinkError(
-            "unsupported",
-            "Only public Instagram and YouTube links can be checked (https).",
-        )
+        raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
     try:
         with yt_dlp.YoutubeDL(_base_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -343,7 +355,7 @@ def download_link_audio(url: str, max_bytes: int) -> tuple[bytes, str]:
     import yt_dlp
 
     if allowed_link_host(url) is None:   # the route checks too; fail closed here anyway
-        raise LinkError("unsupported", "Only Instagram and YouTube links can be fetched.")
+        raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
 
     state = {"too_large": False, "too_slow": False}
     deadline = time.monotonic() + _DOWNLOAD_WALL_S
@@ -359,8 +371,8 @@ def download_link_audio(url: str, max_bytes: int) -> tuple[bytes, str]:
     with tempfile.TemporaryDirectory() as tmp:
         opts = {
             **_base_opts(),
-            # Audio-only when the platform offers it (Instagram and YouTube
-            # both do — measured); whole file otherwise. ffmpeg strips video
+            # Audio-only when the platform offers it (all three do —
+            # measured); whole file otherwise. ffmpeg strips video
             # later either way.
             "format": "bestaudio/best",
             "outtmpl": os.path.join(tmp, "media.%(ext)s"),

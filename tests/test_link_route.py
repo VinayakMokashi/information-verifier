@@ -67,7 +67,10 @@ def test_disallowed_urls_never_reach_resolve(client, url, monkeypatch):
 
     assert resp.status_code == 422
     assert calls == []                       # the server never touched the URL
-    assert "Instagram and YouTube" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    # Names every supported platform, from the single definition.
+    for platform in ("Instagram", "YouTube", "Facebook"):
+        assert platform in detail
 
 
 def test_resolve_failures_become_readable_http(client, monkeypatch):
@@ -289,12 +292,50 @@ def test_the_page_link_regex_matches_what_the_server_accepts():
     assert m, "LINK_RE not found in the page"
     link_re = _re.compile(m.group(1), _re.I)
 
-    from app.providers.links import allowed_link_host
+    from app.providers.links import ALLOWED_HOSTS, allowed_link_host
 
-    for url in [REEL, SHORT, "https://youtu.be/UiR55MZnzu0",
-                "https://m.youtube.com/watch?v=x"]:
-        assert link_re.match(url), url
-        assert allowed_link_host(url) is not None, url
+    # EVERY allowlisted host, not a hand-picked few. The old version checked
+    # four Instagram/YouTube URLs, so when Facebook was added server-side the
+    # drift this test exists to catch went unguarded for the newest platform.
+    for host in sorted(ALLOWED_HOSTS):
+        url = f"https://{host}/reel/abc123"
+        assert allowed_link_host(url) is not None, f"server rejects {url}"
+        assert link_re.match(url), (
+            f"the page would send {url} to /verify/text — a valid link "
+            "treated as a string, billed, and finding nothing")
     # And both reject a message that merely contains a link.
     mixed = "Dekho yeh! https://youtu.be/x sach hai kya?"
     assert not link_re.match(mixed)
+
+
+def test_every_user_facing_link_message_names_every_platform():
+    """Facebook was added to the hosts, extractors and page regex — but all
+    three rejection messages still said 'Instagram and YouTube', so a user
+    whose valid FB link failed was told the platform is unsupported."""
+    from app.providers.links import SUPPORTED_LINKS_MSG, SUPPORTED_PLATFORMS
+
+    for platform in SUPPORTED_PLATFORMS:
+        assert platform in SUPPORTED_LINKS_MSG
+
+    # The stale wording must not come back anywhere in shipped code.
+    import pathlib
+    for path in ["app/api/routes.py", "app/providers/links.py",
+                 "scripts/telegram_bot.py"]:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue                      # comments may quote the history
+            assert "Instagram and YouTube links" not in stripped, f"{path}: {line}"
+
+
+def test_the_probe_predicts_the_server_exactly():
+    """A probe that disagrees with the endpoint it models is worse than none."""
+    import scripts.link_probe as probe
+    from app.providers.links import ALLOWED_HOSTS
+
+    assert probe._ALLOWED_HOSTS is ALLOWED_HOSTS      # aliased, never copied
+    # And it classifies failures through the app's own classifier.
+    assert "gated" in probe._diagnose(RuntimeError("Instagram sent an empty "
+                                                   "media response, use cookies"))
+    assert "network" in probe._diagnose(RuntimeError("HTTP Error 429: Too Many"))
