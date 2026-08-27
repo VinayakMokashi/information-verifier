@@ -234,6 +234,27 @@ class AppClient:
         return None
 
 
+# Measured 2026-07-28 from this machine: getMe timed out twice before
+# succeeding on the third try. Telegram is reachable but intermittently slow
+# here, so every call to it retries — a bot that gives up on the first
+# timeout drops the reply to a check the user already paid for.
+_TG_ATTEMPTS = 3
+_TG_BACKOFF_S = 3.0
+
+
+async def _tg_retry(what: str, call):
+    """Run a Telegram call with retries. Returns None if every attempt fails."""
+    for attempt in range(1, _TG_ATTEMPTS + 1):
+        try:
+            return await call()
+        except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+            print(f"[bot] {what} attempt {attempt}/{_TG_ATTEMPTS}: "
+                  f"{type(exc).__name__}")
+            if attempt < _TG_ATTEMPTS:
+                await asyncio.sleep(_TG_BACKOFF_S)
+    return None
+
+
 class TelegramClient:
     def __init__(self, http: httpx.AsyncClient, token: str):
         self._http = http
@@ -264,29 +285,28 @@ class TelegramClient:
         """
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
                    "disable_web_page_preview": True}
-        try:
-            resp = await self._http.post(f"{self._api}/sendMessage", json=payload)
-            if resp.status_code == 200:
-                return True
-            detail = resp.text[:200]
-            print(f"[bot] sendMessage rejected ({resp.status_code}): {detail}")
-        except httpx.HTTPError as exc:
-            print(f"[bot] sendMessage failed: {type(exc).__name__}: {exc}")
-            return False
+        resp = await _tg_retry(
+            "sendMessage",
+            lambda: self._http.post(f"{self._api}/sendMessage", json=payload))
+        if resp is not None and resp.status_code == 200:
+            return True
+        if resp is not None:
+            print(f"[bot] sendMessage rejected ({resp.status_code}): {resp.text[:200]}")
 
-        plain = re.sub(r"<[^>]+>", "", text)
-        plain = html.unescape(plain)[:_TG_HARD_LIMIT]
-        try:
-            retry = await self._http.post(f"{self._api}/sendMessage", json={
+        # A rejection is usually our HTML, not the network — resend the same
+        # words with no markup rather than leaving a paid check unanswered.
+        plain = html.unescape(re.sub(r"<[^>]+>", "", text))[:_TG_HARD_LIMIT]
+        retry = await _tg_retry(
+            "sendMessage(plain)",
+            lambda: self._http.post(f"{self._api}/sendMessage", json={
                 "chat_id": chat_id, "text": plain,
                 "disable_web_page_preview": True,
-            })
-            if retry.status_code == 200:
-                print("[bot] recovered: sent as plain text")
-                return True
+            }))
+        if retry is not None and retry.status_code == 200:
+            print("[bot] recovered: sent as plain text")
+            return True
+        if retry is not None:
             print(f"[bot] plain-text retry also rejected: {retry.text[:200]}")
-        except httpx.HTTPError as exc:
-            print(f"[bot] plain-text retry failed: {type(exc).__name__}: {exc}")
         return False
 
     async def file_bytes(self, file_id: str) -> tuple[bytes, str]:
@@ -373,7 +393,37 @@ async def handle_message(
         await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
 
 
+def _utf8_console() -> None:
+    """A long-running bot must not die of a console encoding error.
+
+    It logs whatever Telegram sends back, which can carry Devanagari; on a
+    Windows console that falls back to the ANSI code page (cp1252 here) and
+    printing it raises UnicodeEncodeError — killing the process mid-poll.
+    Same hazard scripts/render.py::print_report exists for.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+async def check_token(http: httpx.AsyncClient, token: str) -> tuple[bool, str]:
+    """Validate the bot token with getMe. FREE — no message, no check, $0."""
+    resp = await _tg_retry(
+        "getMe",
+        lambda: http.get(f"https://api.telegram.org/bot{token}/getMe", timeout=45.0))
+    if resp is None:
+        return False, "could not reach Telegram after retries"
+    if resp.status_code != 200:
+        return False, f"Telegram rejected the token (HTTP {resp.status_code})"
+    me = resp.json().get("result") or {}
+    return True, f"@{me.get('username', '?')} ({me.get('first_name', '')})"
+
+
 async def main() -> None:
+    _utf8_console()
     if not settings.telegram_bot_token:
         print("No TELEGRAM_BOT_TOKEN in .env — nothing was started ($0).\n"
               "To create one (2 minutes):\n"
@@ -385,10 +435,19 @@ async def main() -> None:
     async with httpx.AsyncClient(timeout=30.0) as http:
         app = AppClient(http)
         tg = TelegramClient(http, settings.telegram_bot_token)
+
+        ok, detail = await check_token(http, settings.telegram_bot_token)
+        print(f">> Token: {'OK — ' + detail if ok else 'FAILED — ' + detail}")
+        if not ok:
+            return
+        if "--check-token" in sys.argv:
+            print(">> --check-token: nothing started, nothing spent.")
+            return
+
         try:
             await http.get(f"{APP_BASE}/../health")
         except httpx.HTTPError:
-            print(f"The app is not reachable at {APP_BASE} — start it first:\n"
+            print(f"The app is not reachable at {APP_BASE} - start it first:\n"
                   "  .venv\\Scripts\\python.exe -m uvicorn app.main:app")
             return
 
