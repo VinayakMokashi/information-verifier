@@ -192,7 +192,7 @@ link dies with it.
 |---|---|---|
 | `scripts\demo_offline.py` | Free | The engine plumbing + cache, streaming, in the console |
 | `scripts\serve_demo.py` | Free | The real chat page + real SSE, with a simulated Claude |
-| `python -m pytest tests -q` | Free | The full suite (390 tests: web, cache, media, trust filter) |
+| `python -m pytest tests -q` | Free | The full suite (397 tests: web, cache, media, trust filter) |
 | `scripts\factcheck_probe.py "claim"` | Free | Which fact-check publishers we keep vs drop |
 | `scripts\link_probe.py <url>` | Free | Whether a reel resolves, and whether it has captions |
 | `scripts\telegram_bot.py --check-token` | Free | That the bot's token still works |

@@ -23,7 +23,7 @@ NHS, Cochrane, FDA, EMA, NASA, NOAA, ESA, USGS, Nature, Science, arXiv,
 Snopes, PolitiFact, Full Fact, plus the Indian fact-checkers it started with.
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**390 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
+**397 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
 paid seam is faked).
 
 Working end to end:
@@ -866,6 +866,36 @@ global-fact-checker or non-Indian-government claim now has somewhere vetted to
 go. Every security assertion — lookalikes, parser differentials, schemes,
 userinfo — was left untouched.
 
+**The adversarial pass over the pivot found four more, all the same shape.**
+Every one of them threw away a check that had already been paid for:
+
+  1. **A dead job stranded the page forever.** Both route-level failure paths
+     (media ASR, link fetch) stored a FAILED answer and never published to the
+     job's stream. Heartbeats keep the connection open, so from the page a dead
+     job is indistinguishable from a slow one — "Checking…" stayed up
+     indefinitely for a failure already in the database. Storing the row was
+     enough when the page only polled; streaming made the stream half
+     mandatory. This is precisely what the old §11 item about three-way
+     FAILED-finalization duplication predicted, and the two copies had already
+     drifted. Now one `fail_job()`, plus a client-side deadline on `follow()`
+     so any future not-published bug degrades to polling rather than vanishing.
+  2. **Escaping expands, and the Telegram budget measured the raw string.**
+     `source_text` is ASR/OCR/caption text. 4,000 ampersands measure as 4,000
+     characters and arrive as 20,000, blowing the hard limit — reply lost.
+     Cutting the *escaped* string would be worse (a cut inside `&amp;` is the
+     broken entity Telegram rejects), so the raw text is cut and shrunk until
+     its escaped form fits.
+  3. **`_soften()` only broke on spaces**, so CJK, Thai, or one enormous token
+     produced an undroppable block and the answer vanished again — one layer
+     below the fix that had just been made for it.
+  4. **A source heading could outlive its sources**, telling the reader we
+     found general-web sources and then showing none.
+
+Each was reproduced against the unfixed code before the fix, and re-measured
+after: a combined hostile input (CJK + entities + a 4,800-char heard block + 30
+sources) now comes out at 3,829 characters with every tag balanced, the answer
+present and the sources present.
+
 **What was kept deliberately.** Every SSRF fence, the exact-host allowlist, the
 yt-dlp extractor pinning, the rate limiter's atomic reservation, the caps
 before spend, the `#job=` hash resume, `GoneError` clearing a dead hash, the
@@ -1018,9 +1048,10 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    `trusted_sources.trusted_domain_of`'s fail-closed parsing, and they already
    disagree on the hostname charset — two security boundaries to patch when the
    next parser-differential bypass appears.
-9. **FAILED-answer finalization exists in four places** (media `fail()`, link
-   `except`, and two branches in `run_check`). Forgetting `usage` in one is
-   exactly how failed reports used to lose their bill.
+9. ~~**FAILED-answer finalization exists in four places**~~ — **CLOSED
+   2026-09-11.** The two route-level copies are now one `fail_job()`, which was
+   overdue: they had drifted, and both had forgotten to close the job's stream
+   (see §7). `run_check` keeps its own because it also owns the success path.
 10. **ASR metering sits at the ffmpeg boundary**, not the ASR provider seam, so
     a future path reaching `transcribe` without `normalize_to_wav` (Sarvam's
     batch API for >30 s clips) would be silently unmetered — while the bill

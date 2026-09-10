@@ -25,7 +25,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~35s):
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 390 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 397 passing
 
 BIG CONTEXT: the app was rebuilt in Sept 2026. There is no more Truth Report,
 no rating enum, no per-claim verdicts, no semantic cache, no embeddings. One
@@ -107,7 +107,7 @@ then the Sonnet-vs-Opus A/B (item 6), then pruning stored answers (item 7).
 ## 4. WHERE THE LAST SESSION ENDED
 
 **Session of 2026-09-10/11 — the pivot is COMPLETE, committed and pushed.**
-`main` is clean, **390 tests pass**, working tree empty. Nothing is half-done.
+`main` is clean, **397 tests pass**, working tree empty. Nothing is half-done.
 
 Vinayak asked for the app to answer "like a simple claude chat" and, mid-build,
 to make it general-purpose rather than India-political. Both are done.
@@ -118,7 +118,8 @@ to make it general-purpose rather than India-political. Both are done.
 | `2602338` | the page becomes a streaming chat UI |
 | `436fa16` | the Telegram bot spoke a shape that no longer existed |
 | `10b3652` | four free-path scripts that would have died on line 1 |
-| this one | docs: CLAUDE.md invariants, PROJECT_PLAN §0–§5/§7/§8/§11, README, this file |
+| `0747cf7` | docs rewritten — the plan described a program that no longer existed |
+| `c8cdb43` | adversarial pass over my own diff: 4 more ways a paid answer was thrown away |
 
 **Two findings worth carrying forward** (both in §7 "The pivot"):
 

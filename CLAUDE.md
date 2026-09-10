@@ -65,7 +65,10 @@ limiter are both in-memory.
    as text on every surface — no links, no images, no HTML. (A markdown image
    would leak the reader's forwarded message to a third party on render.)
    Telegram is the special case: it auto-links bare URLs in message text, so
-   URLs are stripped from the prose there specifically.
+   URLs are stripped from the prose there specifically. The console renderer
+   (`scripts/render.py`) deliberately prints the prose verbatim — it is a
+   developer surface, and hiding what the model actually wrote would defeat
+   the point of running a paid check to inspect it.
 4. **Machine-read text is shown back to the user.** ASR/OCR output goes in
    `answer.source_text` and is displayed — a mis-hear must never silently
    become a confident answer about a different claim.
