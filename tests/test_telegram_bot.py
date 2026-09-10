@@ -2,8 +2,9 @@
 
 The loop is a thin shell; everything decision-shaped is a pure function or
 takes duck-typed clients. What these pin: message classification agrees with
-the server's own link gate, replies prefer the reader's language and never
-blow Telegram's length cap, and every failure becomes words in the chat.
+the server's own link gate, an Answer becomes a message that Telegram will
+actually accept, prose can never smuggle a link past the sources block, and
+every failure becomes words in the chat.
 """
 import asyncio
 
@@ -49,55 +50,97 @@ def test_voice_video_photo_and_junk():
 
 # -- reply formatting ---------------------------------------------------------
 
-def _report(**kw):
+def _answer(**kw):
     base = {
         "status": "COMPLETE",
-        "overall_rating": "FALSE",
-        "summary": "1 claim(s) checked. Overall rating: FALSE.",
         "source_text": None,
-        "claim_verdicts": [{
-            "claim": {"text": "5G spreads coronavirus."},
-            "verdict": {"rating": "FALSE", "confidence": 97,
-                        "reasoning": "Trusted sources say it is false.",
-                        "correction": "Corona spreads by droplets.",
-                        "citations": [{"url": "https://altnews.in/x",
-                                       "title": "No link", "publisher": "AltNews"}]},
+        "sections": [{
+            "tier": "trusted",
+            "markdown": (
+                "**This is false.** 5G radio waves cannot spread a virus.\n\n"
+                "Alt News and BOOM both checked this when it went viral, and "
+                "the WHO has said plainly that COVID-19 spreads through "
+                "respiratory droplets."),
         }],
-        "localized": None,
+        "sources": [{"url": "https://altnews.in/x", "title": "No link",
+                     "publisher": "AltNews", "tier": "trusted"}],
+        "confidence": 95,
+        "tier": "trusted",
+        "truncated": False,
+        "cached": False,
     }
     base.update(kw)
     return base
 
 
-def test_reply_prefers_the_readers_language():
-    report = _report(localized={
-        "language": "hi",
-        "summary": "1 दावे की जांच की गई। नतीजा: गलत।",
-        "claims": [{"claim": "5जी से कोरोना फैलता है।",
-                    "reasoning": "भरोसेमंद स्रोत कहते हैं कि यह गलत है।",
-                    "correction": "कोरोना बूंदों से फैलता है।"}],
-    })
-    reply = B.format_reply(report)
-    assert "दावे की जांच" in reply
-    assert "5जी से कोरोना" in reply
-    assert "भरोसेमंद स्रोत" in reply
-    # Citations remain English receipts either way.
+def test_the_answer_prose_is_the_reply():
+    reply = B.format_reply(_answer())
+    assert "5G radio waves cannot spread a virus" in reply
+    assert "respiratory droplets" in reply
+    # Markdown is promoted, not shown raw.
+    assert "<b>This is false.</b>" in reply
+    assert "**" not in reply
+
+
+def test_the_readers_language_survives():
+    """Devanagari in the sections comes out unchanged — no transliteration,
+    no escaping of Indic code points."""
+    hindi = "**यह दावा झूठा है।** 5जी की तरंगें वायरस नहीं फैला सकतीं।"
+    reply = B.format_reply(_answer(sections=[{"tier": "trusted", "markdown": hindi}]))
+    assert "5जी की तरंगें वायरस नहीं फैला सकतीं।" in reply
+    assert "<b>यह दावा झूठा है।</b>" in reply
+    # Sources stay in their original language — they are receipts to click,
+    # and a translated headline is unfindable on the source page.
     assert "AltNews" in reply and "https://altnews.in/x" in reply
 
 
-def test_reply_falls_back_to_english_per_claim():
-    report = _report(localized={"language": "hi", "summary": "सारांश",
-                                "claims": [None]})
-    reply = B.format_reply(report)
-    assert "5G spreads coronavirus." in reply
-    assert "Trusted sources say" in reply
+def test_evidence_badge_and_confidence_are_both_shown():
+    reply = B.format_reply(_answer())
+    assert "Fact-checkers / official sources se check kiya" in reply
+    assert "95% confident" in reply
 
 
-def test_the_badge_and_heard_text_are_present():
-    reply = B.format_reply(_report(source_text="WHO ne kaha 5G se corona"))
-    assert "❌ FALSE" in reply
+def test_a_missing_confidence_says_so_rather_than_inventing_one():
+    reply = B.format_reply(_answer(confidence=None))
+    assert "Confidence stated nahi hui" in reply
+    assert "% confident" not in reply
+
+
+def test_the_web_tier_is_labelled_not_blended_in():
+    """Merged into one blob, a random blog reads as if it carried a
+    fact-checker's authority."""
+    reply = B.format_reply(_answer(
+        tier="web",
+        sections=[{"tier": "web", "markdown": "Only a few blogs mention this."}],
+        sources=[{"url": "https://example.com/post", "title": "A post",
+                  "publisher": "example.com", "tier": "web"}],
+    ))
+    assert "Sirf aam web" in reply
+    assert "Aam web (fact-checkers nahi)" in reply
+
+
+def test_both_tiers_get_a_divider_between_them():
+    reply = B.format_reply(_answer(sections=[
+        {"tier": "trusted", "markdown": "Nobody vetted has covered this."},
+        {"tier": "web", "markdown": "A few blogs say otherwise."},
+    ]))
+    assert "Neeche sirf aam web se" in reply
+    assert reply.index("Nobody vetted") < reply.index("Neeche sirf aam web se")
+    assert reply.index("Neeche sirf aam web se") < reply.index("A few blogs")
+
+
+def test_the_heard_text_is_shown_back():
+    reply = B.format_reply(_answer(source_text="WHO ne kaha 5G se corona"))
     assert "Humne yeh suna/padha" in reply
     assert "WHO ne kaha" in reply
+
+
+def test_a_cached_answer_says_it_cost_nothing():
+    assert "kharch $0" in B.format_reply(_answer(cached=True))
+
+
+def test_a_truncated_answer_says_so():
+    assert "beech mein kat gaya" in B.format_reply(_answer(truncated=True))
 
 
 def test_failed_reports_become_words():
@@ -108,29 +151,126 @@ def test_failed_reports_become_words():
 
 
 def test_html_in_content_is_escaped():
-    report = _report()
-    report["claim_verdicts"][0]["claim"]["text"] = "<script>alert(1)</script>"
-    reply = B.format_reply(report)
+    reply = B.format_reply(_answer(sections=[
+        {"tier": "trusted", "markdown": "<script>alert(1)</script>"}]))
     assert "<script>" not in reply
     assert "&lt;script&gt;" in reply
 
 
-def test_a_long_report_drops_whole_claims_never_mid_sentence():
-    many = [{
-        "claim": {"text": f"Claim number {i} " + "x" * 400},
-        "verdict": {"rating": "UNVERIFIED", "confidence": 0,
-                    "reasoning": "y" * 400, "correction": "", "citations": []},
-    } for i in range(12)]
-    reply = B.format_reply(_report(claim_verdicts=many))
+def test_a_url_the_model_wrote_never_becomes_a_tappable_link():
+    """Invariant 3: prose is never a receipt. Telegram auto-links bare URLs in
+    message text, so a link the MODEL invented would arrive tappable and
+    indistinguishable from the vetted ones — the one surface where 'render it
+    as plain text' is not enough on its own."""
+    reply = B.format_reply(_answer(sections=[{
+        "tier": "trusted",
+        "markdown": "See [the study](https://evil.example/steal?q=secret) and "
+                    "also https://evil.example/raw for details.",
+    }]))
+    assert "evil.example" not in reply
+    assert "the study" in reply                 # the words survive
+    assert reply.count("<a href=") == 1         # only the real citation
+    assert "https://altnews.in/x" in reply
+
+
+def test_a_leaked_sentinel_never_reaches_the_reader():
+    """Invariant 7. The engine strips its own sentinel; this also runs over
+    rows written before a fix."""
+    reply = B.format_reply(_answer(sections=[{
+        "tier": "trusted",
+        "markdown": 'It is false. <verdict confidence="82" trusted="yes"/>',
+    }]))
+    assert "verdict confidence" not in reply
+    assert "It is false." in reply
+
+
+# -- length: Telegram rejects the whole message, so this is a payment bug -----
+
+def test_a_long_answer_drops_whole_paragraphs_never_mid_sentence():
+    paras = "\n\n".join(f"Paragraph number {i} " + "x" * 400 for i in range(20))
+    reply = B.format_reply(_answer(sections=[{"tier": "trusted",
+                                              "markdown": paras}]))
     assert len(reply) <= B._TG_HARD_LIMIT
-    assert "aur" in reply and "claim(s)" in reply     # the drop is disclosed
+    assert "poora jawab web page par" in reply   # the drop is DISCLOSED
+    assert not reply.rstrip().endswith("<")
+
+
+def test_a_giant_answer_never_yields_broken_html():
+    """A cut landing inside a tag or an &entity; makes Telegram reject the
+    whole message — which, before send() started checking its response, meant
+    total silence after a paid check. Conversion happens per paragraph, so a
+    cut can only land between well-formed blocks."""
+    reply = B.format_reply(_answer(
+        sections=[{"tier": "trusted",
+                   "markdown": "**bold & <angry>** para\n\n" * 400}],
+        source_text="x " * 900,
+    ))
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert reply.count("<b>") == reply.count("</b>")
+    assert reply.count("<i>") == reply.count("</i>")
+    assert not reply.rstrip().endswith("<")
+
+
+def test_a_huge_answer_cannot_push_out_the_receipts():
+    """A verdict with no sources is the failure this project exists to avoid,
+    so the receipts are reserved out of the budget before the prose gets it."""
+    reply = B.format_reply(_answer(
+        sections=[{"tier": "trusted", "markdown": "para " * 3000}]))
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert "https://altnews.in/x" in reply
+    assert "95% confident" in reply
+
+
+def test_one_enormous_paragraph_still_yields_an_answer():
+    """MEASURED: 'para ' * 3000 is ONE 15,000-char block. It fit in no budget,
+    so ALL of it was dropped and the reply was a 95%-confident badge with a
+    source link and no answer — a confident-looking verdict explaining
+    nothing, which is worse than saying nothing at all. Blocks must be
+    droppable, therefore bounded."""
+    reply = B.format_reply(_answer(
+        sections=[{"tier": "trusted", "markdown": "para " * 3000}]))
+    assert reply.count("para ") > 100, "the answer itself vanished"
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert "poora jawab web page par" in reply    # and the cut is disclosed
+
+
+def test_machine_read_text_is_not_silently_shortened():
+    """Invariant 4: a mis-hear in a hidden tail would silently become a
+    confident answer about words the sender never said."""
+    long_heard = "क ख ग " * 900          # far past any inline budget
+    reply = B.format_reply(_answer(source_text=long_heard))
+    assert "Humne yeh suna/padha" in reply
+    assert "aur characters" in reply     # the cut is DISCLOSED, not hidden
+
+    short = "WHO ne kaha 5G se corona"
+    assert "aur characters" not in B.format_reply(_answer(source_text=short))
+
+
+def test_a_quote_in_a_source_url_cannot_break_the_html():
+    """Source URLs come from search results; the trust filter checks the HOST,
+    not the query. One unescaped double quote closed the href early, Telegram
+    rejected the whole message, and the reader got silence after paying."""
+    reply = B.format_reply(_answer(sources=[
+        {"url": 'https://altnews.in/x?q="evil', "title": 'a "title"',
+         "publisher": "AltNews", "tier": "trusted"}]))
+    assert 'href="https://altnews.in/x?q=&quot;evil"' in reply
+    # Exactly one opening and one closing anchor — the tag is not broken.
+    assert reply.count("<a href=") == 1 and reply.count("</a>") == 1
+
+
+def test_a_non_http_source_url_is_never_linked():
+    reply = B.format_reply(_answer(sources=[
+        {"url": "javascript:alert(1)", "title": "x", "publisher": "evil",
+         "tier": "trusted"}]))
+    assert "javascript:" not in reply
+    assert "<a href=" not in reply
 
 
 # -- one message end to end (stub clients) ------------------------------------
 
 class StubApp:
     def __init__(self, report=None, reject=None):
-        self.report = report or _report()
+        self.report = report or _answer()
         self.reject = reject
         self.submissions = []
 
@@ -171,7 +311,7 @@ def test_text_flow_submits_polls_and_replies():
     assert app.submissions == [("text", {"text": "WHO ne kaha 5G se corona"})]
     assert len(tg.sent) == 2                      # ack + reply
     assert "Checking" in tg.sent[0][1]
-    assert "❌ FALSE" in tg.sent[1][1]
+    assert "This is false." in tg.sent[1][1]
 
 
 def test_link_flow_uses_the_link_endpoint():
@@ -215,54 +355,12 @@ def test_help_costs_nothing():
     assert "Information Verifier" in tg.sent[0][1]
 
 
-# -- review fixes (2026-07-28) ------------------------------------------------
-
-def test_a_quote_in_a_citation_url_cannot_break_the_html():
-    """Citation URLs are adjudicator output; the trust filter checks the HOST,
-    not the query. One unescaped double quote closed the href early, Telegram
-    rejected the whole message, and the reader got silence after paying."""
-    report = _report()
-    report["claim_verdicts"][0]["verdict"]["citations"] = [
-        {"url": 'https://altnews.in/x?q="evil', "title": 'a "title"',
-         "publisher": "AltNews"}]
-    reply = B.format_reply(report)
-    assert 'href="https://altnews.in/x?q=&quot;evil"' in reply
-    # Exactly one opening and one closing anchor — the tag is not broken.
-    assert reply.count("<a href=") == 1 and reply.count("</a>") == 1
-
-
-def test_machine_read_text_is_not_silently_shortened():
-    """Invariant 4: a mis-hear in a hidden tail would silently become a
-    confident verdict on words the sender never said."""
-    long_heard = "क ख ग " * 900          # far past any inline budget
-    reply = B.format_reply(_report(source_text=long_heard))
-    assert "Humne yeh suna/padha" in reply
-    assert "more characters" in reply    # the cut is DISCLOSED, not hidden
-
-    short = "WHO ne kaha 5G se corona"
-    assert "more characters" not in B.format_reply(_report(source_text=short))
-
-
-def test_a_giant_head_never_yields_broken_html():
-    """The final slice used to be able to land inside a tag or an entity."""
-    reply = B.format_reply(_report(
-        summary="<b>&amp;</b> " * 900, source_text="x " * 900))
-    assert len(reply) <= B._TG_HARD_LIMIT
-    assert reply.count("<i>") == reply.count("</i>")
-    assert not reply.rstrip().endswith("<")
-
-
-def test_localized_fallback_is_per_claim_not_per_field():
-    """The engine guarantees a translation is all-or-nothing; mixing fields
-    would invent a half-English claim it refuses to produce."""
-    report = _report(localized={"language": "hi", "summary": "सारांश",
-                                "claims": [{"claim": "5जी दावा",
-                                            "reasoning": "कारण",
-                                            "correction": ""}]})
-    reply = B.format_reply(report)
-    assert "5जी दावा" in reply and "कारण" in reply
-    # The English correction must NOT be spliced in beside Hindi prose.
-    assert "Corona spreads by droplets." not in reply
+def test_help_promises_what_the_engine_actually_does():
+    """The bot went general-purpose with the engine; a help text still
+    promising only Indian political fact-checks would undersell it and
+    mis-set expectations for a health or science question."""
+    assert "health" in B.HELP and "science" in B.HELP
+    assert "WHO" in B.HELP
 
 
 class _PendingApp(StubApp):
@@ -289,7 +387,7 @@ def test_a_slow_check_is_resumed_not_re_bought():
     _handle({"chat": {"id": 7}, "text": "kya hua?"}, app, tg, pending)
     assert len(app.submissions) == 1             # NOT resubmitted
     assert "pichla check pura hua" in tg.sent[-2][1]
-    assert "❌ FALSE" in tg.sent[-1][1]
+    assert "This is false." in tg.sent[-1][1]
     assert pending == {}
 
 

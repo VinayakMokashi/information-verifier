@@ -36,24 +36,38 @@ _TG_HARD_LIMIT = 4096     # Telegram's message cap
 _REPLY_BUDGET = 3900      # headroom under it for our own framing
 _MAX_HEARD_CHARS = 1200   # of source_text inline; any cut is disclosed
 
-_RATING_BADGE = {
-    "TRUE": "✅ TRUE — sach hai",
-    "MOSTLY_TRUE": "🟢 MOSTLY TRUE",
-    "MISLEADING": "⚠️ MISLEADING — bhramak",
-    "FALSE": "❌ FALSE — jhooth hai",
-    "UNVERIFIED": "❓ UNVERIFIED — pushti nahi ho saki",
+_SOURCE_BUDGET = 900      # receipts get a reserved slice; the prose can't eat it
+_MAX_PARA = 700           # a block must be small enough to be droppable
+
+# The badge describes the EVIDENCE, not the truth — the verdict itself is in
+# the prose, where it belongs. A tier that reads like a rating is how a reader
+# ends up thinking "general web" meant "checked and fine".
+_TIER_BADGE = {
+    "trusted": "✅ Fact-checkers / official sources se check kiya",
+    "web": "⚠️ Sirf aam web — kisi fact-checker ne ise cover nahi kiya",
+    "none": "❓ Pushti nahi ho saki — koi bharosemand source nahi mila",
 }
+
+# Defence in depth for invariant 7. The engine strips its own sentinel; this
+# also runs over rows written before a fix, where a leaked `<verdict …/>`
+# would otherwise reach a reader.
+_SENTINEL_RE = re.compile(r"<verdict\b[^>]*/?>", re.IGNORECASE)
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:[^)\s]+)\)")
+_URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
+_BULLET_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
 
 HELP = (
     "🔎 <b>Information Verifier</b>\n"
     "Bhejo:\n"
-    "• koi bhi forwarded message (text)\n"
+    "• koi bhi forwarded message (text) — kisi bhi bhasha mein\n"
     "• Instagram Reel / YouTube Shorts / Facebook video ka link\n"
     "• voice note ya video\n"
     "• screenshot / photo\n\n"
-    "Main trusted fact-checkers (AltNews, BOOM, PIB, Factly…) se check karke "
-    "jawab dunga — aapki hi bhasha mein. Galat ho sakta hoon; diye गए sources "
-    "khud padhiye."
+    "Main fact-checkers (AltNews, BOOM, PIB, Factly, Snopes, Full Fact…) aur "
+    "official sources (WHO, NASA, NIH, government sites…) se check karke "
+    "jawab dunga — aapki hi bhasha mein. Sirf India ya politics nahi: "
+    "health, science, history, kuch bhi.\n\n"
+    "Galat ho sakta hoon; diye gaye sources khud padhiye."
 )
 
 
@@ -92,89 +106,195 @@ def _e(text) -> str:
     return html.escape(str(text or ""), quote=True)
 
 
-def format_reply(report: dict) -> str:
-    """One Telegram-HTML message from a Truth Report.
+def _https(url: str) -> bool:
+    """Only ever emit an href whose scheme a reader can trust on sight."""
+    return url.lower().startswith(("https://", "http://"))
 
-    Localized-first (the whole point of back-translation), English fallback
-    per claim; citations stay in English — they are receipts, and a
-    translated headline is unfindable on the source page. Never exceeds
-    Telegram's length cap: whole claims are dropped from the end with a
-    note, not truncated mid-sentence.
+
+def _md_to_tg(markdown: str) -> str:
+    """One markdown paragraph -> Telegram HTML. Escape FIRST, then promote.
+
+    Escaping before promoting is what makes this safe: by the time any tag is
+    inserted, every `<` in the model's own prose is already `&lt;`, so the
+    only tags in the output are the ones this function put there.
     """
-    if report.get("status") == "FAILED":
+    lines: list[str] = []
+    for raw in _SENTINEL_RE.sub("", markdown).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        bullet = _BULLET_RE.match(line)
+        if bullet:
+            line = "• " + bullet.group(1)
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        # Invariant 3: prose is never a receipt. Telegram auto-links bare URLs
+        # in message text, so a URL the MODEL wrote would arrive tappable and
+        # indistinguishable from the vetted ones below. Strip both forms; the
+        # real receipts are the Sources block, built from API citations.
+        line = _MD_LINK_RE.sub(r"\1", line)
+        line = _URL_RE.sub("[link neeche Sources mein]", line)
+        line = _e(line)
+        line = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", line)
+        line = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", line)
+        line = re.sub(r"`([^`]+)`", r"<code>\1</code>", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _soften(paragraph: str) -> list[str]:
+    """Break an over-long markdown paragraph at word boundaries.
+
+    MEASURED: a single unbroken 15,000-char paragraph fit in no budget at all,
+    so the whole answer was dropped and the reader got a 95%-confident badge
+    with a source link and NOTHING ELSE — the exact failure this project
+    exists to prevent. Blocks must be droppable, so they must be bounded.
+
+    Splitting before conversion can land inside `**bold**`; the halves then
+    simply fail to match and render as literal asterisks. Slightly ugly, and
+    structurally safe — the right trade for a pathological input.
+    """
+    if len(paragraph) <= _MAX_PARA:
+        return [paragraph]
+    pieces, current = [], ""
+    for word in paragraph.split(" "):
+        if current and len(current) + 1 + len(word) > _MAX_PARA:
+            pieces.append(current)
+            current = word
+        else:
+            current = f"{current} {word}" if current else word
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def _answer_paragraphs(answer: dict) -> list[str]:
+    """The prose as independently well-formed HTML paragraphs.
+
+    Paragraph-at-a-time conversion is what lets the length budget below stay
+    safe: a cut lands BETWEEN paragraphs, so it can never land inside a tag or
+    an &entity;. The old code sliced finished HTML, and a cut inside a tag made
+    Telegram reject the whole message — silence after a paid check.
+    """
+    out: list[str] = []
+    seen_web = False
+    for section in answer.get("sections") or []:
+        markdown = section.get("markdown") or ""
+        if not markdown.strip():
+            continue
+        if section.get("tier") == "web" and not seen_web:
+            seen_web = True
+            out.append("<i>— Yahan tak fact-checkers ne kuch nahi kaha. "
+                       "Neeche sirf aam web se: —</i>")
+        for para in markdown.split("\n\n"):
+            for piece in _soften(para):
+                rendered = _md_to_tg(piece)
+                if rendered.strip():
+                    out.append(rendered)
+    return out
+
+
+def _source_lines(answer: dict) -> list[str]:
+    lines: list[str] = []
+    sources = answer.get("sources") or []
+    for tier, heading in (("trusted", "📎 <b>Sources</b>"),
+                          ("web", "🌐 <b>Aam web (fact-checkers nahi)</b>")):
+        group = [s for s in sources if (s.get("tier") or "web") == tier]
+        if not group:
+            continue
+        lines.append(heading)
+        for s in group:
+            url = str(s.get("url") or "")
+            if not _https(url):
+                continue
+            publisher = s.get("publisher") or ""
+            title = s.get("title") or ""
+            label = (f"{publisher}: {title}" if publisher and title
+                     else (publisher or title or url))
+            if len(label) > 90:
+                label = label[:87] + "…"
+            lines.append(f'<a href="{_e(url)}">{_e(label)}</a>')
+    return lines
+
+
+def _fit(blocks: list[str], limit: int, sep: str = "\n\n") -> tuple[str, int]:
+    """Take whole blocks from the front while they fit. -> (text, n_dropped)."""
+    kept: list[str] = []
+    used = 0
+    for i, block in enumerate(blocks):
+        cost = len(block) + (len(sep) if kept else 0)
+        if used + cost > limit:
+            return sep.join(kept), len(blocks) - i
+        kept.append(block)
+        used += cost
+    return sep.join(kept), 0
+
+
+def format_reply(answer: dict) -> str:
+    """One Telegram-HTML message from an Answer.
+
+    The prose IS the answer, so it gets most of the budget; the evidence badge
+    and the receipts are reserved out of it first, because they are short and
+    because a verdict with no receipts is the failure mode this whole project
+    exists to avoid. Nothing is sliced mid-string — whole blocks are dropped
+    and every drop is disclosed.
+    """
+    if answer.get("status") == "FAILED":
         return ("😕 Check nahi ho paya: "
-                f"{_e(report.get('error') or 'unknown error')}")
+                f"{_e(answer.get('error') or 'unknown error')}")
 
-    loc = report.get("localized") or {}
-    loc_claims = loc.get("claims") or []
-    parts: list[str] = []
+    tier = answer.get("tier") or "none"
+    verdict = f"<b>{_TIER_BADGE.get(tier, _TIER_BADGE['none'])}</b>"
+    confidence = answer.get("confidence")
+    if isinstance(confidence, int):
+        verdict += f"\n<b>{confidence}% confident</b>"
+    else:
+        # Confidence is always shown WITH its basis, and "not stated" is a
+        # real value — inventing a number would be worse than the blank.
+        verdict += "\n<i>Confidence stated nahi hui</i>"
+    if answer.get("cached"):
+        verdict += "  <i>(pehle check kiya hua — is baar kharch $0)</i>"
+    if answer.get("truncated"):
+        verdict += "\n<i>Jawab lamba tha, beech mein kat gaya — poora web page par.</i>"
 
-    overall = report.get("overall_rating")
-    if overall:
-        parts.append(f"<b>{_RATING_BADGE.get(overall, overall)}</b>")
-    summary = loc.get("summary") or report.get("summary")
-    if summary:
-        parts.append(_e(summary))
-    if report.get("source_text"):
+    remaining = _REPLY_BUDGET - len(verdict) - 2
+
+    # Receipts first: bounded, and the only thing that lets a reader check us.
+    # A long answer must not be able to push every source out of the message.
+    sources, _ = _fit(_source_lines(answer), min(_SOURCE_BUDGET, remaining), sep="\n")
+    if sources:
+        remaining -= len(sources) + 2
+
+    body, dropped = _fit(_answer_paragraphs(answer), max(remaining - 120, 0))
+    if dropped:
+        body += f"\n\n…aur {dropped} paragraph — poora jawab web page par."
+    if body:
+        remaining -= len(body) + 2
+
+    heard_block = ""
+    if answer.get("source_text"):
         # Invariant 4: machine-read text is SHOWN BACK, because a mis-hear
-        # silently becomes a confident verdict on words the sender never
-        # said. A hard [:500] slice hid most of the measured primary case
-        # (a 599-char caption plus a 70 s transcript) with no marker — the
-        # same hole §7 records fixing on the console. Any shortening is now
-        # disclosed, and the budget below protects the message length.
-        heard = " ".join(report["source_text"].split())
-        if len(heard) > _MAX_HEARD_CHARS:
-            heard = (heard[:_MAX_HEARD_CHARS]
-                     + f" […{len(heard) - _MAX_HEARD_CHARS} more characters — "
-                       "poora text web page par]")
-        parts.append(f"<i>Humne yeh suna/padha:</i> {_e(heard)}")
+        # silently becomes a confident answer about words the sender never
+        # said. Any shortening is disclosed — a hard slice once hid most of a
+        # measured 599-char caption with no marker at all.
+        heard = " ".join(str(answer["source_text"]).split())
+        room = min(_MAX_HEARD_CHARS, max(remaining - 80, 0))
+        if room < 80:
+            heard_block = ("<i>Humne jo suna/padha wo web page par hai — "
+                           "yahan jagah nahi bachi.</i>")
+        elif len(heard) > room:
+            heard_block = (f"<i>Humne yeh suna/padha:</i> {_e(heard[:room])}"
+                           f" […{len(heard) - room} aur characters — "
+                           "poora text web page par]")
+        else:
+            heard_block = f"<i>Humne yeh suna/padha:</i> {_e(heard)}"
 
-    claim_blocks: list[str] = []
-    for i, cv in enumerate(report.get("claim_verdicts") or []):
-        v = cv["verdict"]
-        lc = loc_claims[i] if i < len(loc_claims) else None
-        # Per-CLAIM fallback, matching the page and the console: the engine
-        # guarantees a LocalizedClaim is all-or-nothing (_accept rejects a
-        # half-translated one), so mixing fields would invent a state the
-        # engine refuses to produce — an English sentence spliced mid-claim.
-        claim_text = lc["claim"] if lc else cv["claim"]["text"]
-        reasoning = lc["reasoning"] if lc else v["reasoning"]
-        block = [f"{i + 1}. “{_e(claim_text)}”",
-                 f"{_RATING_BADGE.get(v['rating'], v['rating'])} ({v['confidence']}%)",
-                 _e(reasoning)]
-        correction = lc["correction"] if lc else v.get("correction")
-        if correction:
-            block.append(f"✔️ Sach yeh hai: {_e(correction)}")
-        for c in v.get("citations") or []:
-            block.append(f'📎 <a href="{_e(c["url"])}">{_e(c["publisher"])}: '
-                         f'{_e(c["title"])}</a>')
-        claim_blocks.append("\n".join(block))
-
-    # Drop whole BLOCKS to fit, never slice: the string is HTML, and a cut
-    # landing inside a tag or an &entity; makes Telegram reject the entire
-    # message ("can't parse entities") — which, before send() started
-    # checking its response, meant total silence after a paid check.
-    head = "\n\n".join(parts)
-    while len(head) > _REPLY_BUDGET and len(parts) > 1:
-        parts.pop()          # shed the heard-text block, then the summary
-        head = "\n\n".join(parts)
-    reply = head
-    shown = 0
-    for block in claim_blocks:
-        candidate = reply + "\n\n" + block
-        if len(candidate) > _REPLY_BUDGET:
-            break
-        reply = candidate
-        shown += 1
-    if shown < len(claim_blocks):
-        reply += (f"\n\n…aur {len(claim_blocks) - shown} claim(s) — "
-                  "poora report web page par dekhiye.")
+    reply = "\n\n".join(p for p in (heard_block, body, verdict, sources) if p)
     if len(reply) > _TG_HARD_LIMIT:
-        # Unreachable via the budget above; if it ever happens, send
-        # something valid rather than something Telegram will refuse.
-        return ("Report bahut lamba hai — poora report web page par dekhiye. "
-                f"({_e(overall or 'done')})")
-    return reply or "Koi checkable claim nahi mila."
+        # Unreachable via the budget above; if it ever happens, send something
+        # valid rather than something Telegram will refuse outright.
+        return ("Jawab bahut lamba hai — poora jawab web page par dekhiye. "
+                f"({_e(_TIER_BADGE.get(tier, tier))})")
+    return reply or "Is message mein check karne layak kuch nahi mila."
 
 
 class AppClient:
