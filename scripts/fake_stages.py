@@ -47,14 +47,15 @@ _ANSWER_HI = (
 
 _FAKE_SOURCES = [
     Source(url="https://www.boomlive.in/health/5g-coronavirus-fake",
-           title="No, 5G Does Not Spread Coronavirus", tier="trusted",
-           via="search",
+           title="No, 5G Does Not Spread Coronavirus", publisher="BOOM",
+           tier="trusted", via="search",
            cited_text="There is no link between 5G and the coronavirus."),
     Source(url="https://www.who.int/health-topics/coronavirus",
-           title="Coronavirus disease (COVID-19)", tier="trusted", via="search"),
+           title="Coronavirus disease (COVID-19)", publisher="WHO",
+           tier="trusted", via="search"),
     Source(url="https://www.altnews.in/5g-covid-viral-claim/",
-           title="Viral claim linking 5G to COVID-19 is false", tier="trusted",
-           via="factcheck"),
+           title="Viral claim linking 5G to COVID-19 is false",
+           publisher="Alt News", tier="trusted", via="factcheck"),
 ]
 
 

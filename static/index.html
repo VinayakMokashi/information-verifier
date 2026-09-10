@@ -2,124 +2,216 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Information Verifier — सच जानिए</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Information Verifier — is this true?</title>
 <style>
   :root {
-    --bg: #f5f6f8; --card: #ffffff; --ink: #1a1d21; --muted: #5c6570;
-    --accent: #1a56db; --border: #e3e6ea;
-    --true: #0e7a3d; --mostly: #4d8b31; --misleading: #b45309;
-    --false: #b91c1c; --unverified: #5c6570;
+    --bg: #fbfbfa;        --surface: #ffffff;   --surface-2: #f4f4f2;
+    --ink: #16181d;       --ink-2: #5b6270;     --ink-3: #8b93a1;
+    --line: #e6e6e3;      --accent: #1d4ed8;    --accent-soft: #eef2ff;
+    --trusted: #0e7a3d;   --trusted-soft: #e9f6ee;
+    --web: #b45309;       --web-soft: #fdf3e6;
+    --danger: #b91c1c;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(16,18,29,.04), 0 8px 24px rgba(16,18,29,.06);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #101418; --card: #1a2027; --ink: #e8eaed; --muted: #9aa4af;
-      --accent: #6ea8ff; --border: #2a323b;
+      --bg: #0d0f13;      --surface: #161920;   --surface-2: #1d212a;
+      --ink: #e9ebef;     --ink-2: #a3abba;     --ink-3: #737b8a;
+      --line: #262b35;    --accent: #7aa2ff;    --accent-soft: #1a2136;
+      --trusted: #4ade80; --trusted-soft: #12241a;
+      --web: #fbbf24;     --web-soft: #241d10;
+      --danger: #f87171;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
     }
   }
-  * { box-sizing: border-box; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    background: var(--bg); color: var(--ink);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
-    line-height: 1.55; padding: 16px; max-width: 640px; margin: 0 auto;
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Noto Sans", "Noto Sans Devanagari", sans-serif;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
   }
-  header { text-align: center; margin: 12px 0 20px; }
-  header h1 { font-size: 1.5rem; }
-  header p { color: var(--muted); font-size: .92rem; margin-top: 4px; }
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px; margin-bottom: 14px;
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px max(16px, env(safe-area-inset-left));
   }
-  textarea {
-    width: 100%; min-height: 110px; resize: vertical; font: inherit;
-    color: inherit; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px;
+  .head-inner {
+    max-width: 720px; margin: 0 auto;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   }
-  .row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
-  button {
-    font: inherit; font-weight: 600; border: 0; border-radius: 8px;
-    padding: 10px 18px; cursor: pointer; background: var(--accent); color: #fff;
+  header h1 { font-size: 1.02rem; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  header .tag { color: var(--ink-3); font-size: .82rem; }
+
+  main {
+    flex: 1; width: 100%; max-width: 720px; margin: 0 auto;
+    padding: 20px max(16px, env(safe-area-inset-left)) 8px;
   }
-  button:disabled { opacity: .55; cursor: wait; }
-  .ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
-  input[type=file] { display: none; }
-  #status { color: var(--muted); font-size: .95rem; }
-  .spin {
-    display: inline-block; width: 14px; height: 14px; vertical-align: -2px;
-    border: 2px solid var(--muted); border-top-color: transparent;
-    border-radius: 50%; animation: r 0.8s linear infinite; margin-right: 6px;
+
+  .empty { color: var(--ink-2); padding: 28px 4px 8px; }
+  .empty h2 { font-size: 1.35rem; color: var(--ink); margin: 0 0 8px; letter-spacing: -.02em; }
+  .empty p { margin: 0 0 18px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font: inherit; font-size: .86rem; color: var(--ink-2); cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 13px; text-align: left;
   }
-  @keyframes r { to { transform: rotate(360deg); } }
-  .badge {
-    display: inline-block; font-weight: 700; font-size: .85rem; color: #fff;
-    border-radius: 999px; padding: 3px 12px; letter-spacing: .02em;
-  }
-  .b-TRUE { background: var(--true); } .b-MOSTLY_TRUE { background: var(--mostly); }
-  .b-MISLEADING { background: var(--misleading); } .b-FALSE { background: var(--false); }
-  .b-UNVERIFIED { background: var(--unverified); }
-  .claim { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
-  .claim h3 { font-size: 1rem; margin-bottom: 6px; }
-  .meta { color: var(--muted); font-size: .85rem; }
-  .correction {
-    border-left: 3px solid var(--true); padding: 6px 10px; margin: 8px 0;
-    background: color-mix(in srgb, var(--true) 8%, transparent);
-    border-radius: 0 6px 6px 0; font-size: .95rem;
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .turn { margin-bottom: 26px; }
+  .mine {
+    background: var(--accent-soft); border: 1px solid transparent;
+    border-radius: var(--radius) var(--radius) 4px var(--radius);
+    padding: 11px 14px; margin: 0 0 14px auto; max-width: 86%; width: fit-content;
+    white-space: pre-wrap; overflow-wrap: anywhere;
   }
   .heard {
-    border-left: 3px solid var(--muted); padding: 6px 10px; margin: 0 0 10px;
-    background: color-mix(in srgb, var(--muted) 8%, transparent);
-    border-radius: 0 6px 6px 0; font-size: .9rem;
+    border-left: 3px solid var(--line); padding: 8px 12px; margin: 0 0 14px;
+    background: var(--surface-2); border-radius: 0 8px 8px 0;
+    font-size: .9rem; color: var(--ink-2);
   }
-  .heard .label { color: var(--muted); display: block; font-size: .8rem; }
-  .cites { margin-top: 8px; font-size: .9rem; }
-  .cites a { color: var(--accent); word-break: break-all; }
-  .langbar {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    margin-bottom: 10px; font-size: .82rem; color: var(--muted);
+  .heard b { display: block; font-weight: 600; font-size: .76rem;
+             text-transform: uppercase; letter-spacing: .05em;
+             color: var(--ink-3); margin-bottom: 3px; }
+
+  .answer { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--radius); box-shadow: var(--shadow);
+            padding: 18px 18px 6px; overflow-wrap: anywhere; }
+  .answer > :first-child { margin-top: 0; }
+  .answer p { margin: 0 0 .9em; }
+  .answer ul, .answer ol { margin: 0 0 .9em; padding-left: 1.3em; }
+  .answer li { margin-bottom: .3em; }
+  .answer strong { font-weight: 650; }
+  .answer code { background: var(--surface-2); border-radius: 4px;
+                 padding: .1em .35em; font-size: .9em; }
+
+  .status { display: flex; align-items: center; gap: 9px;
+            color: var(--ink-2); font-size: .9rem; padding: 2px 0 14px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+         animation: pulse 1.3s ease-in-out infinite; flex: none; }
+  @keyframes pulse { 0%,100% { opacity: .25; transform: scale(.8); }
+                     50% { opacity: 1; transform: scale(1.15); } }
+  .caret { display: inline-block; width: 2px; height: 1.05em;
+           background: var(--accent); vertical-align: -.18em;
+           animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tierline { display: flex; align-items: center; gap: 10px;
+              margin: 18px 0 14px; color: var(--web); font-size: .82rem;
+              font-weight: 600; }
+  .tierline::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  .foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+          border-top: 1px solid var(--line); margin-top: 14px;
+          padding: 12px 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px;
+          font-size: .8rem; font-weight: 600; border-radius: 999px;
+          padding: 4px 11px; }
+  .pill.trusted { background: var(--trusted-soft); color: var(--trusted); }
+  .pill.web     { background: var(--web-soft);     color: var(--web); }
+  .pill.none    { background: var(--surface-2);    color: var(--ink-2); }
+  .basis { color: var(--ink-3); font-size: .8rem; }
+
+  .sources { padding: 0 0 14px; }
+  .sources h3 { font-size: .76rem; text-transform: uppercase;
+                letter-spacing: .05em; color: var(--ink-3);
+                margin: 10px 0 7px; font-weight: 600; }
+  .src { display: block; text-decoration: none; color: inherit;
+         border: 1px solid var(--line); border-radius: 10px;
+         padding: 9px 12px; margin-bottom: 7px; background: var(--surface); }
+  .src:hover { border-color: var(--accent); }
+  .src .name { font-size: .78rem; font-weight: 650; color: var(--ink-2); }
+  .src .name.trusted { color: var(--trusted); }
+  .src .title { font-size: .89rem; color: var(--ink); }
+
+  .err { color: var(--danger); background: var(--surface);
+         border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+         border-radius: var(--radius); padding: 14px 16px; }
+
+  .composer { position: sticky; bottom: 0;
+              background: color-mix(in srgb, var(--bg) 90%, transparent);
+              backdrop-filter: saturate(180%) blur(12px);
+              border-top: 1px solid var(--line);
+              padding: 12px max(16px, env(safe-area-inset-left))
+                       max(12px, env(safe-area-inset-bottom)); }
+  .composer-inner { max-width: 720px; margin: 0 auto;
+                    background: var(--surface); border: 1px solid var(--line);
+                    border-radius: var(--radius); box-shadow: var(--shadow);
+                    padding: 8px 8px 8px 14px; }
+  textarea {
+    width: 100%; border: 0; outline: 0; resize: none; background: transparent;
+    color: inherit; font: inherit; line-height: 1.5;
+    max-height: 180px; padding: 6px 0;
   }
-  .langbar button {
-    font: inherit; font-weight: 600; padding: 4px 12px; border-radius: 999px;
-    background: transparent; color: var(--accent); border: 1px solid var(--accent);
-  }
-  .untranslated { color: var(--muted); font-size: .8rem; font-style: italic; }
-  footer { color: var(--muted); font-size: .8rem; text-align: center; margin: 22px 0 10px; }
-  .hidden { display: none; }
-  .error { color: var(--false); font-weight: 600; }
+  textarea::placeholder { color: var(--ink-3); }
+  .tools { display: flex; align-items: center; gap: 6px; }
+  .icon { font: inherit; font-size: 1.05rem; line-height: 1; cursor: pointer;
+          background: transparent; border: 0; color: var(--ink-2);
+          border-radius: 8px; padding: 7px 8px; }
+  .icon:hover { background: var(--surface-2); color: var(--ink); }
+  .send { margin-left: auto; font: inherit; font-weight: 600; font-size: .92rem;
+          cursor: pointer; border: 0; border-radius: 10px; padding: 8px 16px;
+          background: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=file] { display: none; }
+  .hint { max-width: 720px; margin: 8px auto 0; color: var(--ink-3);
+          font-size: .74rem; text-align: center; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🔎 Information Verifier</h1>
-  <p>Kya yeh sach hai? Paste a forwarded message — Hindi, Marathi, Tamil, Bengali,
-     English sab chalega — and get a sourced answer.</p>
+  <div class="head-inner">
+    <h1>🔎 Information Verifier</h1>
+    <span class="tag">Is this true? — paste anything and find out</span>
+  </div>
 </header>
 
-<div class="card">
-  <textarea id="text" placeholder="Paste a message — ya Instagram Reel / YouTube Shorts ka link.
-Example: WHO ne kaha hai ki 5G se coronavirus phailta hai…"></textarea>
-  <div class="row">
-    <button id="check">Check it</button>
-    <button id="pickImage" class="ghost" type="button">📷 Image</button>
-    <button id="pickMedia" class="ghost" type="button">🎤 Voice / video</button>
-    <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif">
-    <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
-    <span id="status"></span>
+<main id="thread">
+  <div class="empty" id="empty">
+    <h2>Send me something to check.</h2>
+    <p>A forwarded message, a screenshot, a voice note, or a link to a reel —
+       in any language. I'll check it against fact-checkers and official
+       sources, and tell you plainly what I find.</p>
+    <div class="chips">
+      <button class="chip" type="button" data-fill="Drinking hot water kills the coronavirus">Drinking hot water kills the coronavirus</button>
+      <button class="chip" type="button" data-fill="NASA confirmed the Earth will have 6 days of total darkness">NASA confirmed 6 days of total darkness</button>
+      <button class="chip" type="button" data-fill="डब्ल्यूएचओ ने कहा कि 5जी से कोरोना फैलता है">डब्ल्यूएचओ ने कहा कि 5जी से कोरोना फैलता है</button>
+    </div>
   </div>
+</main>
+
+<div class="composer">
+  <div class="composer-inner">
+    <textarea id="text" rows="1" placeholder="Paste a message, a claim, or a reel link…"></textarea>
+    <div class="tools">
+      <button class="icon" id="pickImage" type="button" title="Screenshot or photo">📷</button>
+      <button class="icon" id="pickMedia" type="button" title="Voice note or video">🎤</button>
+      <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif">
+      <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
+      <button class="send" id="check">Check</button>
+    </div>
+  </div>
+  <p class="hint">Answers cite fact-checkers and official sources. I can be
+     wrong — open the sources. When nobody reliable has covered something,
+     I'll say so instead of guessing.</p>
 </div>
-
-<div id="report" class="card hidden"></div>
-
-<footer>
-  Verdicts cite only trusted fact-checkers &amp; official sources (AltNews, BOOM,
-  Factly, PIB, Vishvas News&hellip;). The checker can make mistakes — always read the
-  cited sources. No verdict is given when trusted sources are silent.
-</footer>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-// Link jobs download and transcribe the video before the check even starts,
-// so they run longer than a text check — poll up to ~4 minutes.
+// Link jobs download and transcribe before the check even starts, so they run
+// longer than a text check — poll up to ~4 minutes.
 const POLL_MS = 2500, POLL_MAX = 96;
 let busy = false;
 
@@ -129,48 +221,10 @@ let busy = false;
 // a link is still a text check. The server re-validates with a stricter gate.
 const LINK_RE = /^https:\/\/(www\.|m\.|web\.)?(instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch)\/\S+$/i;
 
-const RATING_LABELS = {
-  TRUE: "TRUE — sach hai", MOSTLY_TRUE: "MOSTLY TRUE",
-  MISLEADING: "MISLEADING — bhramak", FALSE: "FALSE — jhooth hai",
-  UNVERIFIED: "UNVERIFIED — pushti nahi ho saki",
-};
-
-// Endonyms, not English names: someone who needs the Hindi answer is not
-// well served by a button labelled "Hindi". Keyed by tag AND by English name
-// because the detector may return either; unknown tags show as-is.
-const LANG_NAMES = {
-  hi: "हिंदी", mr: "मराठी", bn: "বাংলা", ta: "தமிழ்", te: "తెలుగు",
-  kn: "ಕನ್ನಡ", ml: "മലയാളം", gu: "ગુજરાતી", pa: "ਪੰਜਾਬੀ", or: "ଓଡ଼ିଆ",
-  as: "অসমীয়া", ur: "اردو", ne: "नेपाली", sa: "संस्कृतम्", kok: "कोंकणी",
-  mai: "मैथिली", sd: "سنڌي", si: "සිංහල",
-  hindi: "हिंदी", marathi: "मराठी", bengali: "বাংলা", tamil: "தமிழ்",
-  telugu: "తెలుగు", kannada: "ಕನ್ನಡ", malayalam: "മലയാളം",
-  gujarati: "ગુજરાતી", punjabi: "ਪੰਜਾਬੀ", odia: "ଓଡ଼ିଆ", urdu: "اردو",
-  assamese: "অসমীয়া", nepali: "नेपाली", konkani: "कोंकणी", maithili: "मैथिली",
-};
-
-function langLabel(tag) {
-  const t = String(tag || "").trim().toLowerCase().replace(/_/g, "-").split("-")[0];
-  // hasOwnProperty, not `LANG_NAMES[t]`: the tag reaches here from the
-  // detector, and "constructor" passes the server's tag check — a plain
-  // lookup would return Object's constructor and render it as the button.
-  return Object.prototype.hasOwnProperty.call(LANG_NAMES, t) ? LANG_NAMES[t] : tag;
-}
-
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
-}
-
-function setStatus(html) { $("status").innerHTML = html; }
-function setBusy(b) {
-  busy = b;
-  // The file inputs are disabled too: a disabled input fires no change
-  // event, so a picker that returns mid-request cannot submit at all.
-  for (const id of ["check", "pickImage", "pickMedia", "image", "media"]) {
-    $(id).disabled = b;
-  }
 }
 
 function safeUrl(u) {
@@ -179,86 +233,144 @@ function safeUrl(u) {
   return null;
 }
 
-let lastReport = null;
-let showEnglish = false;
-
-function renderReport(r) {
-  lastReport = r;
-  showEnglish = false;   // the reader's own language is the point; default to it
-  drawReport();
+// The same rule as Source.display_name on the server: a chip shows a name a
+// reader recognises. Falling through to the raw URL puts a 90-character
+// tracking link where "boomlive.in" belongs.
+function displayName(s) {
+  if (s.publisher) return s.publisher;
+  try { return new URL(s.url).hostname.replace(/^www\./, ""); }
+  catch (e) { return "source"; }
 }
 
-function drawReport() {
-  const r = lastReport;
-  const el = $("report");
-  el.classList.remove("hidden");
-  if (r.status === "FAILED") {
-    el.innerHTML = `<p class="error">Check failed.</p><p class="meta">${esc(r.error || "Unknown error")}</p>`;
-    return;
+// A deliberately small markdown subset: paragraphs, bold, italic, inline code
+// and simple lists. NO links, NO images, NO raw HTML — the model's prose is
+// never a receipt, and a markdown image would let an answer leak the reader's
+// message to a third party via its URL. Sources are rendered separately from
+// structured data the API returned.
+function md(src) {
+  const inline = (t) => esc(t)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|\W)\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+  const out = [];
+  for (const block of String(src ?? "").split(/\n{2,}/)) {
+    const lines = block.split("\n").filter((l) => l.trim());
+    if (!lines.length) continue;
+    if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
+      out.push("<ul>" + lines.map((l) =>
+        `<li>${inline(l.replace(/^\s*[-*]\s+/, ""))}</li>`).join("") + "</ul>");
+    } else if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
+      out.push("<ol>" + lines.map((l) =>
+        `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ""))}</li>`).join("") + "</ol>");
+    } else {
+      out.push(`<p>${lines.map(inline).join("<br>")}</p>`);
+    }
   }
-  // The English is what was actually adjudicated, so it stays one tap away.
-  const loc = (!showEnglish && r.localized) ? r.localized : null;
-  const parts = [];
+  return out.join("");
+}
 
-  if (r.localized) {
-    const name = langLabel(r.localized.language);
-    parts.push(`<div class="langbar">
-      <button id="langToggle" type="button">${showEnglish ? esc(name) : "English"}</button>
-      <span>${showEnglish
-        ? "This is the English we checked."
-        : "Translated automatically. The English is what we checked."}</span>
-    </div>`);
-  }
-  if (r.source_text) {
-    // Speech-to-text and OCR can drop a key word, which would mean we
-    // checked a different claim than the one sent. Show it so it's visible.
-    // Never translated — this is what a machine heard, not what we concluded.
-    // dir="auto" goes on the INNER span, not the block: it resolves from the
-    // first strong character in the element, and the English label would
-    // otherwise always win and force LTR on Urdu/Sindhi text.
-    parts.push(`<div class="heard"><span class="label">We read this from what you sent — if it's wrong, retype it above:</span><span dir="auto">${esc(r.source_text)}</span></div>`);
-  }
-  if (r.overall_rating) {
-    parts.push(`<p><span class="badge b-${esc(r.overall_rating)}">${esc(RATING_LABELS[r.overall_rating] || r.overall_rating)}</span></p>`);
-  }
-  const summary = (loc && loc.summary) || r.summary;
-  // dir="auto" throughout: Urdu and Sindhi are right-to-left, and their
-  // punctuation lands on the wrong end inside an LTR container without it.
-  if (summary) parts.push(`<p style="margin-top:8px" dir="auto">${esc(summary)}</p>`);
-  if (!r.localized && r.input_language && r.input_language !== "en") {
-    parts.push(`<p class="meta">Detected language: ${esc(r.input_language)}</p>`);
-  }
+// -- the current turn ---------------------------------------------------------
+let turn = null;
 
-  (r.claim_verdicts || []).forEach((cv, i) => {
-    const v = cv.verdict;
-    // Index-aligned with claim_verdicts, and null where that one claim's
-    // translation failed — so a hole falls back to English here rather than
-    // sliding the next claim's answer into this slot.
-    const lc = loc && loc.claims ? loc.claims[i] : null;
-    const cites = (v.citations || []).map((c) => {
-      const u = safeUrl(c.url);
-      const label = `${esc(c.publisher)}: ${esc(c.title)}`;
-      return `<li>${u ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</li>`;
+function newTurn(mine) {
+  $("empty").classList.add("hidden");
+  const el = document.createElement("div");
+  el.className = "turn";
+  el.innerHTML = `
+    ${mine ? `<div class="mine" dir="auto">${esc(mine)}</div>` : ""}
+    <div class="heard hidden"></div>
+    <div class="status"><span class="dot"></span><span class="stxt">Sending…</span></div>
+    <div class="answer hidden"></div>
+    <div class="sources"></div>`;
+  $("thread").appendChild(el);
+  turn = {
+    el,
+    heard: el.querySelector(".heard"),
+    status: el.querySelector(".status"),
+    stxt: el.querySelector(".stxt"),
+    answer: el.querySelector(".answer"),
+    sources: el.querySelector(".sources"),
+    text: { trusted: "", web: "" },
+    seenWeb: false,
+    sources_: [],
+  };
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  return turn;
+}
+
+function setStatus(text) {
+  if (!turn) return;
+  if (text) { turn.status.classList.remove("hidden"); turn.stxt.textContent = text; }
+  else turn.status.classList.add("hidden");
+}
+
+function showHeard(text) {
+  if (!turn || !text) return;
+  turn.heard.classList.remove("hidden");
+  turn.heard.innerHTML =
+    `<b>What I read from what you sent</b><span dir="auto">${esc(text)}</span>`;
+}
+
+function drawAnswer(streaming) {
+  if (!turn) return;
+  turn.answer.classList.remove("hidden");
+  let html = md(turn.text.trusted);
+  if (turn.seenWeb) {
+    html += `<div class="tierline">No fact-checker has covered this — general web</div>`
+          + md(turn.text.web);
+  }
+  if (streaming) html += `<span class="caret"></span>`;
+  turn.answer.innerHTML = html;
+  turn.answer.setAttribute("dir", "auto");
+}
+
+function drawSources(list) {
+  if (!turn) return;
+  const groups = [
+    ["trusted", "Fact-checkers & official sources"],
+    ["web", "General web — not fact-checkers"],
+  ];
+  let html = "";
+  for (const [tier, label] of groups) {
+    const rows = list.filter((s) => s.tier === tier);
+    if (!rows.length) continue;
+    html += `<h3>${label}</h3>` + rows.map((s) => {
+      const u = safeUrl(s.url);
+      const name = esc(displayName(s));
+      const title = esc(s.title || "");
+      const inner = `<span class="name ${tier === "trusted" ? "trusted" : ""}">${name}</span>`
+                  + (title ? `<div class="title">${title}</div>` : "");
+      return u ? `<a class="src" href="${u}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+               : `<div class="src">${inner}</div>`;
     }).join("");
-    parts.push(`
-      <div class="claim">
-        <h3 dir="auto">“${esc(lc ? lc.claim : cv.claim.text)}”</h3>
-        <p><span class="badge b-${esc(v.rating)}">${esc(v.rating)}</span>
-           <span class="meta"> confidence ${esc(v.confidence)}%${cv.cache_hit ? " · answered from cache" : ""}</span></p>
-        ${loc && !lc ? `<p class="untranslated">Shown in English — this one could not be translated.</p>` : ""}
-        <p style="margin-top:6px" dir="auto">${esc(lc ? lc.reasoning : v.reasoning)}</p>
-        ${(lc ? lc.correction : v.correction)
-          ? `<div class="correction"><strong>Sach yeh hai:</strong> <span dir="auto">${esc(lc ? lc.correction : v.correction)}</span></div>`
-          : ""}
-        ${cites ? `<div class="cites"><strong>Sources:</strong><ul>${cites}</ul></div>` : ""}
-      </div>`);
-  });
-
-  el.innerHTML = parts.join("") || "<p>No checkable factual claims were found in this message.</p>";
-  // Re-attached every draw: innerHTML above discards the previous element.
-  const toggle = $("langToggle");
-  if (toggle) toggle.addEventListener("click", () => { showEnglish = !showEnglish; drawReport(); });
+  }
+  turn.sources.innerHTML = html;
 }
+
+function drawFooter(report) {
+  if (!turn) return;
+  const tier = report.tier || "none";
+  const label = { trusted: "Fact-checkers", web: "General web only",
+                  none: "No sources found" }[tier];
+  const n = (report.sources || []).length;
+  const basis = { trusted: `${n} trusted source${n === 1 ? "" : "s"}`,
+                  web: `${n} general web source${n === 1 ? "" : "s"} — no fact-checker has covered this`,
+                  none: "nothing reliable addressed this" }[tier];
+  const conf = report.confidence == null
+    ? `<span class="pill none">Confidence not stated</span>`
+    : `<span class="pill ${tier}">${report.confidence}% confident</span>`;
+  const cut = report.truncated
+    ? `<span class="basis">· answer was cut short</span>` : "";
+  const cached = report.cached
+    ? `<span class="basis">· from cache</span>` : "";
+  const foot = document.createElement("div");
+  foot.className = "foot";
+  foot.innerHTML = `${conf}<span class="pill ${tier}">${label}</span>`
+                 + `<span class="basis">${basis}</span>${cut}${cached}`;
+  turn.answer.appendChild(foot);
+}
+
+// -- transport ----------------------------------------------------------------
 
 // The job behind this URL is gone for good — stop resuming it.
 class GoneError extends Error {}
@@ -273,55 +385,121 @@ async function poll(jobId) {
       // A 404 is an ANSWER, not a dropped connection: this job does not
       // exist (a bookmarked #job= from a reset database, a typo'd hash).
       // Treating it as "retrying…" trapped the page in a 4-minute loop that
-      // a refresh restarted identically, with everything else disabled.
+      // a refresh restarted identically.
       if (resp.status === 404) throw new GoneError();
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       r = await resp.json();
     } catch (e) {
       if (e instanceof GoneError) throw e;
-      setStatus(`<span class="error">Connection lost — retrying…</span>`);
+      setStatus("Connection lost — retrying…");
       continue;
     }
     if (r.status === "COMPLETE" || r.status === "FAILED") return r;
-    setStatus(`<span class="spin"></span>Checking against trusted sources… (${Math.round((i + 1) * POLL_MS / 1000)}s)`);
+    setStatus(`Checking… (${Math.round((i + 1) * POLL_MS / 1000)}s)`);
   }
-  // The job id lives in the URL hash, so the paid report is never orphaned:
-  // reloading the page resumes watching this same job.
-  throw new Error("Abhi bhi chal raha hai — is page ko refresh karke dobara dekho. " +
-                  `(job ${jobId.slice(0, 12)})`);
+  throw new Error("Abhi bhi chal raha hai — refresh karke dobara dekhiye. "
+                  + `(job ${jobId.slice(0, 12)})`);
 }
 
-// The job id is kept in the URL hash so a long check survives the page:
-// a reload (or a phone browser killing the tab) resumes polling the SAME
-// job instead of stranding a report that was already paid for.
+// The job id lives in the URL hash so a long check survives the page: a
+// reload (or a phone browser killing the tab) resumes the SAME job instead
+// of stranding an answer that was already paid for.
 function jobFromHash() {
   const m = location.hash.match(/job=([a-f0-9]{8,64})/i);
   return m ? m[1] : null;
 }
 
+/** Watch a job live over SSE, falling back to polling. Resolves when done. */
+function follow(jobId) {
+  return new Promise((resolve) => {
+    if (typeof EventSource === "undefined") return resolve(false);
+    let settled = false;
+    const es = new EventSource(`api/v1/stream/${encodeURIComponent(jobId)}`);
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      es.close();
+      resolve(ok);
+    };
+    es.addEventListener("status", (e) => setStatus(JSON.parse(e.data).text));
+    es.addEventListener("text", (e) => {
+      const d = JSON.parse(e.data);
+      if (d.tier === "web") turn.seenWeb = true;
+      turn.text[d.tier === "web" ? "web" : "trusted"] += d.text;
+      setStatus("");
+      drawAnswer(true);
+    });
+    es.addEventListener("tier", () => { turn.seenWeb = true; drawAnswer(true); });
+    es.addEventListener("source", (e) => {
+      turn.sources_.push(JSON.parse(e.data));
+      drawSources(turn.sources_);
+    });
+    es.addEventListener("done", () => finish(true));
+    es.addEventListener("error", () => finish(false));
+    es.onerror = () => finish(false);
+  });
+}
+
 async function track(jobId) {
   location.hash = "job=" + jobId;
+  await follow(jobId);
+  // The persisted Answer is canonical — always re-render from it, so what
+  // streamed and what was stored can never drift.
   const report = await poll(jobId);
   setStatus("");
-  renderReport(report);
+  render(report);
+}
+
+function render(report) {
+  if (!turn) newTurn("");
+  if (report.status === "FAILED") {
+    turn.answer.classList.remove("hidden");
+    turn.answer.innerHTML =
+      `<div class="err">${esc(report.error || "Something went wrong.")}</div>`;
+    return;
+  }
+  if (report.input_text && !turn.el.querySelector(".mine")) {
+    const mine = document.createElement("div");
+    mine.className = "mine";
+    mine.setAttribute("dir", "auto");
+    mine.textContent = report.input_text;
+    turn.el.prepend(mine);
+  }
+  showHeard(report.source_text);
+  turn.text = { trusted: "", web: "" };
+  turn.seenWeb = false;
+  for (const s of report.sections || []) {
+    if (s.tier === "web") turn.seenWeb = true;
+    turn.text[s.tier === "web" ? "web" : "trusted"] += s.markdown;
+  }
+  drawAnswer(false);
+  drawFooter(report);
+  drawSources(report.sources || []);
+}
+
+function setBusy(b) {
+  busy = b;
+  // The file inputs are disabled too: a disabled input fires no change
+  // event, so a picker that returns mid-request cannot submit at all.
+  for (const id of ["check", "pickImage", "pickMedia", "image", "media"]) {
+    $(id).disabled = b;
+  }
+  $("check").textContent = b ? "Checking…" : "Check";
 }
 
 // Takes a FACTORY, not a live promise: `submit(fetch(...))` would dispatch
 // the request while evaluating the argument, i.e. before the busy check —
 // so a second submission could spend money before the guard ever ran.
-async function submit(makeRequest) {
+async function submit(makeRequest, mine) {
   if (busy) {
     // Never silently swallow a submission. The file pickers clear their
     // input before calling this, so a silent return threw the user's pick
-    // away with no feedback — and the resume-from-hash poll can hold busy
-    // for minutes, making the whole page look broken.
-    setStatus("Ek check pehle se chal raha hai — wo pura hone ka intezaar "
-              "kijiye, phir dobara bhejiye.");
+    // away with no feedback at all.
+    setStatus("Ek check pehle se chal raha hai — thodi der rukiye.");
     return;
   }
   setBusy(true);
-  $("report").classList.add("hidden");
-  setStatus(`<span class="spin"></span>Submitting…`);
+  newTurn(mine);
   try {
     const resp = await makeRequest();
     if (!resp.ok) {
@@ -329,10 +507,12 @@ async function submit(makeRequest) {
       throw new Error(body.detail || `HTTP ${resp.status}`);
     }
     const { job_id } = await resp.json();
-    setStatus(`<span class="spin"></span>Queued…`);
+    setStatus("Queued…");
     await track(job_id);
   } catch (e) {
-    setStatus(`<span class="error">${esc(e.message)}</span>`);
+    setStatus("");
+    turn.answer.classList.remove("hidden");
+    turn.answer.innerHTML = `<div class="err">${esc(e.message)}</div>`;
   } finally {
     setBusy(false);
   }
@@ -344,40 +524,60 @@ async function submit(makeRequest) {
   const jobId = jobFromHash();
   if (!jobId) return;
   setBusy(true);
+  newTurn("");
   track(jobId)
     .catch((e) => {
       if (e instanceof GoneError) {
         // Clear the dead hash so a refresh starts fresh instead of
         // re-entering the same doomed loop.
         history.replaceState(null, "", location.pathname + location.search);
-        setStatus("Us purane check ka report ab available nahi hai — " +
-                  "naya message bhejiye.");
+        turn.el.remove();
+        turn = null;
+        $("empty").classList.remove("hidden");
         return;
       }
-      setStatus(`<span class="error">${esc(e.message)}</span>`);
+      setStatus(e.message);
     })
     .finally(() => setBusy(false));
 })();
 
+const box = $("text");
+box.addEventListener("input", () => {
+  box.style.height = "auto";
+  box.style.height = Math.min(box.scrollHeight, 180) + "px";
+});
+box.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("check").click(); }
+});
+for (const chip of document.querySelectorAll(".chip")) {
+  chip.addEventListener("click", () => {
+    box.value = chip.dataset.fill;
+    box.dispatchEvent(new Event("input"));
+    box.focus();
+  });
+}
+
 $("check").addEventListener("click", () => {
-  const text = $("text").value.trim();
-  if (!text) { setStatus("Type or paste a message — ya reel ka link."); return; }
+  const text = box.value.trim();
+  if (!text) { box.focus(); return; }
+  box.value = "";
+  box.style.height = "auto";
   if (LINK_RE.test(text)) {
     submit(() => fetch("api/v1/verify/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: text }),
-    }));
+    }), text);
     return;
   }
   submit(() => fetch("api/v1/verify/text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
-  }));
+  }), text);
 });
 
-function wireFilePicker(buttonId, inputId, endpoint) {
+function wireFilePicker(buttonId, inputId, endpoint, label) {
   $(buttonId).addEventListener("click", () => $(inputId).click());
   $(inputId).addEventListener("change", () => {
     const f = $(inputId).files[0];
@@ -385,11 +585,11 @@ function wireFilePicker(buttonId, inputId, endpoint) {
     const fd = new FormData();
     fd.append("file", f);
     $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
-    submit(() => fetch(endpoint, { method: "POST", body: fd }));
+    submit(() => fetch(endpoint, { method: "POST", body: fd }), `${label}: ${f.name}`);
   });
 }
-wireFilePicker("pickImage", "image", "api/v1/verify/image");
-wireFilePicker("pickMedia", "media", "api/v1/verify/media");
+wireFilePicker("pickImage", "image", "api/v1/verify/image", "📷 Image");
+wireFilePicker("pickMedia", "media", "api/v1/verify/media", "🎤 Voice / video");
 </script>
 </body>
 </html>
