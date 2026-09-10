@@ -99,6 +99,31 @@ async def _new_job(input_text: str = ""):
     return answer, stream
 
 
+async def fail_job(job_id: str, message: str, repo, meter: UsageMeter,
+                   stream=None) -> None:
+    """Finalize a job that failed BEFORE the engine ran, on every surface.
+
+    The stream half is not optional, and leaving it out was a real defect in
+    both callers: a stored FAILED answer that never publishes leaves an SSE
+    subscriber waiting on heartbeats forever, so the page shows "Checking…"
+    indefinitely for a failure the server has already diagnosed and written
+    down. Before streaming existed the page only polled, so saving the row was
+    enough. It is not any more.
+
+    One function because there were two, and they had already diverged — the
+    media path attached the meter snapshot, the link path very nearly did not.
+    """
+    answer = await asyncio.to_thread(repo.get, job_id)
+    if answer is not None:
+        answer.status = JobStatus.FAILED
+        answer.error = message
+        answer.usage = meter.snapshot()      # a failed fetch still spent ASR
+        answer.completed_at = datetime.now(timezone.utc)
+        await asyncio.to_thread(repo.save, answer)
+    if stream is not None:
+        await stream.publish("error", {"message": message})
+
+
 async def transcribe_wav(wav: bytes, duration: float) -> str:
     """16 kHz WAV -> transcript. The single ASR tail both audio paths use.
 
@@ -133,13 +158,7 @@ async def _run_media_job(
     checking a different claim than the one the person sent.
     """
     async def fail(message: str) -> None:
-        report = await asyncio.to_thread(repo.get, job_id)
-        if report is not None:
-            report.status = JobStatus.FAILED
-            report.error = message
-            report.usage = meter.snapshot()
-            report.completed_at = datetime.now(timezone.utc)
-            await asyncio.to_thread(repo.save, report)
+        await fail_job(job_id, message, repo, meter, stream)
 
     try:
         text = await transcribe_wav(wav, duration)
@@ -315,13 +334,7 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None) -> None:
         with meter.activate():   # the download's normalize notes ASR seconds
             text = await gather_link_text(info)
     except Exception as exc:  # noqa: BLE001 — every failure must reach the report
-        report = await asyncio.to_thread(repo.get, job_id)
-        if report is not None:
-            report.status = JobStatus.FAILED
-            report.error = _friendly_link_failure(exc)
-            report.usage = meter.snapshot()   # a failed fetch still spent ASR
-            report.completed_at = datetime.now(timezone.utc)
-            await asyncio.to_thread(repo.save, report)
+        await fail_job(job_id, _friendly_link_failure(exc), repo, meter, stream)
         return
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter)
 

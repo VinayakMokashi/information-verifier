@@ -176,6 +176,28 @@ def test_streaming_degrades_to_polling():
     assert "es.onerror" in follow
 
 
+def test_a_stream_that_never_ends_cannot_strand_the_page():
+    """MEASURED: an ASR failure stored a FAILED answer and closed nothing, so
+    the page sat on heartbeats forever showing "Checking…" for a failure
+    already in the database. The server side is fixed, but a client with no
+    deadline makes every future not-published bug invisible in the same way —
+    and the deadline is what restores poll()'s 4-minute cap."""
+    follow = PAGE[PAGE.index("function follow("):PAGE.index("async function track(")]
+    assert "setTimeout(() => finish(false), POLL_MS * POLL_MAX)" in follow
+    assert "clearTimeout(deadline)" in follow
+    # Declared before the timeout arms it — not relying on the temporal dead
+    # zone resolving in time.
+    assert follow.index("const finish =") < follow.index("deadline = setTimeout")
+
+
+def test_the_composer_is_direction_aware():
+    """Most of the people this is for type in Devanagari. dir="auto" must sit
+    on the element holding their text — measured before: an outer dir="auto"
+    was inert because an English label was the first strong character."""
+    composer = PAGE[PAGE.index('<textarea id="text"'):PAGE.index("</textarea>")]
+    assert 'dir="auto"' in composer
+
+
 # -- rendering the whole thing ------------------------------------------------
 
 def test_the_page_is_utf8_and_direction_aware():

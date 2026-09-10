@@ -256,3 +256,55 @@ def test_silent_audio_is_a_readable_failed_report(media_client, tmp_path, monkey
     report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
     assert report["status"] == "FAILED"
     assert "No speech" in report["error"]
+
+
+def test_an_asr_failure_closes_the_stream_too(media_client, tmp_path, monkeypatch):
+    """MEASURED defect: `fail()` stored a FAILED answer and never published to
+    the job's stream. The server sends SSE heartbeats to stop proxies cutting
+    the connection, so from the page a dead job looks exactly like a slow one
+    — "Checking…" stayed up forever for a failure already sitting in the
+    database. Storing the row was enough when the page only polled; streaming
+    made the stream half mandatory."""
+    import httpx
+
+    from app.api import stream as job_stream
+
+    class DownASR:
+        async def transcribe(self, audio, language_hint=None):
+            raise httpx.ConnectError("sarvam unreachable")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: DownASR())
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("note.ogg", _tone(tmp_path, 1.0), "audio/ogg")},
+    )
+    job_id = resp.json()["job_id"]
+
+    stream = job_stream.get(job_id)
+    assert stream is not None, "the stream was never registered"
+    assert stream.done, "a subscriber would wait on heartbeats forever"
+    kinds = [kind for _, kind, _ in stream.events]
+    assert "error" in kinds, f"no terminal error event: {kinds}"
+    # And the words the reader gets are the same on both halves.
+    stored = media_client.get(f"/api/v1/reports/{job_id}").json()
+    payload = next(d for _, k, d in stream.events if k == "error")
+    assert payload["message"] == stored["error"]
+
+
+def test_a_failed_job_still_carries_its_bill(media_client, tmp_path, monkeypatch):
+    """A failed fetch still spent ASR seconds. Both fail paths used to build
+    this by hand and had already drifted once."""
+    class SilentASR:
+        async def transcribe(self, audio, language_hint=None):
+            from app.providers.asr import Transcript
+
+            return Transcript(text="", language="hi-IN")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: SilentASR())
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("note.ogg", _tone(tmp_path, 1.0), "audio/ogg")},
+    )
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "FAILED"
+    assert report["usage"] is not None, "a failed job lost its bill"

@@ -106,6 +106,29 @@ def _e(text) -> str:
     return html.escape(str(text or ""), quote=True)
 
 
+def _clip_escaped(text: str, room: int) -> tuple[str, int]:
+    """Escape `text` so the RESULT fits in `room`. -> (escaped, chars dropped).
+
+    MEASURED: escaping expands — one `&` becomes `&amp;`. A caption of 4,000
+    ampersands measured as 4,000 characters and arrived as 20,000, blowing
+    Telegram's hard limit, so the reply degraded to "Jawab bahut lamba hai" and
+    an answer that had already been paid for was thrown away.
+
+    Cutting the ESCAPED string instead would be worse: a cut inside `&amp;` is
+    exactly the broken entity Telegram rejects outright. So cut the RAW text,
+    then shrink until its escaped form fits. Worst case is a 5x expansion, so
+    the proportional step converges in a couple of iterations.
+    """
+    keep = min(len(text), room)
+    while keep > 0:
+        escaped = _e(text[:keep])
+        if len(escaped) <= room:
+            return escaped, len(text) - keep
+        shrunk = keep * room // len(escaped)
+        keep = shrunk if shrunk < keep else keep - 1
+    return "", len(text)
+
+
 def _https(url: str) -> bool:
     """Only ever emit an href whose scheme a reader can trust on sight."""
     return url.lower().startswith(("https://", "http://"))
@@ -155,8 +178,21 @@ def _soften(paragraph: str) -> list[str]:
     """
     if len(paragraph) <= _MAX_PARA:
         return [paragraph]
-    pieces, current = [], ""
+    pieces: list[str] = []
+    current = ""
     for word in paragraph.split(" "):
+        # A word can itself be longer than the budget — CJK and Thai do not
+        # separate words with spaces, and one enormous token has the same
+        # shape. Breaking only on spaces left those as a single undroppable
+        # block, which is how the whole answer disappeared again.
+        while len(word) > _MAX_PARA:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(word[:_MAX_PARA])
+            word = word[_MAX_PARA:]
+        if not word:
+            continue
         if current and len(current) + 1 + len(word) > _MAX_PARA:
             pieces.append(current)
             current = word
@@ -261,6 +297,12 @@ def format_reply(answer: dict) -> str:
     # Receipts first: bounded, and the only thing that lets a reader check us.
     # A long answer must not be able to push every source out of the message.
     sources, _ = _fit(_source_lines(answer), min(_SOURCE_BUDGET, remaining), sep="\n")
+    # A heading the budget cut everything off of tells the reader we found
+    # general-web sources and then shows none of them.
+    kept = sources.splitlines()
+    while kept and not kept[-1].startswith("<a href="):
+        kept.pop()
+    sources = "\n".join(kept)
     if sources:
         remaining -= len(sources) + 2
 
@@ -277,16 +319,16 @@ def format_reply(answer: dict) -> str:
         # said. Any shortening is disclosed — a hard slice once hid most of a
         # measured 599-char caption with no marker at all.
         heard = " ".join(str(answer["source_text"]).split())
-        room = min(_MAX_HEARD_CHARS, max(remaining - 80, 0))
+        room = min(_MAX_HEARD_CHARS, max(remaining - 120, 0))
         if room < 80:
             heard_block = ("<i>Humne jo suna/padha wo web page par hai — "
                            "yahan jagah nahi bachi.</i>")
-        elif len(heard) > room:
-            heard_block = (f"<i>Humne yeh suna/padha:</i> {_e(heard[:room])}"
-                           f" […{len(heard) - room} aur characters — "
-                           "poora text web page par]")
         else:
-            heard_block = f"<i>Humne yeh suna/padha:</i> {_e(heard)}"
+            shown, dropped_chars = _clip_escaped(heard, room)
+            heard_block = f"<i>Humne yeh suna/padha:</i> {shown}"
+            if dropped_chars:
+                heard_block += (f" […{dropped_chars} aur characters — "
+                                "poora text web page par]")
 
     reply = "\n\n".join(p for p in (heard_block, body, verdict, sources) if p)
     if len(reply) > _TG_HARD_LIMIT:

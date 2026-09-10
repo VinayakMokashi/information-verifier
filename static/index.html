@@ -193,7 +193,8 @@
 
 <div class="composer">
   <div class="composer-inner">
-    <textarea id="text" rows="1" placeholder="Paste a message, a claim, or a reel link…"></textarea>
+    <textarea id="text" rows="1" dir="auto"
+              placeholder="Paste a message, a claim, or a reel link…"></textarea>
     <div class="tools">
       <button class="icon" id="pickImage" type="button" title="Screenshot or photo">📷</button>
       <button class="icon" id="pickMedia" type="button" title="Voice note or video">🎤</button>
@@ -415,12 +416,22 @@ function follow(jobId) {
     if (typeof EventSource === "undefined") return resolve(false);
     let settled = false;
     const es = new EventSource(`api/v1/stream/${encodeURIComponent(jobId)}`);
+    let deadline = 0;
     const finish = (ok) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       es.close();
       resolve(ok);
     };
+    // A stream that never terminates must not be able to strand the page.
+    // The server sends heartbeats to keep proxies from cutting the
+    // connection, so a stalled job looks exactly like a slow one from here —
+    // and a job that died without publishing (measured: an ASR failure stored
+    // a FAILED answer and closed nothing) left "Checking…" up forever, for a
+    // failure already sitting in the database. Falling through to poll() also
+    // restores its 4-minute cap and its readable give-up message.
+    deadline = setTimeout(() => finish(false), POLL_MS * POLL_MAX);
     es.addEventListener("status", (e) => setStatus(JSON.parse(e.data).text));
     es.addEventListener("text", (e) => {
       const d = JSON.parse(e.data);

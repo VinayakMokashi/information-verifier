@@ -234,6 +234,49 @@ def test_one_enormous_paragraph_still_yields_an_answer():
     assert "poora jawab web page par" in reply    # and the cut is disclosed
 
 
+def test_escaping_expansion_cannot_blow_the_message_budget():
+    """MEASURED: `source_text` is ASR / OCR / caption output — third-party
+    text. 4,000 ampersands are 4,000 characters until `_e()` turns each into
+    `&amp;`, and then they are 20,000. The budget measured the raw string, so
+    the finished reply blew Telegram's hard limit and degraded to "Jawab bahut
+    lamba hai" — throwing away an answer that had already been paid for.
+
+    Cutting the ESCAPED string instead would be worse: a cut inside `&amp;` is
+    exactly the broken entity Telegram rejects outright."""
+    reply = B.format_reply(_answer(source_text="&" * 4000))
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert "5G radio waves cannot spread a virus" in reply, "the answer vanished"
+    assert "&amp;" in reply                       # some of it still shown back
+    assert "&am;" not in reply and "&a;" not in reply   # no split entity
+    assert "aur characters" in reply              # and the cut is disclosed
+
+
+def test_a_paragraph_with_no_spaces_can_still_be_softened():
+    """_soften() broke on spaces, so a script that does not use them — or one
+    enormous unbroken token — produced a single block that fit in no budget,
+    and the whole answer was dropped again. Same failure as the 15,000-char
+    paragraph, one layer down."""
+    reply = B.format_reply(_answer(
+        sections=[{"tier": "trusted", "markdown": "字" * 9000}]))
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert reply.count("字") > 500, "the answer vanished"
+
+
+def test_a_source_heading_never_appears_with_nothing_under_it():
+    """'🌐 Aam web' followed by no links tells the reader we found general-web
+    sources and then shows none of them."""
+    sources = [{"url": f"https://altnews.in/{i}", "publisher": "AltNews",
+                "title": "x" * 78, "tier": "trusted"} for i in range(40)]
+    sources.append({"url": "https://example.com/a", "publisher": "example.com",
+                    "title": "A blog", "tier": "web"})
+    reply = B.format_reply(_answer(sources=sources))
+    for heading in ("📎 <b>Sources</b>", "🌐 <b>Aam web (fact-checkers nahi)</b>"):
+        if heading in reply:
+            after = reply[reply.index(heading) + len(heading):]
+            assert "<a href=" in after.split("\n\n")[0], \
+                f"{heading} has no sources under it"
+
+
 def test_machine_read_text_is_not_silently_shortened():
     """Invariant 4: a mis-hear in a hidden tail would silently become a
     confident answer about words the sender never said."""
