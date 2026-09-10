@@ -18,7 +18,7 @@ def test_mixed_publishers_filtered_and_drops_reported():
                 "text": "5G spreads COVID",
                 "claimReview": [
                     _review("https://www.altnews.in/a", "Alt News"),
-                    _review("https://www.politifact.com/b", "PolitiFact"),
+                    _review("https://viral-news-daily.example/b", "Viral News Daily"),
                     _review("https://www.vishvasnews.com/c", "Vishvas News"),
                 ],
             }
@@ -26,18 +26,18 @@ def test_mixed_publishers_filtered_and_drops_reported():
     }
     sources, dropped = _parse_and_filter(data)
     assert [s.publisher for s in sources] == ["Alt News", "Vishvas News"]
-    assert dropped == ["www.politifact.com"]
+    assert dropped == ["viral-news-daily.example"]
 
 
 def test_dropped_hosts_are_deduplicated():
     data = {
         "claims": [
-            {"claimReview": [_review("https://politifact.com/a"), _review("https://politifact.com/b")]}
+            {"claimReview": [_review("https://spam.example/a"), _review("https://spam.example/b")]}
         ]
     }
     sources, dropped = _parse_and_filter(data)
     assert sources == []
-    assert dropped == ["politifact.com"]
+    assert dropped == ["spam.example"]
 
 
 def test_title_formatting_and_fallbacks():

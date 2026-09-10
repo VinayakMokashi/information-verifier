@@ -72,10 +72,14 @@ async def search_factcheck(query: str) -> list[Source]:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 _ENDPOINT,
+                # No languageCode: the old pipeline always queried in
+                # English because an English pivot ran first. The chat engine
+                # has no pivot, so pinning "en" would silently return nothing
+                # for a Hindi or Spanish claim. Unset lets Google match any
+                # language its ClaimReview index covers.
                 params={
                     "query": query,
                     "key": settings.google_factcheck_api_key,
-                    "languageCode": "en",
                     "pageSize": _PAGE_SIZE,
                 },
             )

@@ -1,23 +1,37 @@
-"""The whitelist.
+"""The whitelist — what this service is willing to treat as authoritative.
 
-IMPORTANT — allowed_domains is all-or-nothing. The domains passed to the
-web_search tool's `allowed_domains` must ALL permit Anthropic's crawler. If
-even one blocks it, the ENTIRE search request fails with HTTP 400.
+Scope widened 2026-09-11 from "Indian political misinformation" to
+general-purpose claim verification: health, science, history, finance,
+technology and celebrity/viral claims, anywhere in the world. India stays
+first-class (it is the home market and the Indian fact-checkers are
+excellent), it is simply no longer the only case.
 
-Several trusted Indian news sites (Reuters, PTI, The Hindu, India Today,
-Vishvas News) block the Anthropic crawler, so they CANNOT be used with web
-search. They remain reachable through the Google Fact Check API, which indexes
-their ClaimReview markup and does not depend on our crawler.
+IMPORTANT — `allowed_domains` is all-or-nothing. Every domain passed to the
+web_search tool must permit Anthropic's crawler; if even ONE blocks it, the
+whole search request fails with HTTP 400 (measured 2026-07-24). That makes
+widening this list genuinely risky, so it is split:
 
-Curating this list is a trust decision, not a code change. When you add a
-source, put it in SEARCH_DOMAINS only after confirming the crawler can reach
-it (a quick smoke test against web search will 400 if it can't).
+  * CORE_SEARCH_DOMAINS  — crawler access verified against the live API.
+  * GLOBAL_SEARCH_CANDIDATES — added for general-purpose coverage, crawler
+    access NOT yet verified.
+
+`app/engine/chat.py` retries with CORE only if a search 400s, so an
+unverified candidate degrades coverage for one request instead of breaking
+search outright. `scripts/crawl_probe.py` promotes candidates once measured.
+
+Curating this list is a trust decision, not a code change.
+
+NOT included, deliberately: Wikipedia and other user-editable references. For
+an uncontroversial fact they would be ideal, but this product exists for
+claims someone is actively pushing — and an editable page is part of that
+attack surface. They still surface in the general-web tier, labelled as such,
+which is the honest placement.
 """
 import re
 from urllib.parse import urlparse
 
-# Crawler-accessible -> safe for web_search `allowed_domains`.
-SEARCH_DOMAINS: list[str] = [
+# Crawler access VERIFIED against the live API (2026-07-24).
+CORE_SEARCH_DOMAINS: list[str] = [
     "altnews.in",
     "boomlive.in",
     "factly.in",
@@ -25,10 +39,60 @@ SEARCH_DOMAINS: list[str] = [
     "pib.gov.in",
 ]
 
+# Added 2026-09-11 for general-purpose verification. Crawler access UNVERIFIED
+# — see the module docstring for what happens if one of these blocks the
+# crawler. Grouped by what they are authoritative ABOUT, because a health
+# claim and an astronomy claim do not have the same best source.
+GLOBAL_SEARCH_CANDIDATES: list[str] = [
+    # -- Fact-checkers (IFCN signatories and equivalents) ------------------
+    "snopes.com",
+    "politifact.com",
+    "factcheck.org",
+    "fullfact.org",
+    "leadstories.com",
+    "checkyourfact.com",
+    "africacheck.org",
+    "factcheck.afp.com",
+    "apnews.com",
+    "factcheckni.org",
+    "truthorfiction.com",
+    # -- Health and medicine ----------------------------------------------
+    "who.int",
+    "cdc.gov",
+    "nih.gov",
+    "ncbi.nlm.nih.gov",
+    "nhs.uk",
+    "cochrane.org",
+    "mayoclinic.org",
+    "healthfeedback.org",
+    "ema.europa.eu",
+    "fda.gov",
+    # -- Science, climate, space ------------------------------------------
+    "nasa.gov",
+    "noaa.gov",
+    "esa.int",
+    "usgs.gov",
+    "sciencefeedback.co",
+    "climatefeedback.org",
+    "nature.com",
+    "science.org",
+    "arxiv.org",
+    # -- Governments, courts, multilaterals --------------------------------
+    "un.org",
+    "europa.eu",
+    "gov.uk",
+    "worldbank.org",
+    "imf.org",
+    "oecd.org",
+    "sec.gov",
+    "rbi.org.in",
+    "supremecourt.gov.in",
+    "eci.gov.in",
+]
+
 # Trusted for citations but reached via the Google Fact Check API, NOT web
 # search — either they block the Anthropic crawler (verified 2026-07-24) or
-# they haven't been crawler-smoke-tested yet. A paid smoke test can promote
-# an untested entry to SEARCH_DOMAINS.
+# they have not been crawler-smoke-tested.
 FACTCHECK_ONLY_DOMAINS: list[str] = [
     # Block the crawler (verified):
     "reuters.com",
@@ -39,14 +103,25 @@ FACTCHECK_ONLY_DOMAINS: list[str] = [
     # Added 2026-07-25 (user-approved), crawler access untested:
     "thequint.com",       # ClaimReview lives on www.thequint.com (WebQoof),
                           # not the factcheck. subdomain used for web search
-    "factcrescendo.com",  # IFCN-certified, India (english./marathi./hindi. subdomains)
-    "fullfact.org",       # IFCN-certified, UK — covers global claims that reach India
-    "snopes.com",         # US — covers global claims that reach India
+    "factcrescendo.com",  # IFCN-certified, India
+    # Added 2026-09-11 with the general-purpose widening:
+    "bbc.com",
+    "bbc.co.uk",
+    "apnews.com",
+    "afp.com",
+    "dw.com",
+    "npr.org",
+    "pbs.org",
 ]
 
-# Everything we treat as trustworthy. Enforced: web search via allowed_domains
-# (server-side), Fact Check API results via trusted_domain_of() below.
-TRUSTED_DOMAINS: list[str] = SEARCH_DOMAINS + FACTCHECK_ONLY_DOMAINS
+# Offered to web_search. Order is stable so the prompt cache prefix is too.
+SEARCH_DOMAINS: list[str] = CORE_SEARCH_DOMAINS + GLOBAL_SEARCH_CANDIDATES
+
+# Everything we treat as trustworthy. Enforced two ways: web search via
+# allowed_domains (server-side) and every returned URL via trusted_domain_of.
+TRUSTED_DOMAINS: list[str] = sorted(
+    set(SEARCH_DOMAINS) | set(FACTCHECK_ONLY_DOMAINS)
+)
 
 
 # A hostname is dot-separated labels of [a-z0-9-] only. Anything else (\ or

@@ -38,7 +38,9 @@ from app.models.answer import AnswerSection, Source, Tier
 from app.providers.factcheck import search_factcheck
 from app.providers.llm import async_client
 from app.providers.usage import note_llm
-from app.trusted_sources import SEARCH_DOMAINS, trusted_domain_of
+from app.trusted_sources import (
+    CORE_SEARCH_DOMAINS, SEARCH_DOMAINS, trusted_domain_of,
+)
 
 # A paused turn must not loop forever; same backstop the old retrieval had.
 _MAX_CONTINUATIONS = 6
@@ -93,7 +95,7 @@ async def _noop_emit(kind: str, data: dict) -> None:
     return None
 
 
-def _tools(trusted: bool, remaining: int) -> list[dict]:
+def _tools(trusted: bool, remaining: int, *, core_only: bool = False) -> list[dict]:
     tool: dict = {
         "type": "web_search_20260209",
         "name": "web_search",
@@ -101,7 +103,7 @@ def _tools(trusted: bool, remaining: int) -> list[dict]:
     }
     # Mutually exclusive — one or the other, never both.
     if trusted:
-        tool["allowed_domains"] = SEARCH_DOMAINS
+        tool["allowed_domains"] = CORE_SEARCH_DOMAINS if core_only else SEARCH_DOMAINS
     else:
         tool["blocked_domains"] = _WEB_BLOCKED_DOMAINS
     return [tool]
@@ -194,6 +196,12 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
     marker = MarkerFilter()
     messages: list[dict] = [{"role": "user", "content": user_content}]
     remaining = budget
+    # `allowed_domains` is ALL-OR-NOTHING: one domain that blocks Anthropic's
+    # crawler 400s the entire request (measured 2026-07-24). The whitelist was
+    # widened well beyond the five domains that have actually been verified,
+    # so a 400 falls back to the verified core rather than losing search
+    # altogether. Coverage degrades for one request; nothing breaks.
+    core_only = False
 
     for _ in range(_MAX_CONTINUATIONS):
         try:
@@ -203,7 +211,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                 system=[{"type": "text", "text": system,
                          "cache_control": {"type": "ephemeral"}}],
                 output_config={"effort": settings.chat_effort},
-                tools=_tools(trusted, remaining),
+                tools=_tools(trusted, remaining, core_only=core_only),
                 messages=messages,
             ) as stream:
                 async for event in stream:
@@ -224,6 +232,13 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                                                     "tier": section_tier})
                 final = await stream.get_final_message()
         except anthropic.APIError as exc:
+            if (trusted and not core_only
+                    and getattr(exc, "status_code", None) == 400):
+                # Almost certainly a widened domain that blocks the crawler.
+                print(f"[chat] domain list rejected ({exc}); retrying with the "
+                      f"{len(CORE_SEARCH_DOMAINS)} verified core domains")
+                core_only = True
+                continue
             # A search-tool outage must not sink an answer we can still give.
             print(f"[chat] pass failed ({'trusted' if trusted else 'web'}): "
                   f"{type(exc).__name__}: {exc}")

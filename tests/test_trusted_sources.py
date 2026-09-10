@@ -44,9 +44,13 @@ from app.trusted_sources import is_trusted_url, trusted_domain_of
         ("//altnews.in/x", None),
         ("ftp://altnews.in/x", None),
         ("http://altnews.in/x", "altnews.in"),
-        # Publishers not on the whitelist stay untrusted
-        ("https://www.politifact.com/x", None),
-        ("https://leadstories.com/x", None),
+        # Publishers not on the whitelist stay untrusted. (These used to be
+        # PolitiFact and Lead Stories — both genuinely trusted since the
+        # 2026-09-11 widening, so the examples had to become things that
+        # will never be vetted rather than things not vetted YET.)
+        ("https://randomblog.wordpress.com/x", None),
+        ("https://viral-news-daily.example/x", None),
+        ("https://en.wikipedia.org/wiki/X", None),   # editable: web tier only
         # Normalization: case and port
         ("HTTPS://WWW.ALTNEWS.IN/Story", "altnews.in"),
         ("https://altnews.in:8443/story", "altnews.in"),
@@ -63,4 +67,26 @@ def test_trusted_domain_of(url: str, expected: str | None):
 
 def test_is_trusted_url_mirrors_domain_lookup():
     assert is_trusted_url("https://altnews.in/x")
-    assert not is_trusted_url("https://politifact.com/x")
+    assert not is_trusted_url("https://some-content-farm.example/x")
+
+
+def test_the_whitelist_covers_more_than_indian_politics():
+    """The 2026-09-11 widening: this is a general-purpose verifier now, so a
+    health, science or international claim must have somewhere vetted to go."""
+    for url in [
+        "https://www.who.int/news-room/x",          # health
+        "https://www.nasa.gov/mission/x",           # space
+        "https://www.cochrane.org/CD000000/x",      # systematic reviews
+        "https://www.snopes.com/fact-check/x",      # global fact-checker
+        "https://www.gov.uk/government/news/x",     # non-Indian government
+        "https://www.altnews.in/x",                 # and India still works
+    ]:
+        assert is_trusted_url(url), url
+
+
+def test_the_verified_core_is_a_subset_of_what_is_offered():
+    """chat.py falls back to CORE when a widened domain 400s the search."""
+    from app.trusted_sources import CORE_SEARCH_DOMAINS, SEARCH_DOMAINS
+
+    assert set(CORE_SEARCH_DOMAINS) <= set(SEARCH_DOMAINS)
+    assert len(CORE_SEARCH_DOMAINS) < len(SEARCH_DOMAINS)
