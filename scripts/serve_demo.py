@@ -1,10 +1,12 @@
 """FREE demo server — the real web app with simulated LLM stages. Costs $0.
 
-Serves the actual mobile page + REST API with every paid stage faked (LLM,
+Serves the actual chat page + REST API with every paid seam faked (Claude,
 OCR, ASR) and the real API keys swapped for dummies, so you can click through
-the whole experience — text, image, and voice — without an API key or a paisa
-spent. Every submission returns the canned 5G/COVID verdict regardless of
-input — that's expected; it's a UI demo, not a checker.
+the whole experience — text, image, voice and links — without an API key or a
+paisa spent. The canned answer STREAMS word by word over the real SSE
+endpoint, so what you see is the genuine transport. Every submission returns
+the same 5G/COVID answer regardless of input — that's expected; it's a UI
+demo, not a checker.
 
 Run from the project root, then open http://127.0.0.1:8000
     .venv\\Scripts\\python.exe scripts\\serve_demo.py
@@ -14,7 +16,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DB_PATH", "./data/demo.db")
-os.environ.setdefault("SEMANTIC_CACHE_ENABLED", "false")  # demo stays model-free
 
 import uvicorn  # noqa: E402
 
