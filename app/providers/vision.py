@@ -23,7 +23,7 @@ _OCR_PROMPT = (
 async def ocr_image(image_bytes: bytes, media_type: str) -> str:
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     resp = await async_client.messages.create(
-        model=settings.opus_model,
+        model=settings.vision_model,
         max_tokens=4000,
         messages=[
             {

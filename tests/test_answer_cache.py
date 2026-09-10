@@ -22,7 +22,6 @@ from app.store.repository import AnswerRepository, _normalize_input
 @pytest.fixture()
 def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "a.db"))
-    monkeypatch.setattr(settings, "semantic_cache_enabled", False)
     init_db()
     return AnswerRepository()
 

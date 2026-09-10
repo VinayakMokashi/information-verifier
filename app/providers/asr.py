@@ -19,7 +19,6 @@ from typing import Protocol
 import httpx
 
 from app.config import settings
-from app.models.evidence import Source  # noqa: F401  (kept for symmetry / future use)
 
 
 class Transcript:

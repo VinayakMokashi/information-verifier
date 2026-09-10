@@ -5,7 +5,7 @@ independently of the engine's internal shapes.
 """
 from pydantic import BaseModel, Field
 
-from app.models.report import JobStatus
+from app.models.answer import JobStatus
 
 
 class VerifyTextRequest(BaseModel):

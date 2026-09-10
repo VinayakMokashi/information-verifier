@@ -125,7 +125,7 @@ def test_a_post_with_nothing_to_check_is_422(client, monkeypatch):
 def test_link_flow_end_to_end_with_fakes(client):
     report = _report(client, _submit(client))
     assert report["status"] == "COMPLETE"
-    assert report["overall_rating"] == "FALSE"
+    assert report["sections"]
     # Machine-read text is shown back (invariant 4) — link text is machine-read.
     assert "simulated reel" in report["source_text"]
 

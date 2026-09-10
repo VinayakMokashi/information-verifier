@@ -1,13 +1,13 @@
 """The free demo must be structurally incapable of spending money.
 
 `share_demo.ps1 -DemoMode` puts this on a PUBLIC url advertised as costing
-nothing, so an unpatched paid seam is a real bill. These tests pin every
-seam and the dummy-key backstop.
+nothing, so an unpatched paid seam is a real bill. These tests pin every seam
+and the dummy-key backstop.
 """
 import scripts.fake_stages as F
 from app.api import routes as R
 from app.config import settings
-from app.engine import pipeline as P
+from app.engine import chat as C
 from app.providers.asr import SarvamASR
 
 
@@ -18,21 +18,15 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
 
     # apply_fake_stages assigns module attributes directly, so snapshot them
     # rather than reloading the modules (which would orphan routes' _repo).
-    seams = [(P, "normalize"), (P, "extract_claims"), (P, "gather_evidence"),
-             (P, "adjudicate"), (P, "claims_equivalent"), (P, "localize"),
-             (R, "ocr_image"), (R, "get_asr_provider"),
+    seams = [(C, "answer"), (R, "ocr_image"), (R, "get_asr_provider"),
              (R, "resolve_link"), (R, "gather_link_text")]
     originals = [(mod, name, getattr(mod, name)) for mod, name in seams]
 
     F.apply_fake_stages()
     try:
-        # Every seam that can reach a paid API is a fake.
-        assert P.normalize is F.fake_normalize
-        assert P.extract_claims is F.fake_extract
-        assert P.gather_evidence is F.fake_gather
-        assert P.adjudicate is F.fake_adjudicate
-        assert P.claims_equivalent is F.fake_equivalent
-        assert P.localize is F.fake_localize
+        # Every seam that can reach a paid API — or, for resolve_link, any
+        # network at all — is a fake.
+        assert C.answer is F.fake_answer
         assert R.ocr_image is F.fake_ocr
         assert R.resolve_link is F.fake_resolve_link
         assert R.gather_link_text is F.fake_gather_link_text
@@ -54,6 +48,21 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
     finally:
         for mod, name, original in originals:
             setattr(mod, name, original)
+
+
+def test_a_demo_text_check_never_touches_the_llm_client(client, monkeypatch):
+    """The engine seam is faked, so nothing may reach messages.stream at all."""
+    from app.providers import llm
+
+    def explode(**kw):
+        raise AssertionError("the demo reached the real Anthropic client")
+
+    monkeypatch.setattr(llm.async_client.messages, "stream", explode)
+
+    resp = client.post("/api/v1/verify/text", json={"text": "WHO ne kaha 5G"})
+    report = client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "COMPLETE"
+    assert report["usage"]["estimated_usd"] == 0.0      # honestly free
 
 
 def test_demo_voice_note_never_reaches_sarvam(client, monkeypatch, tmp_path):
@@ -85,8 +94,13 @@ def test_demo_voice_note_never_reaches_sarvam(client, monkeypatch, tmp_path):
     assert report["status"] == "COMPLETE"
 
 
-def test_fake_equivalence_is_strict():
+def test_the_canned_answer_mirrors_the_senders_script():
+    """The demo should DEMONSTRATE "answers in your language", not claim it."""
     import asyncio
 
-    assert asyncio.run(F.fake_equivalent("5G spreads COVID", "5g  spreads covid"))
-    assert not asyncio.run(F.fake_equivalent("pandemic in 2020", "pandemic in 2019"))
+    english = asyncio.run(F.fake_answer("WHO said 5G spreads corona"))
+    hindi = asyncio.run(F.fake_answer("डब्ल्यूएचओ ने कहा 5जी से कोरोना फैलता है"))
+
+    assert english.markdown.startswith("**This is false.**")
+    assert hindi.markdown.startswith("**यह दावा झूठा है।**")
+    assert english.tier == hindi.tier == "trusted"

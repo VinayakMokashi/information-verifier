@@ -1,20 +1,17 @@
 # Core
-anthropic>=0.116          # Opus 4.8 vision + web_search_20260209 + messages.parse
+anthropic>=0.116          # streaming + web_search_20260209 + vision
 fastapi>=0.115
-uvicorn[standard]>=0.30
+uvicorn[standard]>=0.30   # --workers 1: the rate limiter and the SSE registry
+                          # are both in-process
 pydantic>=2.7
 pydantic-settings>=2.3
 httpx>=0.27               # Google Fact Check API + Sarvam ASR
 python-multipart>=0.0.9   # multipart file uploads (image/audio)
 
-# Semantic claim cache (Phase 2) — local, $0 per lookup
-sqlite-vec==0.1.9         # pinned: pre-v1, warns of breaking changes
-sentence-transformers>=3.0  # EmbeddingGemma-300m on CPU (gated repo: needs HF_TOKEN once)
-
-# Reel / Shorts link ingestion — /verify/link (app/providers/links.py) and
-# the free probe (scripts/link_probe.py). Pinned to the Instagram/YouTube
+# Link ingestion — /verify/link (app/providers/links.py) and the free probe
+# (scripts/link_probe.py). Pinned to the Instagram/YouTube/Facebook
 # extractors in code; the generic extractor is never allowed to run.
-yt-dlp>=2026.7            # both platforms verified resolving anonymously (2026-07-28)
+yt-dlp>=2026.7            # all three verified resolving anonymously (2026-07-28)
 
 # Dev / tests (free to run: tests never call paid APIs)
 pytest>=8.0

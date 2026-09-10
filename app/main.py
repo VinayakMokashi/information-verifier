@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.api.stream import router as stream_router
 from app.config import settings
 from app.store.db import init_db
 
@@ -94,6 +95,14 @@ class LimitUploadSize:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
+    # is dead by definition — it would otherwise be polled forever by a page
+    # that will never get an answer.
+    from app.store.repository import AnswerRepository
+
+    healed = AnswerRepository().sweep_orphans()
+    if healed:
+        print(f"[startup] failed {healed} job(s) orphaned by a restart")
     yield
 
 
@@ -111,6 +120,7 @@ app = FastAPI(
 app.add_middleware(LimitUploadSize)
 
 app.include_router(router)
+app.include_router(stream_router)
 
 
 @app.get("/health")

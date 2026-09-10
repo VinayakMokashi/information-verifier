@@ -16,8 +16,9 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Up
 from app.api.limits import refund, reserve
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
-from app.engine.pipeline import enforce_trust_on_report, run_pipeline
-from app.models.report import JobStatus, TruthReport
+from app.api import stream as job_stream
+from app.engine.job import run_check
+from app.models.answer import Answer, JobStatus
 from app.providers.asr import get_asr_provider
 from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
@@ -26,10 +27,11 @@ from app.providers.links import (
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
 from app.providers.vision import ocr_image
-from app.store.repository import ReportRepository
+from app.trusted_sources import is_trusted_url
+from app.store.repository import AnswerRepository
 
 router = APIRouter(prefix="/api/v1")
-_repo = ReportRepository()
+_repo = AnswerRepository()
 
 _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 # ffmpeg sniffs the real container, so the type gate is deliberately loose —
@@ -76,16 +78,25 @@ def _quota(request: Request):
         raise
 
 
-async def _new_job() -> TruthReport:
-    report = TruthReport(
+async def _new_job(input_text: str = ""):
+    """Create the job row AND its event stream before the 202 is sent.
+
+    Registration order is load-bearing: the page opens its EventSource the
+    moment it has a job_id, which can be before the BackgroundTask has
+    started. If the job created the stream, that race would drop the opening
+    events of every fast check.
+    """
+    answer = Answer(
         job_id=uuid.uuid4().hex,
         status=JobStatus.QUEUED,
         created_at=datetime.now(timezone.utc),
+        input_text=input_text,
     )
     # SQLite calls are synchronous and can wait on a write lock; off the loop
     # so one contended write cannot stall every other request in the server.
-    await asyncio.to_thread(_repo.save, report)
-    return report
+    await asyncio.to_thread(_repo.save, answer)
+    stream = job_stream.create(answer.job_id)
+    return answer, stream
 
 
 async def transcribe_wav(wav: bytes, duration: float) -> str:
@@ -111,7 +122,7 @@ async def transcribe_wav(wav: bytes, duration: float) -> str:
 
 
 async def _run_media_job(
-    job_id: str, wav: bytes, duration: float, repo: ReportRepository, meter: UsageMeter
+    job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> pipeline.
 
@@ -149,7 +160,7 @@ async def _run_media_job(
     if not text:
         await fail("No speech could be transcribed from this audio.")
         return
-    await run_pipeline(job_id, text, repo, derived_text=text, meter=meter)
+    await run_check(job_id, text, repo, stream, derived_text=text, meter=meter)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -163,9 +174,9 @@ async def verify_text(
                 f"That message is {len(req.text)} characters; the limit is "
                 f"{settings.max_input_chars}. Send the part you want checked.",
             )
-        report = await _new_job()
-        background.add_task(run_pipeline, report.job_id, req.text, _repo)
-        return JobAccepted(job_id=report.job_id, status=report.status)
+        answer, stream = await _new_job(req.text)
+        background.add_task(run_check, answer.job_id, req.text, _repo, stream)
+        return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
 @router.post("/verify/image", response_model=JobAccepted, status_code=202)
@@ -185,10 +196,10 @@ async def verify_image(
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
 
-        report = await _new_job()
-        background.add_task(run_pipeline, report.job_id, extracted, _repo, extracted,
-                            meter=meter)
-        return JobAccepted(job_id=report.job_id, status=report.status)
+        answer, stream = await _new_job(extracted)
+        background.add_task(run_check, answer.job_id, extracted, _repo, stream,
+                            derived_text=extracted, meter=meter)
+        return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
 @router.post("/verify/media", response_model=JobAccepted, status_code=202)
@@ -231,9 +242,10 @@ async def verify_media(
         # at ~100 s while the server kept spending, and a 202-then-poll
         # contract survives that. Same trade as /verify/link, same documented
         # cost: the quota slot stays consumed even if transcription fails.
-        report = await _new_job()
-        background.add_task(_run_media_job, report.job_id, wav, duration, _repo, meter)
-        return JobAccepted(job_id=report.job_id, status=report.status)
+        answer, stream = await _new_job()
+        background.add_task(_run_media_job, answer.job_id, wav, duration, _repo,
+                            meter, stream)
+        return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
 # LinkError.kind -> HTTP status. Everything the user can fix is 422; only a
@@ -291,11 +303,11 @@ def _friendly_link_failure(exc: Exception) -> str:
     return "Something went wrong reading that link. Please try again."
 
 
-async def _run_link_job(job_id: str, info: LinkInfo, repo: ReportRepository) -> None:
+async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None) -> None:
     """Background half: fetch the text, then run the normal pipeline.
 
     A failure here becomes a FAILED report with a readable error (the page
-    renders those), never a silent PROCESSING-forever. run_pipeline guards
+    renders those), never a silent PROCESSING-forever. run_check guards
     itself; this guard covers the fetch/ASR work before it.
     """
     meter = UsageMeter()
@@ -311,7 +323,7 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo: ReportRepository) -> 
             report.completed_at = datetime.now(timezone.utc)
             await asyncio.to_thread(repo.save, report)
         return
-    await run_pipeline(job_id, text, repo, derived_text=text, meter=meter)
+    await run_check(job_id, text, repo, stream, derived_text=text, meter=meter)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)
@@ -354,16 +366,37 @@ async def verify_link(
         if not info.has_media and not info.caption.strip():
             raise HTTPException(422, "That post has no video and no caption to check.")
 
-        report = await _new_job()
-        background.add_task(_run_link_job, report.job_id, info, _repo)
-        return JobAccepted(job_id=report.job_id, status=report.status)
+        answer, stream = await _new_job(url)
+        background.add_task(_run_link_job, answer.job_id, info, _repo, stream)
+        return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
-@router.get("/reports/{job_id}", response_model=TruthReport)
-async def get_report(job_id: str) -> TruthReport:
-    report = await asyncio.to_thread(_repo.get, job_id)
-    if report is None:
+def relabel_sources(answer: Answer) -> Answer:
+    """Re-derive every source's tier at SERVE time, not just at write time.
+
+    An answer stored last week was labelled against last week's whitelist,
+    and the page re-serves stored answers on every reload of a #job= link.
+    Dropping a domain from TRUSTED_DOMAINS has to reach history too, or
+    curating the list is theatre. Returns the same object when nothing
+    changed, so the common path allocates nothing.
+    """
+    if not answer.sources:
+        return answer
+    fixed = [
+        s if s.tier == (t := "trusted" if is_trusted_url(s.url) else "web")
+        else s.model_copy(update={"tier": t})
+        for s in answer.sources
+    ]
+    if all(new is old for new, old in zip(fixed, answer.sources)):
+        return answer
+    tier = ("trusted" if any(s.tier == "trusted" for s in fixed)
+            else "web" if fixed else "none")
+    return answer.model_copy(update={"sources": fixed, "tier": tier})
+
+
+@router.get("/reports/{job_id}", response_model=Answer)
+async def get_report(job_id: str) -> Answer:
+    answer = await asyncio.to_thread(_repo.get, job_id)
+    if answer is None:
         raise HTTPException(404, "Report not found.")
-    # Invariant 1 on the way out of the STORE, not just out of the engine: a
-    # report saved last week was filtered against last week's whitelist.
-    return enforce_trust_on_report(report)
+    return relabel_sources(answer)

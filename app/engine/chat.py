@@ -113,6 +113,13 @@ def _tier_of(url: str) -> Tier:
     return "trusted" if trusted_domain_of(url) else "web"
 
 
+def _publisher_of(url: str) -> str:
+    """A readable name for a source chip, from the host."""
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "").removeprefix("www.")
+
+
 def _collect_sources(message) -> list[Source]:
     """Sources from the API's own structures — citations first, then results.
 
@@ -128,6 +135,7 @@ def _collect_sources(message) -> list[Source]:
         existing = found.get(url)
         if existing is None:
             found[url] = Source(url=url, title=title or "",
+                                publisher=_publisher_of(url),
                                 tier=_tier_of(url), via="search",
                                 cited_text=cited or "")
         elif cited and not existing.cited_text:
@@ -304,7 +312,8 @@ async def answer(text: str, *, heard: str | None = None,
 
     user_content = _render_input(text, heard, factchecks)
     prior = [
-        Source(url=s.url, title=s.title, tier=_tier_of(s.url), via="factcheck")
+        Source(url=s.url, title=s.title, publisher=s.publisher,
+               tier=_tier_of(s.url), via="factcheck")
         for s in factchecks
     ]
 

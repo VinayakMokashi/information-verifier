@@ -23,7 +23,7 @@ mid-way — the conservative direction for a spend figure.
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from app.models.report import ModelUsage, ReportUsage
+from app.models.answer import ModelUsage, ReportUsage
 
 # $ per MTok, list prices. Tokens in a ReportUsage are measured facts; only
 # the dollar estimate inherits this table's staleness. Cache writes bill at

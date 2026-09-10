@@ -307,11 +307,11 @@ def test_an_api_error_still_yields_whatever_streamed(no_factcheck, monkeypatch):
 # -- the free Fact Check head start -------------------------------------------
 
 def test_prior_factchecks_are_injected_and_tiered(monkeypatch):
-    from app.models.evidence import Source as EvidenceSource
+    from app.models.answer import Source as FactCheckSource
 
     async def one(_query):
-        return [EvidenceSource(url=TRUSTED_URL, title="[Rated: False] X",
-                               publisher="AltNews")]
+        return [FactCheckSource(url=TRUSTED_URL, title="[Rated: False] X",
+                                publisher="AltNews")]
 
     monkeypatch.setattr(C, "search_factcheck", one)
     client = StubClient([(

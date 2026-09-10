@@ -80,10 +80,10 @@ def test_voice_note_flow(media_client, tmp_path):
     assert media_client.fake_asr.calls == 1
     report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
     assert report["status"] == "COMPLETE"
-    assert report["overall_rating"] == "FALSE"
+    assert report["sections"]
     # The transcript must be shown back: ASR can drop a claim's key term
     # (measured: "5जी" vanished from a real Hindi clip), and a silent
-    # mis-hear means checking a different claim than the one sent.
+    # mis-hear means answering a different claim than the one sent.
     assert report["source_text"] == "WHO ne kaha 5G se corona hota hai"
 
 

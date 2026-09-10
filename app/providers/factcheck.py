@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import settings
-from app.models.evidence import Source
+from app.models.answer import Source
 from app.trusted_sources import trusted_domain_of
 
 _ENDPOINT = "https://factchecktools.googleapis.com/v1alpha1/claims:search"

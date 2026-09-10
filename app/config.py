@@ -18,9 +18,8 @@ class Settings(BaseSettings):
     hf_token: str = ""  # Hugging Face token — EmbeddingGemma is a gated repo
     telegram_bot_token: str = ""  # from @BotFather; used only by scripts/telegram_bot.py
 
-    # Model tiers  (see docs: $5/$25 vs $1/$5 per MTok)
-    opus_model: str = "claude-opus-4-8"   # adjudication, extraction, vision OCR
-    haiku_model: str = "claude-haiku-4-5"  # language detect + translation
+    # Vision OCR still needs a model of its own (it is not the chat call).
+    vision_model: str = "claude-sonnet-5"
 
     # Storage
     db_path: str = "./data/verifier.db"
@@ -43,24 +42,8 @@ class Settings(BaseSettings):
     answer_cache_ttl_trusted_h: int = 168   # 7 days
     answer_cache_ttl_web_h: int = 24
 
-    # Retrieval
-    max_search_uses: int = 4  # cap web_search rounds per claim (each ~$0.01)
 
-    # Semantic claim cache (Phase 2) — local EmbeddingGemma via sentence-transformers
-    semantic_cache_enabled: bool = True
-    embedding_model: str = "google/embeddinggemma-300m"
-    embedding_dim: int = 256      # Matryoshka truncation; must match the vec0 DDL
-    # Max cosine DISTANCE for the vector index to NOMINATE a cached claim as a
-    # candidate. Candidates are never served directly — calibration showed a
-    # one-token swap (2020->2019) sits at distance 0.03, closer than real
-    # paraphrases — a Haiku equivalence check confirms every candidate first.
-    semantic_candidate_distance: float = 0.20
 
-    # Back-translation (Phase 2) — answer in the language the message arrived
-    # in. Additive: the English report is canonical, so turning this off (or a
-    # failure) costs the reader a translation, never a verdict.
-    translate_reports: bool = True
-    max_translate_chars: int = 12000  # source prose per report; bounds Haiku spend
 
     # Media (Phase 2) — audio/video via ffmpeg + Sarvam Saaras
     max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap
@@ -75,7 +58,6 @@ class Settings(BaseSettings):
     max_checks_per_hour: int = 10   # per visitor IP
     max_checks_per_day: int = 100   # across the whole deployment
     max_input_chars: int = 5000     # a forwarded message, not a book
-    max_claims_per_report: int = 8  # hard ceiling on paid fan-out per submission
 
 
 @lru_cache

@@ -73,9 +73,19 @@ class Source(BaseModel):
 
     url: str
     title: str = ""
+    publisher: str = ""      # "BOOM", "WHO" — what a reader recognises
     tier: Tier = "web"
     via: Literal["search", "factcheck"] = "search"
     cited_text: str = ""
+
+    @property
+    def display_name(self) -> str:
+        """Publisher if we have one, else the bare host. Never an empty chip."""
+        if self.publisher:
+            return self.publisher
+        from urllib.parse import urlparse
+
+        return (urlparse(self.url).hostname or "source").removeprefix("www.")
 
 
 class AnswerSection(BaseModel):

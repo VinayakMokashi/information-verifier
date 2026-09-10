@@ -1,22 +1,22 @@
 """Indic text must survive the whole stack byte-for-byte.
 
-The users this project exists for write in Devanagari, Tamil and Bengali, so
-a mojibake bug anywhere between the transcript and the rendered page would
-break the product for exactly the people it targets. These tests are free:
-the ASR and LLM stages are simulated, only the real storage/serialization/
-HTTP layers are exercised.
+Many of the people this project exists for write in Devanagari, Tamil or
+Bengali, so a mojibake bug anywhere between the transcript and the rendered
+page would break the product for exactly its users. Free: the engine is
+simulated, only the real storage / serialization / HTTP layers are exercised.
 """
 import json
+import uuid
+from datetime import datetime, timezone
 
 import pytest
 
 import scripts.fake_stages as F
 from app.api import routes as R
 from app.config import settings
-from app.engine import pipeline as P
-from app.models.verdict import Citation, Rating, Verdict
+from app.models.answer import Answer, AnswerSection, JobStatus, Source
 from app.store.db import init_db
-from app.store.repository import ClaimCache
+from app.store.repository import AnswerRepository, _normalize_input
 
 HINDI = "डब्ल्यूएचओ ने कहा है कि 5जी से कोरोना वायरस फैलता है।"
 MARATHI = "५जी मुळे कोरोना पसरतो असे डब्ल्यूएचओने म्हटले आहे."
@@ -26,69 +26,52 @@ ALL_SCRIPTS = [HINDI, MARATHI, TAMIL, BENGALI]
 
 
 @pytest.mark.parametrize("text", ALL_SCRIPTS)
-def test_verdicts_round_trip_through_sqlite_unchanged(tmp_path, monkeypatch, text):
+def test_answers_round_trip_through_sqlite_unchanged(tmp_path, monkeypatch, text):
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "indic.db"))
-    monkeypatch.setattr(settings, "semantic_cache_enabled", False)
     init_db()
-    cache = ClaimCache()
+    repo = AnswerRepository()
 
-    verdict = Verdict(
-        rating=Rating.FALSE, confidence=95,
-        reasoning=f"दावा गलत है: {text}",
-        correction=f"सही जानकारी: {text}",
-        citations=[Citation(url="https://altnews.in/x", title=text, publisher="ऑल्ट न्यूज़")],
+    answer = Answer(
+        job_id=uuid.uuid4().hex, status=JobStatus.COMPLETE,
+        created_at=datetime.now(timezone.utc),
+        input_text=text,
+        sections=[AnswerSection(tier="trusted", markdown=f"**झूठ है।** {text}")],
+        sources=[Source(url="https://altnews.in/x", title=text,
+                        publisher="ऑल्ट न्यूज़", tier="trusted")],
+        confidence=95, tier="trusted",
     )
-    cache.put(text, verdict)
-    got = cache.get(text)
+    repo.save(answer)
+    got = repo.get(answer.job_id)
 
-    assert got == verdict
-    assert got.reasoning.endswith(text)          # no mojibake, no truncation
-    assert got.citations[0].publisher == "ऑल्ट न्यूज़"
+    assert got.markdown.endswith(text)          # no mojibake, no truncation
+    assert got.sources[0].publisher == "ऑल्ट न्यूज़"
+    assert got.input_text == text
 
 
-def test_indic_claim_normalizes_for_the_cache_key(tmp_path, monkeypatch):
-    """Whitespace collapsing must not mangle combining marks."""
+def test_the_cache_key_survives_combining_marks(tmp_path, monkeypatch):
+    """Whitespace folding must not mangle Devanagari combining marks."""
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "key.db"))
-    monkeypatch.setattr(settings, "semantic_cache_enabled", False)
     init_db()
-    cache = ClaimCache()
-    v = Verdict(rating=Rating.FALSE, confidence=90, reasoning="r", correction="c", citations=[])
 
-    cache.put(HINDI, v)
-    assert cache.get(f"  {HINDI}  ") == v        # padded lookup still hits
-    assert cache.get(HINDI.replace("।", "")) is None  # genuinely different text misses
+    assert _normalize_input(f"  {HINDI}  ") == _normalize_input(HINDI)
+    # Genuinely different text still misses — dropping the danda changes it.
+    assert _normalize_input(HINDI.replace("।", "")) != _normalize_input(HINDI)
 
 
-def test_hindi_transcript_survives_the_api_as_utf8(client, monkeypatch):
-    """Transcript -> pipeline -> SQLite -> JSON response, unchanged."""
-    async def hindi_extract(english_text):
-        from app.models.claim import Claim
-        return [Claim(text=HINDI, subject="डब्ल्यूएचओ",
-                      claim_type="attribution", checkworthy=True)]
-
-    async def hindi_adjudicate(claim, evidence):
-        return Verdict(rating=Rating.FALSE, confidence=97,
-                       reasoning=f"यह दावा झूठा है। {HINDI}",
-                       correction="कोरोना वायरस 5जी से नहीं फैलता।",
-                       citations=[Citation(url="https://www.boomlive.in/x",
-                                           title="5जी और कोरोना", publisher="बूम")])
-
-    monkeypatch.setattr(P, "extract_claims", hindi_extract)
-    monkeypatch.setattr(P, "adjudicate", hindi_adjudicate)
-
+def test_a_hindi_answer_survives_the_api_as_utf8(client):
+    """Engine -> SQLite -> JSON response, unchanged."""
     accepted = client.post("/api/v1/verify/text", json={"text": HINDI})
     assert accepted.status_code == 202
     resp = client.get(f"/api/v1/reports/{accepted.json()['job_id']}")
 
     # Bytes on the wire must decode to the same characters we stored.
     body = json.loads(resp.content.decode("utf-8"))
-    cv = body["claim_verdicts"][0]
-    assert cv["claim"]["text"] == HINDI
-    assert cv["verdict"]["correction"] == "कोरोना वायरस 5जी से नहीं फैलता।"
-    assert cv["verdict"]["citations"][0]["publisher"] == "बूम"
+    assert body["input_text"] == HINDI
+    # Devanagari in -> Devanagari out (the fake mirrors the real prompt rule).
+    assert body["sections"][0]["markdown"].startswith("**यह दावा झूठा है।**")
 
 
-def test_page_is_utf8_so_indic_verdicts_render(client):
+def test_the_page_is_utf8_so_indic_answers_render(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert 'charset="utf-8"' in resp.text.lower()
