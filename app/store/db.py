@@ -84,6 +84,26 @@ CREATE TABLE IF NOT EXISTS cache_meta (
     key          TEXT PRIMARY KEY,
     value        TEXT NOT NULL
 );
+
+-- The chat engine (2026-09-10 pivot). Payload is an opaque Answer JSON, so
+-- the model can evolve without a migration.
+CREATE TABLE IF NOT EXISTS answers (
+    job_id       TEXT PRIMARY KEY,
+    status       TEXT NOT NULL,
+    payload      TEXT NOT NULL,          -- full Answer as JSON
+    created_at   TEXT NOT NULL
+);
+
+-- Exact-match answer cache. `key` is a digest over everything that decides
+-- the answer: prompt fingerprint, model, effort, the whitelist, and the
+-- normalized input. `tier` is stored OUT of the payload so the TTL can be
+-- applied in SQL without deserializing every row.
+CREATE TABLE IF NOT EXISTS answer_cache (
+    key          TEXT PRIMARY KEY,
+    tier         TEXT NOT NULL,
+    payload      TEXT NOT NULL,          -- full Answer as JSON
+    created_at   TEXT NOT NULL
+);
 """
 
 
