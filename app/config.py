@@ -25,6 +25,24 @@ class Settings(BaseSettings):
     # Storage
     db_path: str = "./data/verifier.db"
 
+    # Chat engine (the pivot, 2026-09-10) — one Claude call per check,
+    # whitelist-first then open web. Sonnet 5 chosen over Opus 5 on cost:
+    # this workload is mostly "read these search results and explain them",
+    # not the hard adjudication the old pipeline needed Opus for.
+    chat_model: str = "claude-sonnet-5"
+    chat_effort: str = "medium"      # low | medium | high | xhigh | max
+    chat_max_tokens: int = 12000     # caps thinking + prose; a pre-call bound
+    chat_max_searches_trusted: int = 3
+    chat_max_searches_web: int = 2
+    web_tier_enabled: bool = True    # False = whitelist only, never escalate
+    # An answer resting only on general web sources can never show a
+    # fact-checker-grade number. None = no cap (a trust decision; see §11).
+    web_tier_confidence_cap: int | None = 75
+    # Exact-match answer cache. TTL by tier because "no fact-checker has
+    # covered this" is wrong the day one does.
+    answer_cache_ttl_trusted_h: int = 168   # 7 days
+    answer_cache_ttl_web_h: int = 24
+
     # Retrieval
     max_search_uses: int = 4  # cap web_search rounds per claim (each ~$0.01)
 

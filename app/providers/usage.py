@@ -29,7 +29,9 @@ from app.models.report import ModelUsage, ReportUsage
 # the dollar estimate inherits this table's staleness. Cache writes bill at
 # 1.25x input, cache reads at 0.1x.
 _PRICES = {
+    "claude-opus-5":    {"in": 5.0, "out": 25.0, "cache_w": 6.25, "cache_r": 0.50},
     "claude-opus-4-8":  {"in": 5.0, "out": 25.0, "cache_w": 6.25, "cache_r": 0.50},
+    "claude-sonnet-5":  {"in": 2.0, "out": 10.0, "cache_w": 2.50, "cache_r": 0.20},
     "claude-haiku-4-5": {"in": 1.0, "out": 5.0,  "cache_w": 1.25, "cache_r": 0.10},
 }
 _FALLBACK_PRICE = _PRICES["claude-opus-4-8"]   # unknown model: price as the dearest
