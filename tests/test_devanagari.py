@@ -6,6 +6,7 @@ page would break the product for exactly its users. Free: the engine is
 simulated, only the real storage / serialization / HTTP layers are exercised.
 """
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -75,9 +76,15 @@ def test_the_page_is_utf8_so_indic_answers_render(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert 'charset="utf-8"' in resp.text.lower()
-    # The page escapes with a character-level function; confirm Devanagari is
-    # not in the escape set (it would be double-encoded if it were).
-    assert "&#" not in HINDI
+    # The old version of this asserted `"&#" not in HINDI` — a property of a
+    # constant in this file, true no matter what the page does. Assert the
+    # PAGE instead: esc() escapes by character class, and that class must be
+    # ASCII-only, or Devanagari would be replaced with entity soup.
+    charclass = re.search(r"replace\(/\[([^\]]+)\]/g", resp.text)
+    assert charclass, "esc()'s character class not found in the page"
+    assert charclass.group(1).isascii(), \
+        f"esc() escapes non-ASCII characters: {charclass.group(1)!r}"
+    assert set(charclass.group(1)) == set("&<>\"'")
 
 
 def test_devanagari_filename_upload_is_accepted(client, monkeypatch, tmp_path):

@@ -1,47 +1,52 @@
 # Information Verifier
 
-A multi-modal fact-checking engine built to combat fake news and propaganda in India.
-Send **text, a screenshot, a voice note, or a pasted Instagram Reel / YouTube
-Shorts link** — the engine extracts the verifiable
-claims, checks each against a **whitelist of trusted sources** (Indian fact-checkers,
-government portals, wire services), and returns a **Truth Report** with a rating,
-reasoning, the correction, and clickable citations.
+Paste a WhatsApp forward, a screenshot, a voice note, or an Instagram Reel /
+YouTube Shorts / Facebook video link — and get back a straight answer about
+whether it's true, with a confidence % and sources you can click.
 
-Works in Hindi, Marathi, Tamil, Bengali and English — and **answers in the language
-the rumour arrived in**. Mobile-first, no app to install.
+The answer reads like a person explaining something, not a form: one piece of
+prose, streamed as it's written, **in the language the rumour arrived in**.
+Hindi, Marathi, Tamil, Bengali, English. Mobile-first, no app to install.
 
-> Status: text, image, audio/video and pasted Reel/Shorts links all work
-> end-to-end, with a mobile web page, a semantic claim cache, and
-> back-translated Truth Reports. See
-> [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand and what's next.
+It checks fact-checkers and official sources first — Alt News, BOOM, Factly,
+PIB, Snopes, Full Fact, WHO, CDC, NIH, NASA, NOAA, Cochrane, PubMed, and more.
+If nothing vetted has covered the claim, it searches the wider web and **says
+so**, in its own clearly-labelled section. General-purpose: health, science,
+history, politics — not just Indian political rumours.
+
+> Status: text, image, audio/video and pasted links all work end to end, with a
+> streaming chat page, a Telegram bot, and an answer cache. The engine was
+> rebuilt around this answer shape in September 2026; the first paid run of the
+> new engine is the next step. See
+> [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand.
 
 ## Why the design looks the way it does
 
-- **The trusted-source whitelist is enforced, not suggested.** Web search is
-  restricted server-side via Claude's `allowed_domains`, and Google Fact Check
-  results are filtered through the same whitelist before they can reach the
-  adjudicator. The engine cannot wander the open web — that restraint *is* the
-  product.
-- **Every LLM boundary returns a validated Pydantic object** (`messages.parse`).
-  The output of this system is a public accusation of falsehood; "the model
-  returned malformed JSON and we rendered it anyway" is not an acceptable
-  failure mode.
-- **The rating scale can abstain** (`UNVERIFIED`). Silence in the trusted sources
-  is not evidence of falsehood; forcing a true/false call on a novel claim is how
-  a fact-checker manufactures confident wrong answers.
-- **A claim cache turns per-user cost into per-rumour cost.** One viral forward
-  reaches millions. Exact re-forwards are free; paraphrases are matched
-  semantically — but a cached verdict is *never* served on embedding similarity
-  alone, because claims differing by a single token can embed closer than genuine
-  paraphrases. A cheap LLM check confirms every match first.
+- **Tier is evidence, not assertion.** Whether an answer counts as
+  "fact-checked" is computed from the host of every URL the API actually
+  returned — never from what the model says about its own searching. It is
+  recomputed on every serve, including cache hits.
+- **The whitelist is enforced, not suggested.** Pass 1 restricts web search
+  server-side via Claude's `allowed_domains`, and Google Fact Check results are
+  filtered through the same list. The open web is a *second* pass that arrives
+  labelled, in its own section, with its own sources and a capped confidence.
+  Merging the two is how a reader ends up thinking a blog carried a
+  fact-checker's authority.
+- **The engine can say it doesn't know.** "Nothing reliable has addressed this"
+  is a real answer. Silence in the trusted sources is not evidence of
+  falsehood, and forcing a true/false call on a novel claim is how a
+  fact-checker manufactures confident wrong answers.
+- **Prose is never a receipt.** A model can write a convincing fake URL. Its
+  markdown renders as *text* — no links, no images, no HTML — and every link
+  you see comes from the structured citation objects the API returned. (This
+  also closes an exfiltration path: a markdown image would fire on render and
+  leak your forwarded message to whoever's server it points at.)
 - **We show you what we heard.** Speech-to-text and OCR are guesses. The
-  transcript is displayed above the verdict, so a mis-hear is visible instead of
-  becoming a confident answer to a question you never asked.
-- **The answer comes back in your language, but the English stays underneath.**
-  A red FALSE badge you can't read the reasoning for changes nobody's mind. The
-  translation is *additive*: it never overwrites what was adjudicated, ratings
-  and citations are never translated (a translated headline is unfindable on the
-  source page), and the English is always one tap away.
+  transcript is displayed above the answer, so a mis-hear is visible instead of
+  becoming a confident reply to a question you never asked.
+- **An answer cache turns per-user cost into per-rumour cost.** One viral
+  forward reaches millions; the second person to send it pays nothing. Entries
+  expire — "no fact-checker has covered this" is wrong the day one does.
 
 ## Quick start
 
@@ -51,13 +56,15 @@ python -m venv .venv
 Copy-Item .env.example .env      # then fill in ANTHROPIC_API_KEY
 ```
 
-See it **free**, with simulated verdicts and no API key:
+See it **free**, with a simulated Claude and no API key — the canned answer
+streams word by word over the real SSE endpoint, so the transport is genuine:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\serve_demo.py    # http://127.0.0.1:8000
 ```
 
-Run it for real:
+Run it for real (one worker — the stream registry and rate limiter are
+in-memory):
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
@@ -72,30 +79,33 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md).
 | `POST` | `/api/v1/verify/text` | Submit text → `{job_id, status}` (202) |
 | `POST` | `/api/v1/verify/image` | Submit an image (multipart `file`) |
 | `POST` | `/api/v1/verify/media` | Submit audio or video (multipart `file`) |
-| `POST` | `/api/v1/verify/link` | Submit a public Instagram Reel / YouTube URL |
-| `GET`  | `/api/v1/reports/{job_id}` | Poll for the Truth Report |
+| `POST` | `/api/v1/verify/link` | Submit a public Reel / Shorts / Facebook URL |
+| `GET`  | `/api/v1/reports/{job_id}` | Poll for the finished answer |
+| `GET`  | `/api/v1/stream/{job_id}` | Watch it being written (SSE) |
 | `GET`  | `/health` | Liveness |
-| `GET`  | `/` | The mobile web page |
+| `GET`  | `/` | The chat page |
 
-Submit, get a `job_id`, poll. The web page and the Telegram bot
-(`scripts/telegram_bot.py` — long polling, no tunnel; needs a @BotFather
-token in `.env`) use exactly this contract.
+Submit, get a `job_id`, poll — and optionally stream while you wait. The
+persisted answer is always canonical; the stream is a preview. The web page and
+the Telegram bot (`scripts/telegram_bot.py` — long polling, no tunnel; needs a
+@BotFather token in `.env`) use exactly this contract.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/api/v1/verify/text \
   -H "Content-Type: application/json" \
-  -d '{"text": "WHO ne kaha hai ki 5G se coronavirus phailta hai."}'
+  -d '{"text": "Drinking hot water kills the coronavirus"}'
 # -> {"job_id":"<id>","status":"QUEUED"}
-curl -s http://127.0.0.1:8000/api/v1/reports/<id>
+curl -s -N http://127.0.0.1:8000/api/v1/stream/<id>     # live, as it is written
+curl -s    http://127.0.0.1:8000/api/v1/reports/<id>    # the stored answer
 ```
 
 ## Stack
 
-Python 3.12 · FastAPI · Pydantic v2 · SQLite + sqlite-vec · ffmpeg
-Claude Opus 4.8 (extraction, adjudication, vision OCR) · Claude Haiku 4.5
-(language detection, retrieval, cache confirmation) · Sarvam Saaras v3 (Indic
-speech-to-text) · EmbeddingGemma-300m (local embeddings, $0) · Google Fact Check
-Tools API. No Node, no Docker, no build step.
+Python 3.12 · FastAPI · Pydantic v2 · SQLite · ffmpeg
+**Claude Sonnet 5** (the whole check, streaming, plus vision OCR) ·
+`web_search_20260209` · Google Fact Check Tools API ·
+Sarvam Saaras v3 (Indic speech-to-text) · yt-dlp (link ingestion).
+No Node, no Docker, no build step, no vector database, no local model.
 
 ## Tests
 
@@ -103,8 +113,9 @@ Tools API. No Node, no Docker, no build step.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-350 tests, always free — every paid API is faked, including a test that proves
-the "free" demo mode cannot reach a paid provider.
+390 tests, always free — every paid API is faked, including a test that proves
+"free" demo mode cannot reach a paid provider, and one that proves every script
+can still import what it claims to.
 
 ## Documentation
 

@@ -2,44 +2,60 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-07-28** (end-to-end review — see §7).
+> Keep it updated as the project moves. Last updated: **2026-09-11**
+> (the pivot to a Claude-style answer — see §7).
 
 ---
 
 ## 0. Where we are right now (read this first)
 
-**Everything below is built, tested, committed and pushed.** `main` is clean;
-**350 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
-paid API is faked).
+**The app was rebuilt around a different answer shape on 2026-09-10/11.** It no
+longer produces a Truth Report (rating enum + per-claim verdicts + a localized
+block). It produces **one prose answer, the way Claude would answer if you
+pasted the thing into a chat** — streamed word by word into a clean web page,
+with a confidence % and the evidence tier beneath it. See §7 "The pivot" for
+why, and what it cost to find out.
 
-Working end-to-end, verified against live APIs:
-- **Text, image, voice/video AND pasted Reel/Shorts links** through one
-  pipeline, with a mobile web page at `/` and a REST API underneath.
-- **Bounded trust**: verdicts can only cite a curated whitelist; Google Fact Check
-  results are filtered to it too.
-- **Two-tier claim cache**: exact match, then semantic nomination confirmed by a
-  cheap LLM check.
-- **The answer comes back in the language the message arrived in** (2026-07-27),
-  with the adjudicated English kept canonical and one tap away, plus its own
-  content-addressed translation cache so cost stays per-rumour.
-- **Spend guards**: per-visitor and per-deployment rate limits, input/claim caps,
-  upload size and duration caps — all enforced before any paid call.
+**It is also general-purpose now.** Health, science, history, viral claims from
+anywhere — not only Indian politics. The trusted list grew from 5 searchable
+domains to 45 (58 trusted in total) to make that real: WHO, CDC, NIH, PubMed,
+NHS, Cochrane, FDA, EMA, NASA, NOAA, ESA, USGS, Nature, Science, arXiv,
+Snopes, PolitiFact, Full Fact, plus the Indian fact-checkers it started with.
+
+**Everything below is built, tested, committed and pushed.** `main` is clean;
+**390 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free — every
+paid seam is faked).
+
+Working end to end:
+- **Text, image, voice/video and pasted Reel/Shorts/Facebook links** all reach
+  the same engine, through the same `submit → {job_id} → poll` REST contract.
+- **Whitelist first, then the open web.** Pass 1 searches only vetted sources.
+  If nothing vetted has covered the claim, pass 2 searches the wider web and
+  the answer says so, in its own labelled section, with its own source group.
+- **Tier is computed, never claimed** — from `trusted_domain_of()` over the
+  API's own citation objects, on every serve path including cache.
+- **Streaming** over SSE with sequence ids, `Last-Event-ID` resume and
+  heartbeats; the persisted `Answer` stays canonical and the page re-renders
+  from it when the stream ends.
+- **Spend guards** unchanged: per-visitor and per-deployment rate limits, input
+  caps, upload size and duration caps — all enforced before any paid call.
+- Every answer carries its own measured bill in `answer.usage`.
 
 **To see it right now (free, $0):**
 ```powershell
 .\.venv\Scripts\python.exe scripts\serve_demo.py     # then open http://127.0.0.1:8000
 ```
+The canned answer streams word by word over the real SSE endpoint, so what you
+see is the genuine transport with a simulated Claude behind it.
 
-**Phase 3 delivery is BUILT**: a Telegram bot (`scripts/telegram_bot.py`,
-long polling, no tunnel) that takes text, links, voice notes and photos and
-replies in the sender's language. **It has not touched live Telegram yet** —
-it needs `TELEGRAM_BOT_TOKEN` in `.env` (2 minutes with @BotFather), then:
-app in one terminal, bot in the other. Every report now carries its own
-measured bill (`report.usage`), and the six audit blockers for a public link
-are closed (see §7 and §11).
+**⚠️ The pivot has NOT had a paid run yet.** Every cost figure in §8 for the
+new engine is *modelled*, and this project's one measured number (`$0.279`,
+2026-07-28) came in against `$0.39` predicted — so treat the model as a
+starting point, not a fact. Deferred deliberately by Vinayak: "we will do the
+paid run once everything is built". It is now built.
 
-**Waiting on Vinayak** — see §11 "Open decisions": AFP whitelist, public
-spend caps, the translation-quality judgment, and the BotFather token.
+**Waiting on Vinayak** — see §11: the first paid run of the new engine, the
+AFP whitelist decision, public spend caps, and the first live Telegram message.
 
 ---
 
@@ -75,100 +91,143 @@ measured cost figure — see §8).
 
 ## 1. Mission
 
-Give any Indian with a phone a fast, trustworthy way to check whether a message,
-image, or video is true — with the real answer, in their own language, backed by
-sources they can click.
+Give anyone with a phone a fast, trustworthy way to check whether a message,
+image, or video is true — with the real answer, in their own language, backed
+by sources they can click.
 
-The people most exposed to misinformation (rural / semi-urban, reading in Hindi,
-Marathi, Tamil, Bengali…) are the least served by existing fact-check sites, which
-are English-first and desktop-shaped. We bring the check to where the rumour already
-is: mobile, and ultimately WhatsApp.
+It started India-first and that is still where the need is sharpest: the people
+most exposed to misinformation (rural / semi-urban, reading in Hindi, Marathi,
+Tamil, Bengali…) are the least served by existing fact-check sites, which are
+English-first and desktop-shaped. We bring the check to where the rumour
+already is: mobile, and ultimately WhatsApp.
+
+**Widened 2026-09-11 at Vinayak's request:** it is a general-purpose claim
+verifier, not a political one. A health rumour, a science claim, a doctored
+historical quote and a WhatsApp forward about a politician all take the same
+path; only the sources it reaches for differ.
 
 ## 2. Principles (these are enforced in code, not slogans)
 
-- **Bounded trust.** The engine can only cite a curated whitelist of vetted sources.
-  It cannot wander the open web. That restraint *is* the product.
-- **Willing to abstain.** The `UNVERIFIED` rating exists so we never manufacture a
-  confident answer on a novel claim. Absence of evidence ≠ falsehood.
-- **Every verdict carries receipts.** No trusted source → no verdict.
-- **Cheap at scale.** A claim cache makes cost per-*rumour*, not per-*user*.
-- **Not an arbiter of all truth.** We check falsifiable factual claims against trusted
-  sources — not opinions, not politics, not the open web.
+- **Evidence, not assertion.** What the model *says* about its own searching
+  never sets the label. The tier comes from the host of every URL the API
+  actually returned, recomputed on every serve including cache hits.
+- **Whitelist first, then the open web — labelled.** Vetted sources get the
+  first pass. The wider web is a fallback that arrives in its own section,
+  under its own heading, with its own source group and a capped confidence.
+  Merging the two is how a reader ends up thinking a blog carried a
+  fact-checker's authority.
+- **Willing to abstain.** "Nothing reliable has addressed this" is a real
+  answer, and one the engine gives. Absence of evidence ≠ falsehood.
+- **Prose is never a receipt.** The model can write a convincing fake URL.
+  Links and confidence come only from structured fields; its markdown renders
+  as text — no links, no images, no HTML, on any surface.
+- **Cheap at scale.** An answer cache makes cost per-*rumour*, not per-*user*.
+- **Machine-read text is shown back.** ASR and OCR guess. A mis-hear must
+  never quietly become a confident answer about words nobody said.
 
 ## 3. Tech stack
 
 | Layer | Choice |
 |---|---|
 | Backend | Python 3.12 + FastAPI + Pydantic v2 |
-| Reasoning / vision / extraction / adjudication | Claude **Opus 4.8** (`claude-opus-4-8`) |
-| Language detect + translation + retrieval + cache confirm | Claude **Haiku 4.5** (`claude-haiku-4-5`) |
-| Retrieval | Native `web_search_20260209` (allowed_domains) + Google Fact Check API |
+| The whole check | Claude **Sonnet 5** (`claude-sonnet-5`), effort `medium`, streaming |
+| Vision (OCR) | Claude **Sonnet 5** |
+| Retrieval | Native `web_search_20260209` (`allowed_domains`, then `blocked_domains`) + Google Fact Check API |
 | Link ingestion | **yt-dlp** (Instagram/YouTube/Facebook extractors only, generic disabled) |
-| OCR | Opus 4.8 vision (no Tesseract) |
-| ASR | **Sarvam Saaras v3** (`saaras:v3`) — live, wired to `/verify/media` + `/verify/link` |
+| ASR | **Sarvam Saaras v3** (`saaras:v3`) — `/verify/media` + `/verify/link` |
 | Audio/video handling | ffmpeg (normalize to 16 kHz mono WAV, chunk, probe) |
-| Embeddings | **EmbeddingGemma-300m** local on CPU, 256-dim ($0/lookup) |
-| Storage | **SQLite + sqlite-vec** (Postgres + pgvector deferred to deployment) |
+| Storage | **SQLite** (`answers` + `answer_cache`) — no vector index any more |
+| Streaming | SSE, in-memory `JobStream` per job (single worker) |
 | Async | FastAPI BackgroundTasks (ARQ/Redis still deferred) |
 | Frontend | **Self-contained `static/index.html`** served by FastAPI — no Node, no build |
 | Public sharing | cloudflared quick tunnel (`scripts/share_demo.ps1`) |
 
-**Every LLM boundary returns a validated Pydantic object** via `messages.parse`.
+**Dropped in the pivot:** Opus 4.8, Haiku 4.5, EmbeddingGemma,
+sentence-transformers, sqlite-vec, and the six per-stage structured schemas.
+Startup no longer imports torch — `import app.main` went from ~11 s to 3.4 s.
 
-## 4. Pipeline
+## 4. How a check runs
 
 ```
 INPUT
   /verify/text   raw text
-  /verify/image  → OCR (Opus vision)            ─┐  machine-read text is kept in
-  /verify/media  → ffmpeg → Sarvam ASR (chunked) ┘  report.source_text and shown back
-  /verify/link   → yt-dlp resolve (inline, free) → background:
+  /verify/image  → OCR (Sonnet vision)           ─┐  machine-read text is kept
+  /verify/media  → ffmpeg → Sarvam ASR (chunked)  │  in answer.source_text and
+  /verify/link   → yt-dlp resolve (inline, free) →┘  SHOWN BACK before the answer
                    caption + (subtitles | capped download → ffmpeg → ASR)
 
-normalize (Haiku: detect language + English pivot)
-  → extract claims (Opus)   → capped at max_claims_per_report
-  → per claim, concurrently:
-        1. exact cache hit?                        → serve, free
-        2. semantic nomination (sqlite-vec KNN)     → candidate only, never served
-           └ Haiku equivalence confirm (~$0.0005)   → serve + learn alias (unindexed)
-        3. otherwise: retrieve (Haiku: web_search whitelist + Google Fact Check,
-           trust-filtered) → adjudicate (Opus, adaptive thinking)
-  → aggregate
-  → back-translate (Haiku, one call per claim, concurrent) — skipped for English
-       └ ADDITIVE: lands in report.localized, never over the English
-  → persist
-OUTPUT  Truth Report: rating + confidence + reasoning + correction + citations,
-        plus the same prose in the reader's language
+answer cache lookup (exact, NFKC-normalized; key covers prompt + model +
+                     effort + whitelist)          → serve, free, $0
+  │ miss
+  ▼
+PASS 1  Sonnet 5, streaming, system = CHAT_SYSTEM_TRUSTED
+        tools: web_search with allowed_domains = the vetted list
+               (+ Google Fact Check results rendered into the prompt)
+        ends with a trailing sentinel:  <verdict confidence="82" trusted="yes"/>
+
+  escalate iff  web_tier_enabled  AND NOT truncated
+                AND (the sentinel said trusted="no"  OR  no trusted source was
+                     actually cited)
+                AND the sentinel did not say trusted="yes"
+  │
+  ▼
+PASS 2  a FRESH request (allowed_domains and blocked_domains are mutually
+        exclusive, and tools render first in the cache prefix — nothing is
+        reusable), system = CHAT_SYSTEM_WEB, blocked_domains = social media,
+        confidence capped at web_tier_confidence_cap
+
+  → sentinel stripped from the visible text (invariant 7)
+  → sources built from the API's citation objects; tier from the URL host
+  → sections kept SEPARATE per tier
+  → persist, cache with a TTL by tier (trusted 7 d, web/none 24 h)
+
+OUTPUT  Answer: prose + confidence + tier + sources, streamed live and stored.
 ```
+
+Two things that are load-bearing and non-obvious:
+
+- **The sentinel trails, it does not head.** A header line cannot survive
+  streaming: the model narrates before its tool calls, so the first text block
+  is often "Let me check the fact-checkers." with no newline and no lookahead
+  to tell preamble from answer. A trailer needs only a ~60-char hold-back on a
+  trailing `<`. Input cannot forge it because `as_prompt_data()` already turns
+  every `<`/`>` into `‹`/`›`.
+- **`allowed_domains` is all-or-nothing.** One crawler-blocked domain 400s the
+  entire request. So the list is split: `CORE_SEARCH_DOMAINS` (crawler-verified)
+  and `GLOBAL_SEARCH_CANDIDATES`. On a 400 the engine retries core-only rather
+  than failing the check.
 
 ## 5. Directory map
 
 ```
 app/
-  main.py            FastAPI app + lifespan (init_db) + static mount at "/"
-  config.py          settings + model IDs + cache/media knobs
-  trusted_sources.py SEARCH_DOMAINS (crawlable) + FACTCHECK_ONLY_DOMAINS + trust matching
-  api/               routes (text/image/media/link/reports) + wire DTOs
-  models/            Pydantic contracts: Claim, Verdict, Evidence, TruthReport
-  engine/            normalize, extract, retrieve, adjudicate, equivalence,
-                     aggregate, translate (back-translation), pipeline, prompts
+  main.py            FastAPI app + lifespan (init_db, sweep orphaned jobs)
+  config.py          settings: chat model/effort/caps, tier knobs, cache TTLs
+  trusted_sources.py CORE_SEARCH_DOMAINS + GLOBAL_SEARCH_CANDIDATES +
+                     FACTCHECK_ONLY_DOMAINS + fail-closed trust matching
+  api/               routes (text/image/media/link/reports), stream (SSE), DTOs
+  models/            answer.py — Answer, AnswerSection, Source, ReportUsage
+  engine/            chat.py (the engine), chat_prompts.py, marker.py
+                     (sentinel filter), job.py (run_check + cache key)
   providers/         llm (Anthropic), vision (OCR), factcheck (Google),
-                     asr (Sarvam Saaras v3), embeddings (EmbeddingGemma),
-                     media (ffmpeg helpers), links (yt-dlp: Reels/Shorts)
-  store/             SQLite + sqlite-vec db, repository (reports + 2-tier claim
-                     cache + content-addressed translation cache)
+                     asr (Sarvam Saaras v3), media (ffmpeg), links (yt-dlp),
+                     usage (metering + price table)
+  store/             SQLite db + repository (answers + answer_cache with TTL)
 static/
-  index.html         self-contained mobile demo page (text/image/voice, no build step)
+  index.html         self-contained chat page — streams over SSE, no build step
 scripts/
-  demo_offline.py    FREE full-pipeline demo with simulated LLM stages
-  serve_demo.py      FREE demo web server (real UI, simulated stages)
+  demo_offline.py    FREE console demo, streams a simulated answer
+  serve_demo.py      FREE demo web server (real UI + real SSE, simulated Claude)
   share_demo.ps1     uvicorn + cloudflared quick tunnel (public share link)
-  smoke_test.py      REAL one-claim end-to-end test (costs a few cents)
+  smoke_test.py      REAL one-claim end-to-end check (costs money)
+  link_smoke.py      REAL check of a pasted reel link (costs money)
   factcheck_probe.py FREE Google-API-only probe: shows KEEP/DROP per publisher
   link_probe.py      FREE yt-dlp probe: does a Reel/Shorts URL resolve, captions?
   asr_probe.py       Sarvam-only transcription probe (fractions of a rupee)
-  fake_stages.py     the shared simulated LLM stages (demos + tests)
-  render.py          console Truth Report formatter
+  telegram_bot.py    the Telegram delivery surface (--check-token is free)
+  fake_stages.py     the shared simulated seams (demos + tests)
+  render.py          console Answer formatter (+ force_utf8_stdout)
+  usage_report.py    one definition of "what did that cost"
 tests/               pytest suite — always free, every paid seam faked
 ```
 
@@ -310,6 +369,25 @@ tests/               pytest suite — always free, every paid seam faked
 - [ ] Lightweight PWA (Next.js) — only if the static page outgrows itself
       (needs Node.js)
 - [ ] Localization UI (Hindi, Marathi, Tamil, Bengali…)
+
+### Phase 4 — The pivot to a Claude-style answer  ✅ BUILT (2026-09-10/11)
+- [x] **New engine** (`app/engine/chat.py`): one streaming Sonnet 5 call,
+      whitelist first, open web as a labelled second pass. Trailing sentinel
+      for confidence; tier computed from the API's own citations.
+- [x] **New model** (`app/models/answer.py`): `Answer` / `AnswerSection` /
+      `Source` replace `TruthReport` / `Verdict` / `Claim` / `Evidence`.
+- [x] **Streaming** (`app/api/stream.py`): SSE with sequence ids,
+      `Last-Event-ID` resume, heartbeats, and replay from the persisted answer.
+- [x] **Answer cache** with a TTL by tier, keyed on prompt + model + effort +
+      whitelist; the semantic tier deleted (§7 says why, and what it costs).
+- [x] **General-purpose scope** (2026-09-11): 5 searchable domains → 45,
+      58 trusted; health, science, space, global fact-checkers, governments.
+- [x] **Every surface rewritten** to the new shape: the page (a real chat UI),
+      the Telegram bot, the console renderer, all four driver scripts.
+- [x] **Old engine deleted**: 8 engine modules, 4 models, embeddings provider,
+      the vector store, and ~100 tests. Startup no longer imports torch.
+- [ ] **The first paid run.** Deferred by Vinayak until everything was built.
+      It is built. See §11 item 1.
 
 ## 7. Decisions & findings log
 
@@ -678,52 +756,161 @@ obvious-looking design.*
   blocks Anthropic's crawler, the whole request 400s. Reuters, PTI, The Hindu, India
   Today, and Vishvas News block the crawler → moved to FACTCHECK_ONLY_DOMAINS. Only
   altnews.in, boomlive.in, factly.in, factcheck.thequint.com, pib.gov.in are searchable.
+  **Superseded 2026-09-11** — those five are now `CORE_SEARCH_DOMAINS` and the
+  searchable list is 45. The all-or-nothing hazard is unchanged; it is handled
+  by retrying core-only on a 400 rather than by keeping the list tiny.
 - **2026-07-24 — Pipeline no longer swallows claim failures.** A failed claim now
   surfaces as `UNVERIFIED` with the reason instead of vanishing as "no claims found".
 - **Rating scale includes UNVERIFIED** so the engine can abstain.
 - **Semantic cache deferred to Phase 2** — no embeddings endpoint on Anthropic; Phase 1
   uses exact normalized-text match.
 
-## 8. Cost model (approximate)
+### The pivot: from Truth Report to a Claude-style answer (2026-09-10/11)
 
-- Opus 4.8: $5 / $25 per million tokens (in / out). Haiku 4.5: $1 / $5.
-- Web search: ~$0.01 per search (separate fee); capped at `max_search_uses` (4) per claim.
-- Semantic-cache confirm: ~**$0.0005** per candidate (Haiku, structured bool) —
-  roughly 100× cheaper than the full check it can replace.
-- Back-translation: ~**$0.001 per claim** (Haiku; one call per claim plus one for
-  the summary, run concurrently), so ~$0.01 on a full 8-claim report — under 2%
-  of the check it rides on. **$0 for English input** (the stage is skipped
-  before any call) and **$0 on a translation-cache hit**, which is the common
-  case for a forward that has been seen before in the same language.
+**What changed.** The six-stage pipeline (normalize → extract → retrieve →
+adjudicate → aggregate → back-translate) and the structured Truth Report are
+gone. One streaming Sonnet 5 call — two at most — now reads the message and
+writes a prose answer, the way Claude would if you pasted the thing into a
+chat. Vinayak's words: *"I want our application to act like a simple claude
+chat (not the chat but the answer should be in that format)."*
+
+**Decisions taken at the start, by Vinayak:** whitelist first then open web;
+one answer, chat-styled, with a confidence %; a new engine inside the existing
+shell (keep the inputs, the SSRF fences, the caps, the metering, the bot, the
+free-demo infrastructure); stream on the web page; **Sonnet 5**, not Opus 5.
+
+**The honest cost finding, surfaced before building.** The pivot is not
+automatically cheaper. Whitelist-first means the second pass fires on most
+fresh rumours (measured on the one real reel: 5 of 6 claims came back
+UNVERIFIED), and each search drags roughly 12k input tokens. Modelled at
+effort `medium`, a two-pass check costs ~$0.44 on Opus 5 against a $0.279
+measured baseline for a whole 6-claim reel — *more* expensive. Sonnet 5 brings
+the same two-pass case to ~$0.26, which is why it was chosen. `chat_effort`,
+`chat_max_searches_web` and `web_tier_enabled=false` are the levers if it still
+runs hot. **The per-search input-token figure is the dominant unknown and only
+a paid run settles it.**
+
+**A trailing sentinel, not a header.** See §4 — a header line cannot survive
+streaming, and this was established by reasoning about the event shape before
+writing any of it, not discovered afterwards.
+
+**Why the semantic cache tier had to go, and what that costs.** Its 0.20
+distance threshold was calibrated on *atomic English claims*, and nothing
+produces atomic claims any more — whole multilingual messages are a different
+distribution entirely. Keeping it would have been serving a cached verdict on
+a similarity score whose calibration no longer applied. Deleting it also drops
+sentence-transformers, a 1.2 GB model and sqlite-vec. The consequence is real:
+the cache is now exact-match only, so a **TTL became mandatory** — "no
+fact-checker has covered this" is wrong the day BOOM publishes. Trusted
+answers keep for 7 days, web/none for 24 hours.
+
+**Two live traps found while wiring the metering.** `usage.py` had no price row
+for `claude-opus-5` or `claude-sonnet-5`, and unknown models fell back to Opus
+4.8 — 2.5× wrong for Sonnet. And `messages.stream()` is **not** wrapped by
+`usage.instrument()`, which covers only `parse`/`create`; without an explicit
+`note_llm()` per request, every bill for the new engine would have read $0.
+Both fixed before the first paid call, which is the only time fixing them is
+free.
+
+**A deadlock, caught by a hanging test suite.** `JobStream` first used an
+`asyncio.Condition`. `follow()` suspends at its `yield` while still holding the
+lock, so `publish()` could never acquire it and the whole stream deadlocked.
+The lock was not merely broken, it was unnecessary: publish and follow both run
+on one event loop and neither awaits between reading and mutating. Removed
+entirely, replaced with a list of futures.
+
+**Green tests, broken product.** After the routes switched to `Answer`, four
+scripts (`render.py`, `demo_offline.py`, `smoke_test.py`, `link_smoke.py`) were
+still importing `app.models.report`, a module that no longer existed — every one
+would have crashed on line 1, and CLAUDE.md's free-path table promised those
+commands worked. Separately, the Telegram bot's `format_reply` still read
+`overall_rating` / `claim_verdicts` / `localized`, so every real reply would
+have been the "no checkable claim" fallback after a paid check. **The suite was
+green through all of it**, because the bot's tests fed it hand-built Truth
+Report dicts and no test imported a script at all.
+`tests/test_scripts_import.py` now walks every script's AST and checks each
+`app.*` import still resolves, module and name; run against the previous commit
+it fails on exactly the three broken scripts.
+
+**A confident badge explaining nothing.** While testing the Telegram length
+budget: `'para ' * 3000` is one unbroken 15,000-character paragraph. It fit in
+no budget, so the whole answer was dropped and the reply became a
+95%-confident badge with a source link and no answer — worse than sending
+nothing. Blocks must be droppable, therefore bounded; `_soften()` now breaks
+over-long paragraphs at 700 chars on a word boundary. The test that missed it
+only asserted the *receipts* survived. It now asserts the answer does too.
+
+**Telegram auto-links bare URLs.** "Render the model's prose as plain text" is
+enough on the web page and in the console; it is not enough in a Telegram
+message, where a URL the model invented arrives tappable and
+indistinguishable from a vetted one. Markdown links and bare URLs are stripped
+from the prose on that surface specifically.
+
+**The whitelist grew from 5 searchable domains to 45** (58 trusted in all) when
+Vinayak asked, mid-build, for a general-purpose verifier rather than an
+India-political one: WHO, CDC, NIH, PubMed, NHS, Cochrane, FDA, EMA, NASA,
+NOAA, ESA, USGS, Nature, Science, arXiv, Snopes, PolitiFact, Full Fact, and
+national governments, alongside the Indian fact-checkers it started with. The
+all-or-nothing `allowed_domains` hazard is what makes this risky — one
+crawler-blocked domain 400s every request — so the list is split into
+crawler-VERIFIED core and candidates, and a 400 retries core-only rather than
+failing the check. **Wikipedia is deliberately excluded**: it is user-editable,
+which makes it part of the attack surface rather than a defence against it.
+
+Widening the scope also changed the tests, and this is worth knowing before
+"fixing" one: `test_trusted_sources` used to assert that PolitiFact and Lead
+Stories were UNtrusted. That was correct under an India-only scope and became
+wrong the moment the scope widened. Those assertions were replaced with domains
+that will never be vetted, plus new tests that a health, space, Cochrane,
+global-fact-checker or non-Indian-government claim now has somewhere vetted to
+go. Every security assertion — lookalikes, parser differentials, schemes,
+userinfo — was left untouched.
+
+**What was kept deliberately.** Every SSRF fence, the exact-host allowlist, the
+yt-dlp extractor pinning, the rate limiter's atomic reservation, the caps
+before spend, the `#job=` hash resume, `GoneError` clearing a dead hash, the
+factory-not-promise `submit()` guard, and the escape-then-promote ordering in
+every renderer. The pivot changed the answer's shape, not the things that stop
+it costing money or lying.
+
+## 8. Cost model
+
+> ⚠️ **Everything in the first table is MODELLED, not measured.** The pivot has
+> not had a paid run. The one time this project modelled a cost and then
+> measured it, the model said $0.39 and the meter said $0.279 — the model was
+> 40% high, in the cheap direction. Do not quote these numbers as facts.
+
+- Sonnet 5: **$2 / $10** per million tokens (in / out). (Opus 5 is $5 / $25 —
+  the A/B is still worth running once, on a real reel.)
+- Web search: ~$0.01 per search (a separate fee), capped by
+  `chat_max_searches_trusted` (3) and `chat_max_searches_web` (2).
 - Sarvam ASR: **₹30/hour**, billed per second (~₹0.50/min).
-- A **link check** adds: $0 when the post has subtitles or the claim is in
-  the caption (YouTube Hindi auto-captions measured present) — otherwise the
-  reel's audio duration × ASR rate (a 70 s reel ≈ ₹0.58) on top of the
-  normal per-claim cost. Resolve/download are bandwidth, not API spend. Sarvam TTS (only used
-  for testing): bulbul:v2 ₹15 / 10K chars.
-- **Per real single-claim check: ~$0.12–0.26 modelled.** First MEASURED
-  anchor (2026-07-28, `scripts/link_smoke.py`): a 6-claim reel report cost
-  **$0.279 all-in** ($0.22 LLM + $0.05 search + ₹0.58 ASR) — cheaper per
-  claim than the model because UNVERIFIED claims skip heavy adjudication.
-  Metering now lives IN THE APP: every report carries `report.usage`
-  (tokens per model from the API's own usage fields, searches, ASR seconds,
-  estimated USD), so future figures come from reports, not scripts.
-- A submission is priced per CLAIM, not per message, and one ordinary compound
-  sentence becomes several claims — a single Hindi sentence about ₹2000 notes
-  extracted into **three**. Budget per sentence, not per submission.
-- **Fixed per report** (regardless of claim count): ~$0.03 for normalize +
-  extract.
 
-| Submission | Typical | Worst case at current caps |
+| Scenario | Modelled, Sonnet 5 | Modelled, Opus 5 |
 |---|---|---|
-| 1 claim | ~$0.15 | ~$0.29 |
-| 3 claims | ~$0.39 | ~$0.81 |
-| 8 claims (`max_claims_per_report`) | ~$0.99 | ~$2.11 |
-| repeat of a cached rumour, same language | ~$0.03 | (both caches hit) |
+| Single pass, vetted sources found | ~$0.16 | ~$0.28 |
+| **Two-pass (typical fresh rumour)** | **~$0.26** | **~$0.44** |
+| Nothing checkable (no search runs) | ~$0.02 | ~$0.05 |
+| Exact re-forward inside the TTL | **$0** | **$0** |
 
-⚠️ **At the current caps a public link's daily ceiling is ~$99 typical /
-~$211 worst case** (`max_checks_per_day` 100 × `max_claims_per_report` 8).
-That is what open decision 2 is really asking about.
+- A **link check** adds: $0 when the post has subtitles or the claim is in the
+  caption (YouTube Hindi auto-captions measured present) — otherwise the
+  clip's audio duration × the ASR rate (a 70 s reel ≈ ₹0.58). Resolve and
+  download are bandwidth, not API spend.
+- **Pricing is now per SUBMISSION, not per claim.** That is a real change: the
+  old pipeline priced a compound sentence as three claims, and a message could
+  reach eight. One message is now one answer, and its ceiling is set by
+  `chat_max_tokens` and the search caps rather than by how many assertions the
+  sender packed in.
+
+**The measured anchor that still stands** (old engine, 2026-07-28,
+`scripts/link_smoke.py`): a 6-claim reel report cost **$0.279 all-in**
+($0.22 LLM + $0.05 search + ₹0.58 ASR). That is the number the new engine has
+to beat, and the first paid run is what will say whether it does.
+
+Metering lives IN THE APP: every answer carries `answer.usage` — tokens per
+model from the API's own usage fields, searches, ASR seconds, estimated USD —
+so future figures come from answers, not from scripts.
 
 **What bounds the spend** (all in `app/config.py`):
 
@@ -732,18 +919,25 @@ That is what open decision 2 is really asking about.
 | `max_checks_per_hour` | 10 | submissions per visitor IP |
 | `max_checks_per_day` | 100 | submissions across the whole deployment |
 | `max_input_chars` | 5000 | text per submission |
-| `max_claims_per_report` | 8 | paid claim checks per submission |
+| `chat_max_tokens` | 12000 | output tokens per pass |
+| `chat_effort` | medium | thinking effort — `low` is the first cost lever |
+| `chat_max_searches_trusted` | 3 | billed searches in pass 1 |
+| `chat_max_searches_web` | 2 | billed searches in pass 2 |
+| `web_tier_enabled` | true | **set false to skip pass 2 entirely** |
+| `web_tier_confidence_cap` | 75 | ceiling on a web-only answer's confidence |
 | `max_media_bytes` | 25 MB | upload size (enforced as bytes stream in) |
 | `max_media_seconds` | 300 | audio duration (probed before decoding) |
-| `max_search_uses` | 4 | billed web searches per claim |
-| `max_translate_chars` | 12000 | source prose per report sent to translation |
-| `translate_reports` | true | set false to answer in English only, at $0 |
+| `answer_cache_ttl_trusted_h` | 168 | 7 days |
+| `answer_cache_ttl_web_h` | 24 | 1 day |
 
-⚠️ Before sharing the public link widely, consider lowering `max_checks_per_day`
-and/or `max_claims_per_report` — 100 × 8 claims is a large worst case.
+⚠️ At the current caps a public link's ceiling is roughly **$26/day modelled**
+(100 checks × ~$0.26) — down from ~$99–211 under the per-claim pricing, because
+a submission can no longer fan out into eight paid checks. Open decision 2 in
+§11 is now a smaller question than it was, but still Vinayak's to answer.
 
 **Always-free**: the whole test suite, `demo_offline.py`, `serve_demo.py`,
-`share_demo.ps1 -DemoMode`, and `factcheck_probe.py`.
+`share_demo.ps1 -DemoMode`, `factcheck_probe.py`, `link_probe.py`, and
+`telegram_bot.py --check-token`.
 
 ## 9. Environment notes (this machine)
 
@@ -752,153 +946,137 @@ and/or `max_claims_per_report` — 100 × 8 claims is a large worst case.
 - Python 3.12 ✅, git ✅, gh CLI ✅ (authed as VinayakMokashi), winget ✅.
 - **ffmpeg ✅ installed** (Gyan.FFmpeg 8.1.2 via winget, on PATH) — the plan
   previously said it wasn't; corrected 2026-07-25 after a local check.
-- **Node.js and Docker NOT installed** (also no psql, no redis-server) — but the
-  decided Phase 2 stack (sqlite-vec + local embeddings) needs neither.
+- **Node.js and Docker NOT installed** (also no psql, no redis-server) — and
+  nothing in the stack needs them. The pivot removed the last heavyweight
+  dependency: no vector index, no local embedding model, no torch at startup.
 - Secrets live only in `.env` (git-ignored). `.env.example` stays blank.
 
 ## 10. How to run
 
 See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
-- Free demo (console): `.venv\Scripts\python.exe scripts\demo_offline.py`
-- Free demo (web UI): `.venv\Scripts\python.exe scripts\serve_demo.py` → http://127.0.0.1:8000
-- Free tests: `.venv\Scripts\python.exe -m pytest tests -q`
-- Free source probe: `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"`
-- ASR probe (~paise): `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg`
-- Real check: `.venv\Scripts\python.exe scripts\smoke_test.py "your claim"`
-- Real server + UI: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload` → http://127.0.0.1:8000
+
+| Command | Cost | Proves |
+|---|---|---|
+| `.venv\Scripts\python.exe -m pytest tests -q` | $0 | everything; every paid seam is faked |
+| `.venv\Scripts\python.exe scripts\serve_demo.py` | $0 | the real chat UI + real SSE, simulated Claude |
+| `.venv\Scripts\python.exe scripts\demo_offline.py` | $0 | the engine plumbing + cache, in the console |
+| `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"` | $0 | which publishers we keep/drop |
+| `.venv\Scripts\python.exe scripts\link_probe.py <url>` | $0 | does a reel resolve, and does it have captions |
+| `.venv\Scripts\python.exe scripts\telegram_bot.py --check-token` | $0 | the bot token still works |
+| `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg` | ~paise | one real transcription |
+| `.venv\Scripts\python.exe scripts\smoke_test.py "claim"` | ~cents | one real check, with its measured bill |
+| `.venv\Scripts\python.exe scripts\link_smoke.py <url>` | ~cents | a real reel, end to end, with its bill |
+
+- Real server + UI: `.venv\Scripts\python.exe -m uvicorn app.main:app --reload`
+  → http://127.0.0.1:8000  (**one worker** — the stream registry and the rate
+  limiter are both in-memory)
 - Share publicly: `.\scripts\share_demo.ps1` (add `-DemoMode` for the free variant)
 
 ## 11. Open items
 
-### THE TODO LIST (updated 2026-07-28, end of session — the authoritative one)
+### THE TODO LIST (updated 2026-09-11 — the authoritative one)
 
 **Needs Vinayak, not code:**
-1. **AFP Fact Check** (`factcheck.afp.com`, IFCN-certified) is the only publisher
-   still being dropped by the trust filter on live queries. Add it to
+
+1. **The first paid run of the new engine.** Everything is built; this is the
+   next thing that should happen. Two runs settle every open cost question:
+   - a known-debunked claim (should be single-pass, trusted sources found):
+     `.venv\Scripts\python.exe scripts\smoke_test.py "Drinking hot water kills the coronavirus"`
+   - a fresh rumour with no fact-checker coverage (should escalate to pass 2)
+   Then paste `answer.usage` into §8 and replace the modelled table with
+   measured numbers. Modelled at ~$0.16 and ~$0.26; the last time this project
+   modelled a cost it was 40% high. Budget under a dollar for both.
+2. **AFP Fact Check** (`factcheck.afp.com`, IFCN-certified) is still the only
+   publisher dropped by the trust filter on live queries. Add it to
    `FACTCHECK_ONLY_DOMAINS` or leave it out? Curating the whitelist is a trust
    decision, deliberately not an automatic one.
-2. **Spend caps before going public** — see §8: the current ceiling is ~$99/day
-   typical, ~$211 worst case. Lower `max_checks_per_day` (100) and/or
-   `max_claims_per_report` (8)?
-3. **Judge the live Hindi translation quality.** Two real reports exist now
-   (the ₹2000-note check and the PEEK TV reel). The prose read well to the AI;
-   whether it reads *naturally* is Vinayak's call. Known rough edges are
-   recorded in §7 (terminology drift between claims, the summary translating
-   the rating word while the badge stays English).
-4. ~~Create the Telegram bot token~~ **DONE by Vinayak 2026-07-28.** The
-   token is in `.env` and validates as `@Information_Verifier_bot`. Re-check
-   any time for $0:
-   `.venv\Scripts\python.exe scripts\telegram_bot.py --check-token`.
-   **The first live message is now the only step left**, and it was
-   deliberately NOT taken while Vinayak slept — anyone messaging the bot
-   spends real money and nobody was awake to supervise. To go live:
-   `uvicorn app.main:app` in one terminal, `scripts\telegram_bot.py` in the
-   other, then message the bot.
+3. **Spend caps before going public** — §8: the ceiling is now ~$26/day
+   modelled (100 checks × ~$0.26), down from ~$99–211, because a submission can
+   no longer fan out into eight paid claims. Lower `max_checks_per_day` anyway?
+4. **The first live Telegram message.** The token is in `.env` and validates as
+   `@Information_Verifier_bot` (`--check-token`, free, re-run any time). The bot
+   has never touched live Telegram. Anyone who messages it spends real money, so
+   this wants someone awake and watching: `uvicorn app.main:app` in one
+   terminal, `scripts\telegram_bot.py` in the other.
 
-**Settled this session (kept for the record):**
-- ~~Hindi ASR accuracy~~ → settled 2026-07-28: real Hinglish speech from a reel
-  preserved every alphanumeric (₹140, "27th", एफआईआर) — the synthetic TTS voice
-  caused the old 5जी loss, not Sarvam.
-- ~~/verify/link paid tail~~ → verified 2026-07-28: $0.279 measured, one
-  MOSTLY_TRUE with a live BOOM citation + five honest abstentions.
-- ~~Back-translation never read live~~ → two real Hindi reports now exist
-  (item 3 above is what remains of this).
+**Worth doing next, in code (value order):**
 
-**Cheap verifications pending (code is ready, needs a paid run or a URL):**
-- **Translation prompt fixes are unverified.** The 2026-07-28 fixes for
-  terminology drift and English-left-inside-Hindi are prompt changes; no paid
-  run has read their output. Cheap: the ₹2000 claims are cached, so a re-run
-  of `smoke_test.py` on that claim pays only normalize + extract + 4 Haiku
-  translations (~$0.04).
-- **Facebook `/reel/<id>` URL form is unprobed.** `/videos/` URLs are measured
-  working; when a real FB reel link comes along, one free
-  `scripts\link_probe.py` run settles the reel form.
-- **Telegram bot has never touched live Telegram.** Token validated ($0,
-  getMe only); 24 bot tests are offline. The first live message is the real
-  test — and worth watching, because Telegram was measured timing out twice
-  in three calls from this network (every call retries now).
-- **WhatsApp bot: deferred, deliberately.** Meta business verification +
-  webhook tunnel + 5-recipient test cap. When it happens it reuses the
-  Telegram bot's `format_reply` unchanged.
-
-### Known-defect backlog (from the 2026-07-28 adversarial audit)
-
-Six independent read-only sweeps raised 37 findings; each was then handed to a
-separate agent instructed to *refute* it. 23 survived. Four are fixed (see the
-Decisions log); these are the rest, in the order I would take them. None is
-known to be actively causing harm today — the app is not publicly exposed.
-
-**Before sharing a public link — ALL SIX CLOSED 2026-07-28** (see §7):
-1. ~~Verdict citations unchecked~~ → `_enforce_trust()` on every serve path.
-2. ~~search cap per-request~~ → budget enforced across continuations in code.
-3. ~~evidence undelimited~~ → `as_prompt_data` in `adjudicate._render`.
-4. ~~CORS wildcard~~ → removed; no ACAO issued, pinned by test.
-5. ~~inline media ASR~~ → behind the 202, FAILED reports in words.
-6. ~~orphaned paid reports~~ → job id in the URL hash; reload resumes.
-
-**Correctness / trust:**
-7. `aggregate.py` has no test file and every fake verdict in the suite is FALSE,
-   so the worst-first roll-up precedence is vacuously verified.
-8. The "a failed claim surfaces as UNVERIFIED, never vanishes" branch in
-   `pipeline.py` is never exercised by a test.
-9. Raw exception strings are stored in `report.error` and rendered to the user.
-10. A claim adjudicated while the semantic tier is paused is stored with no
-    vector and never re-indexed.
-
-**i18n:**
-11. The verdict word itself is never localized — per-claim badges show the raw
-    English enum, and `RATING_LABELS` is romanized *Hindi* shown to Tamil and
-    Bengali readers too. Now in TWO places (the page and the bot's
-    `_RATING_BADGE`): fix once in the API payload, not per surface.
-12. ~~translation cache keyed on the raw tag~~ **CLOSED 2026-07-28** — the key
-    folds case and region. A language NAME ("Hindi") still keys separately.
-
-**Ops / hygiene:**
-13. Nothing is ever pruned: `created_at` is written and never read, so every
-    stranger's message is retained indefinitely.
-14. All `asyncio.to_thread` work shares one default executor — an embedder cold
-    start can freeze report polling for everyone.
-15. `/health` is a constant; there is no way to see spend, queue depth, or which
-    subsystems are degraded.
-16. Two weak tests: `test_devanagari.py:97` asserts a property of a constant, not
-    of the page; the embedding failure-budget tests neutralize `_FAILURE_WINDOW_S`
-    and so hide whether the budget ever exhausts under production timing.
-
-**Deferred by the 2026-07-28 end-to-end review — real, but not worth the churn
-that night. Roughly in value order:**
-17. **No transcript cache for links.** One viral reel forwarded by many people
-    re-downloads and re-buys the whole ASR every time (~₹0.58 for a 70 s clip)
-    — the same "per-user pricing wearing a cache's clothes" inversion the
-    translation cache was built to fix, still open on the most expensive
-    input. `resolve_link` already returns a stable `(platform, video_id)` for
-    free, before any spend, so the key is already in hand. **Best value here.**
-18. **Duplication that has already drifted once.** The FAILED-report
-    finalization exists three times (media `fail()`, link `except`,
-    `run_pipeline`'s `finally`) — forgetting `report.usage` in one is exactly
-    how failed reports used to lose their bill; the fake-seam list is
-    hand-synced across three files; the localized-merge logic is
-    re-implemented in three renderers (and HAD diverged — fixed in the bot).
-19. **Two SSRF host parsers.** `links.allowed_link_host` re-implements
-    `trusted_sources.trusted_domain_of`'s fail-closed parsing and they already
-    disagree on the hostname charset — two security boundaries to patch when
-    the next parser-differential bypass appears.
-20. **ASR metering sits at the ffmpeg boundary**, not the ASR provider seam,
-    so a future path reaching `transcribe` without `normalize_to_wav` (Sarvam's
+5. **A transcript cache for links.** One viral reel forwarded by many people
+   re-downloads and re-buys the whole ASR every time (~₹0.58 for a 70 s clip) —
+   the same "per-user pricing wearing a cache's clothes" inversion the old
+   translation cache existed to fix, still open on the most expensive input.
+   `resolve_link` already returns a stable `(platform, video_id)` for free,
+   before any spend, so the key is already in hand. **Best value on this list.**
+6. **A/B Sonnet 5 against Opus 5** on one real reel, once item 1 has a
+   baseline. Modelled at $0.26 vs $0.44 per two-pass check — if Opus is
+   materially better at spotting "true things made misleading", that gap may be
+   worth paying.
+7. **Answers are never pruned.** `answer_cache` expires by TTL, but the
+   `answers` table keeps every stranger's message indefinitely. `created_at` is
+   written and never read.
+8. **Two SSRF host parsers.** `links.allowed_link_host` re-implements
+   `trusted_sources.trusted_domain_of`'s fail-closed parsing, and they already
+   disagree on the hostname charset — two security boundaries to patch when the
+   next parser-differential bypass appears.
+9. **FAILED-answer finalization exists in four places** (media `fail()`, link
+   `except`, and two branches in `run_check`). Forgetting `usage` in one is
+   exactly how failed reports used to lose their bill.
+10. **ASR metering sits at the ffmpeg boundary**, not the ASR provider seam, so
+    a future path reaching `transcribe` without `normalize_to_wav` (Sarvam's
     batch API for >30 s clips) would be silently unmetered — while the bill
     still LOOKS complete.
-21. **Long downloads share asyncio's default thread pool** with every report
-    poll, so a few concurrent link jobs can make finished reports look stuck.
-22. **The bot handles messages sequentially**, so one user's 4-minute check
+11. **Long downloads share asyncio's default thread pool** with every report
+    poll, so a few concurrent link jobs can make finished answers look stuck.
+12. **The bot handles messages sequentially**, so one user's 4-minute check
     blocks every other chat, including `/help`.
+13. **`/health` is a constant** — no way to see spend, queue depth, or which
+    subsystems are degraded.
+14. **A refusal still puts the raw exception text in `answer.error`**
+    (`job.py:105`). The generic failure branch is friendly; this one is not.
+15. **Facebook `/reel/<id>` URL form is unprobed.** `/videos/` URLs are
+    measured working; when a real FB reel link comes along, one free
+    `scripts\link_probe.py` run settles it.
+16. **WhatsApp bot: deferred, deliberately.** Meta business verification +
+    webhook tunnel + 5-recipient test cap. When it happens it reuses the
+    Telegram bot's `format_reply` unchanged.
+
+**Closed by the pivot (kept so nobody re-opens them):**
+- ~~Verdict word never localized; `RATING_LABELS` showed romanized Hindi to
+  Tamil and Bengali readers, in two places~~ — there is no rating enum any
+  more, and the answer arrives in the reader's language as prose.
+- ~~`aggregate.py` untested; the worst-first roll-up vacuously verified~~ —
+  deleted with the pipeline.
+- ~~The "a failed claim surfaces as UNVERIFIED" branch never exercised~~ —
+  deleted with the pipeline.
+- ~~A claim adjudicated while the semantic tier is paused is stored with no
+  vector~~ — the semantic tier is gone (§7 says why).
+- ~~An embedder cold start freezes report polling for everyone~~ — no embedder.
+- ~~`test_devanagari.py` asserts a property of a constant~~ — fixed 2026-09-11;
+  it now asserts the page's own escape character class is ASCII-only.
+- ~~The localized-merge logic re-implemented in three renderers~~ — no
+  localized block exists.
+
+**Settled earlier, kept for the record:**
+- ~~Hindi ASR accuracy~~ → 2026-07-28: real Hinglish speech from a reel
+  preserved every alphanumeric (₹140, "27th", एफआईआर) — the synthetic TTS voice
+  caused the old 5जी loss, not Sarvam.
+- ~~/verify/link paid tail~~ → 2026-07-28: $0.279 measured.
+- ~~The six public-link blockers~~ → all closed 2026-07-28: citations enforced
+  on every serve path, search budget enforced across continuations, evidence
+  delimited, CORS wildcard removed, media ASR moved behind the 202, orphaned
+  paid reports resumable from the URL hash.
 
 ### Prerequisites already in place
 
 - `.env` holds `ANTHROPIC_API_KEY`, `GOOGLE_FACTCHECK_API_KEY`, `SARVAM_API_KEY`,
-  `HF_TOKEN`, `DB_PATH`. Never commit it; `.env.example` stays blank.
+  `HF_TOKEN`, `DB_PATH`, `TELEGRAM_BOT_TOKEN`. Never commit it;
+  `.env.example` stays blank.
 - Installed: Python 3.12, git, gh, winget, ffmpeg (Gyan 8.1.2),
-  cloudflared 2026.7.3 (at `C:\Program Files (x86)\cloudflared\`),
-  `sqlite-vec==0.1.9`, `sentence-transformers`, EmbeddingGemma-300m
-  (~1.2 GB cached in `~\.cache\huggingface`).
+  cloudflared 2026.7.3 (at `C:\Program Files (x86)\cloudflared\`).
+- Still on disk but **no longer used or required**: `sqlite-vec`,
+  `sentence-transformers`, EmbeddingGemma-300m (~1.2 GB in
+  `~\.cache\huggingface`). Dropped from `requirements.txt` in the pivot;
+  safe to delete the cache if the disk space is wanted.
 - NOT installed and not needed by the current stack: Node.js, Docker, psql, Redis.
 
 ### To share the demo with people

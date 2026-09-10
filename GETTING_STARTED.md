@@ -1,6 +1,6 @@
 # Getting Started — a step-by-step guide
 
-This gets you from "code on disk" to "a live fact-check on a real claim."
+This gets you from "code on disk" to "a live check on a real claim."
 Commands are for **Windows PowerShell** (your setup). Run them from the
 project folder: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`.
 
@@ -25,15 +25,23 @@ You do **not** need to repeat these unless you move the project.
 
 ## Step 1 — See it work for FREE (no key, no cost)
 
-This runs the **real pipeline** with **simulated** AI answers, so you can see a
-full Truth Report and how the cache works — without spending a paisa.
+This runs the **real engine plumbing** with a **simulated** Claude, so you can
+see a full answer arrive and watch the cache work — without spending a paisa.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\demo_offline.py
 ```
 
-You'll see two runs: the first "cold", the second served entirely from cache.
-If you see a formatted TRUTH REPORT, everything is wired correctly.
+RUN 1 streams the answer in a word at a time (that is the real thing — only
+Claude is faked). RUN 2 sends the same message again and is served entirely
+from cache: the simulated-call counter does not move. If you see a formatted
+ANSWER block with a confidence bar and sources, everything is wired correctly.
+
+Prefer to click? This is the same thing in a browser:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\serve_demo.py    # http://127.0.0.1:8000
+```
 
 ---
 
@@ -81,7 +89,12 @@ Or check your own claim:
 ```
 
 This runs the genuine engine — real reasoning, real web search of the trusted
-sources — and prints a real Truth Report.
+sources — and prints a real answer, followed by **exactly what it cost**,
+measured from the API's own usage numbers.
+
+Expect roughly **$0.16** when a fact-checker has covered the claim, and
+**$0.26** when none has and it falls back to the open web. Those are modelled,
+not measured — the first real run is what settles them.
 
 ---
 
@@ -91,7 +104,10 @@ Two things that trip everyone up first:
 - ⚠️ When the server starts, the terminal **looks frozen** — it isn't. That's the server
   running and holding that terminal. Leave it open; don't type in it.
 - ⚠️ After you submit a claim, the first report check may say **`PROCESSING`**. That's
-  normal — wait ~10 seconds and check again; it turns `COMPLETE`.
+  normal — wait ~10 seconds and check again; it turns `COMPLETE`. (On the web
+  page you don't have to: the answer streams in as it's written.)
+- ⚠️ Run **one worker**. The live-stream registry and the rate limiter both
+  live in memory, so a second worker would not see the first one's jobs.
 
 **1. Open a terminal in the project folder.** In VS Code: *Terminal → New Terminal*
 (it opens in the project folder). Confirm the prompt ends in `...\Information_Verifier`.
@@ -105,8 +121,12 @@ The terminal now sits quietly — that means it's working. Leave it running.
 
 **3. Open it in your browser: http://127.0.0.1:8000**
 
-That's the actual app — paste a message, upload a screenshot, or send a voice
-note, and the verdict appears on the page. Nothing else to do.
+That's the actual app — paste a message, upload a screenshot, send a voice
+note, or paste a Reel / Shorts / Facebook link, and the answer writes itself
+onto the page as it's produced. Nothing else to do.
+
+If you close the tab mid-check, the job id is in the URL (`#job=…`) — reopen
+that URL and it picks the same check back up rather than paying for it twice.
 
 *(If you'd rather poke the raw API, **http://127.0.0.1:8000/docs** is the
 interactive control panel; steps 4–5 below use that.)*
@@ -117,11 +137,15 @@ interactive control panel; steps 4–5 below use that.)*
 - Click **Execute**. Under *Server response* you get code `202` and
   `{ "job_id": "…", "status": "QUEUED" }`. **Copy the `job_id`.**
 
-**5. Read the Truth Report:**
+**5. Read the answer:**
 - Click **GET /api/v1/reports/{job_id}** → **Try it out**.
 - Paste the `job_id` → **Execute**.
-- If `PROCESSING`, wait ~10s and **Execute** again. When `COMPLETE`, the response shows
-  `overall_rating` and each claim's rating, confidence, reasoning, correction, citations.
+- If `PROCESSING`, wait ~10s and **Execute** again. When `COMPLETE`, the
+  response shows `sections` (the prose, one per evidence tier), `confidence`,
+  `tier`, `sources`, and `usage` (what it cost).
+- To watch it live instead, open
+  `http://127.0.0.1:8000/api/v1/stream/{job_id}` in a terminal with
+  `curl -N` — that is the same stream the page uses.
 
 **6. Stop the server:** click the terminal, press `Ctrl+C`.
 
@@ -141,7 +165,9 @@ interactive control panel; steps 4–5 below use that.)*
 | Server won't start, "address in use" | Another server is running; close it or use `--port 8001` |
 | Voice note gives `503` | `SARVAM_API_KEY` missing from `.env` |
 | Voice note gives `413` | Clip is over 25 MB or 5 minutes — send a shorter one |
-| The verdict answers a different claim than you sent | Check the "We read this from your file" line — the transcription was wrong. Retype it as text. |
+| The answer is about a different claim than you sent | Check the "What I read from what you sent" box — the transcription was wrong. Retype it as text. |
+| The answer says "no fact-checker has covered this" | That's a real answer, not a failure. The general-web section below it is clearly labelled because those sources are weaker. |
+| The page shows text but no sources | Only the structured citations the API returned become links — the model's own prose is never treated as a receipt. No citations means it genuinely found none. |
 
 ---
 
@@ -164,12 +190,15 @@ link dies with it.
 
 | Command | Cost | What it proves |
 |---|---|---|
-| `scripts\demo_offline.py` | Free | The whole pipeline + cache + report logic works |
-| `scripts\serve_demo.py` | Free | The real web page + API, with simulated verdicts |
-| `python -m pytest tests -q` | Free | The full test suite (web, cache, media, trust filter) |
+| `scripts\demo_offline.py` | Free | The engine plumbing + cache, streaming, in the console |
+| `scripts\serve_demo.py` | Free | The real chat page + real SSE, with a simulated Claude |
+| `python -m pytest tests -q` | Free | The full suite (390 tests: web, cache, media, trust filter) |
 | `scripts\factcheck_probe.py "claim"` | Free | Which fact-check publishers we keep vs drop |
+| `scripts\link_probe.py <url>` | Free | Whether a reel resolves, and whether it has captions |
+| `scripts\telegram_bot.py --check-token` | Free | That the bot's token still works |
 | `scripts\asr_probe.py clip.ogg` | ~paise | Sarvam transcription of one audio clip |
-| `scripts\smoke_test.py` | ~cents | A real, cited fact-check on one claim |
+| `scripts\smoke_test.py "claim"` | ~cents | A real, cited check — and its measured bill |
+| `scripts\link_smoke.py <url>` | ~cents | A real reel, end to end — and its measured bill |
 | `uvicorn app.main:app` | free to run | The live web app: open http://127.0.0.1:8000 |
 | `.\scripts\share_demo.ps1` | per check | A public share link (cloudflared quick tunnel) |
 
@@ -179,7 +208,8 @@ link dies with it.
 
 Start the server (`uvicorn app.main:app` for real checks, `scripts\serve_demo.py`
 for the free simulated demo) and open **http://127.0.0.1:8000** — a mobile-first
-page where you can paste text, upload a screenshot/meme, or send a voice note /
-video. To show friends on their phones, run `.\scripts\share_demo.ps1` and share
+chat page where you can paste text, upload a screenshot/meme, send a voice note
+or video, or paste a Reel / Shorts / Facebook link. The answer streams in as
+it's written, with the confidence and the sources underneath. To show friends on their phones, run `.\scripts\share_demo.ps1` and share
 the printed `https://….trycloudflare.com` link (it dies when you press Ctrl+C —
 and in real mode every check they run spends your API credits, so share privately).
