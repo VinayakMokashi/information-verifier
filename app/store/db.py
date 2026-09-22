@@ -70,6 +70,35 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _drop_legacy(conn: sqlite3.Connection) -> None:
+    """Remove what the pre-pivot app left behind, including what can't be.
+
+    MEASURED on the first real run of the new engine: `DROP TABLE claim_vecs`
+    raised `no such module: vec0` and took `init_db()` — and so the server's
+    startup — down with it. `claim_vecs` was a sqlite-vec VIRTUAL table, and
+    SQLite cannot drop a virtual table once the extension that defines it is
+    gone, which the pivot deliberately uninstalled.
+
+    So: its shadow tables (plain tables, found by name because vec0 numbers
+    them) are dropped, and the virtual table's own schema entry is left in
+    place. That entry owns no storage (rootpage 0) and nothing reads it, so it
+    is inert. Removing it would need PRAGMA writable_schema surgery on the
+    user's own database at every startup — not a trade worth making to save
+    one row of schema.
+    """
+    shadows = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name LIKE 'claim\\_vecs\\_%' ESCAPE '\\'")]
+    for table in (*_LEGACY_TABLES, *shadows):
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+        except sqlite3.OperationalError as exc:
+            if "no such module" not in str(exc):
+                raise
+            print(f"[db] left legacy virtual table {table!r} in place "
+                  f"(its extension is uninstalled; it is inert): {exc}")
+
+
 def init_db() -> None:
     os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
     with get_conn() as conn:
@@ -80,8 +109,7 @@ def init_db() -> None:
         if row is None or row["value"] != _SCHEMA_VERSION:
             # Old rows hold TruthReport JSON that no longer validates, and the
             # old caches are keyed on shapes that no longer exist.
-            for table in _LEGACY_TABLES:
-                conn.execute(f"DROP TABLE IF EXISTS {table}")
+            _drop_legacy(conn)
             conn.execute("DELETE FROM answer_cache")
             conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
