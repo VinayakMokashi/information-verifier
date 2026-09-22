@@ -650,6 +650,62 @@ def test_a_used_list_that_matches_nothing_keeps_everything(no_factcheck, monkeyp
     assert "matched none" in capsys.readouterr().out
 
 
+TOI = "https://timesofindia.indiatimes.com/city/nagpur/metro-fare-story.cms"
+WHO = "https://www.who.int/news-room/fact-sheets/detail/drinking-water"
+
+
+def _web_pass_after_nothing_trusted(used, trusted="yes", results=(TOI, WHO)):
+    return StubClient([
+        _with_results("No fact-checker covered this.", [BOOM_RELATED], used="",
+                      trusted="no", conf=40),
+        _with_results("A Times of India report says the fare is unchanged.",
+                      list(results), used=used, trusted=trusted, conf=90),
+    ])
+
+
+def test_a_web_pass_cannot_borrow_trust_from_a_result_it_did_not_name(
+        no_factcheck, monkeypatch):
+    """Found by review, reproduced with this exact shape: pass 2's
+    trusted="yes" means only "some source addressed it" — any web page. Its
+    used="timesofindia.com" (the brand, not the host) matched nothing, the
+    keep-everything fallback kept an unrelated who.int result, and that
+    labelled a Times of India answer "Fact-checkers and official sources" at
+    90% — past the 75 cap that exists for exactly this case — and cached it
+    for a week."""
+    client = _web_pass_after_nothing_trusted(used="timesofindia.com")
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "web"
+    assert answer.confidence == 75
+
+
+def test_a_web_pass_that_names_nothing_cannot_raise_the_label(no_factcheck, monkeypatch):
+    """No used= at all is not evidence of what the answer rests on either."""
+    client = _web_pass_after_nothing_trusted(used=None)
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "web"
+    assert answer.confidence == 75
+
+
+def test_a_web_pass_that_names_a_trusted_source_is_trusted(no_factcheck, monkeypatch):
+    """The positive case still works: the answer says it rests on WHO, and
+    the API really returned a WHO page."""
+    client = _web_pass_after_nothing_trusted(used="who.int")
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "trusted"
+    assert answer.confidence == 90
+
+
+def test_a_used_list_of_names_not_domains_keeps_the_receipts(no_factcheck, monkeypatch):
+    """Found by review: used="Alt News" parsed to [] — "relied on nothing" —
+    and stripped every source from an answer that named its source. Only an
+    EMPTY attribute means nothing; words that are not domains mean unsaid."""
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL], used="Alt News", trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.url for s in answer.sources] == [TRUSTED_URL]
+    assert answer.tier == "trusted"
+
+
 def test_prior_factchecks_are_never_filtered_by_used(monkeypatch):
     """Google matched them to the claim; they are a human verdict, not a
     search result the model skimmed past."""

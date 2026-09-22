@@ -94,18 +94,26 @@ class PassResult:
     truncated: bool = False
     error: str | None = None       # for the server log only, never the reader
     used: list[str] | None = None  # domains the answer rests on; None = unsaid
+    # URLs there is EVIDENCE the answer rests on: a citation the API returned,
+    # or a result on a domain the sentinel's used= named. What a pass merely
+    # KEPT is not enough — see backs_trusted.
+    relied_on: set[str] = field(default_factory=set)
 
     @property
     def backs_trusted(self) -> bool:
-        """Does this pass support a "fact-checked" label?
+        """Can this OPEN-WEB pass lift the answer to a "fact-checked" label?
 
-        A trusted source must be among what it KEPT, and the model must not
-        have said that nothing trusted addressed the claim. The model can
-        lower the label this way but never raise it — raising still needs a
-        trusted URL the API itself returned.
+        Only if the answer demonstrably rests on a trusted page. Keeping one
+        is not enough — found by review: pass 2's trusted="yes" means "some
+        source addressed it" (any web page), and a used= that matched nothing
+        falls back to keeping every result, so an unrelated who.int page
+        labelled a Times of India answer "Fact-checkers" at 90%. The model
+        can still lower the label, never raise it; raising needs a trusted
+        URL the API returned AND evidence the answer leans on it.
         """
         return (self.model_says_trusted is not False
-                and any(s.tier == "trusted" for s in self.sources))
+                and any(s.tier == "trusted" and s.url in self.relied_on
+                        for s in self.sources))
 
 
 @dataclass
@@ -161,14 +169,16 @@ def _publisher_of(url: str) -> str:
     return _host(url)
 
 
-def _collect_sources(message) -> list[Source]:
+def _collect_sources(message) -> tuple[list[Source], set[str]]:
     """Sources from the API's own structures — citations first, then results.
 
-    Citations carry the sentence the model actually leaned on, so they are
-    better evidence of what informed the answer than the raw result list.
-    Both are read because a model can search without citing.
+    -> (sources, the URLs that came back as CITATIONS). Citations carry the
+    sentence the model actually leaned on, so they are evidence of what
+    informed the answer; a raw result is only something it saw. Both are
+    read because a model can search without citing.
     """
     found: dict[str, Source] = {}
+    cited_urls: set[str] = set()
 
     def add(url: str, title: str, cited: str = "") -> None:
         if not url or not isinstance(url, str):
@@ -185,9 +195,11 @@ def _collect_sources(message) -> list[Source]:
     for block in getattr(message, "content", None) or []:
         if getattr(block, "type", None) == "text":
             for citation in getattr(block, "citations", None) or []:
-                add(getattr(citation, "url", ""),
-                    getattr(citation, "title", "") or "",
+                url = getattr(citation, "url", "")
+                add(url, getattr(citation, "title", "") or "",
                     getattr(citation, "cited_text", "") or "")
+                if url and isinstance(url, str):
+                    cited_urls.add(url)
         elif getattr(block, "type", None) == "web_search_tool_result":
             content = getattr(block, "content", None)
             # A search ERROR is a single object, not a list — the shape that
@@ -201,7 +213,7 @@ def _collect_sources(message) -> list[Source]:
                 # indistinguishable from "the fact-checkers had nothing".
                 print(f"[chat] web search returned an error: "
                       f"{getattr(content, 'error_code', content)}")
-    return list(found.values())
+    return list(found.values()), cited_urls
 
 
 def _searches_used(message) -> int:
@@ -382,7 +394,9 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         # report bills $0.00 while real money leaves.
         note_llm(settings.chat_model, getattr(final, "usage", None))
 
-        result.sources.extend(_collect_sources(final))
+        found, cited = _collect_sources(final)
+        result.sources.extend(found)
+        result.relied_on |= cited
         remaining -= _searches_used(final)
 
         stop = getattr(final, "stop_reason", None)
@@ -417,6 +431,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
             seen.add(source.url)
             unique.append(source)
     result.sources = _keep_used(unique, result.used)
+    result.relied_on |= {s.url for s in unique if _names(result.used, s.url)}
     return result
 
 
@@ -427,6 +442,13 @@ def _host(url: str) -> str:
         return (urlparse(url).hostname or "").removeprefix("www.")
     except ValueError:
         return ""
+
+
+def _names(used: list[str] | None, url: str) -> bool:
+    """Does the sentinel's used= list name this URL's domain (or a parent)?"""
+    host = _host(url)
+    return bool(used) and bool(host) and any(
+        host == d or host.endswith("." + d) for d in used)
 
 
 def _keep_used(sources: list[Source], used: list[str] | None) -> list[Source]:
@@ -449,8 +471,7 @@ def _keep_used(sources: list[Source], used: list[str] | None) -> list[Source]:
         return sources
     if not used:
         return []
-    kept = [s for s in sources
-            if any(_host(s.url) == d or _host(s.url).endswith("." + d) for d in used)]
+    kept = [s for s in sources if _names(used, s.url)]
     if sources and not kept:
         print(f"[chat] the answer's used={used} matched none of "
               f"{len(sources)} result(s); keeping them all")

@@ -134,17 +134,20 @@ def parse_used(raw: str | None) -> list[str] | None:
 
     Forgiving about what the model writes (commas, URLs, `www.`, a path) and
     strict about what comes out: plain hostnames only. None means "no list was
-    given" and must leave the sources alone; [] means "relied on nothing".
+    given" and must leave the sources alone; [] means "relied on nothing" —
+    which ONLY an empty attribute can say. Found by review: used="Alt News"
+    (names, not domains) parsed to [] and stripped every source from an
+    answer that had named its source. Words we cannot read are unsaid.
     """
-    if raw is None:
-        return None
+    if raw is None or not raw.strip():
+        return None if raw is None else []
     domains: list[str] = []
     for token in re.split(r"[\s,;]+", raw.strip().lower()):
         token = re.sub(r"^[a-z]+://", "", token).split("/")[0].split("?")[0]
         token = token.removeprefix("www.").strip(".")
         if token and _DOMAIN_RE.match(token) and token not in domains:
             domains.append(token)
-    return domains
+    return domains or None
 
 
 # Looser than _SENTINEL_RE on purpose: renderers strip ANYTHING that opens
