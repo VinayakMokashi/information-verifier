@@ -11,7 +11,9 @@ python-multipart>=0.0.9   # multipart file uploads (image/audio)
 # Link ingestion — /verify/link (app/providers/links.py) and the free probe
 # (scripts/link_probe.py). Pinned to the Instagram/YouTube/Facebook
 # extractors in code; the generic extractor is never allowed to run.
-yt-dlp>=2026.7            # all three verified resolving anonymously (2026-07-28)
+yt-dlp>=2026.8.19         # Instagram, YouTube and Facebook (incl. share/r/ reel
+                          # links) verified resolving anonymously on 2026-09-22.
+                          # Facebook changes often: upgrade first when it breaks.
 
 # Dev / tests (free to run: tests never call paid APIs)
 pytest>=8.0

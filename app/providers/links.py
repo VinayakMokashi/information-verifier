@@ -184,6 +184,16 @@ def _classified(exc: Exception) -> LinkError:
         )
     if "private" in m:
         return LinkError("private", "That post is private, so it can't be checked.")
+    if "cannot parse data" in m:
+        # MEASURED 2026-09-22 on real Facebook reels: the extractor's reply
+        # when a post is removed, restricted, or shown only to logged-in
+        # users — even on the latest yt-dlp, and whether reached by its
+        # share link or its /reel/<id> address. Other public reels resolved.
+        return LinkError(
+            "gated",
+            "That post couldn't be opened — it may have been removed, or be "
+            "visible only to people who are logged in. Only public posts work.",
+        )
     if "unsupported url" in m:
         return LinkError(
             "unsupported",

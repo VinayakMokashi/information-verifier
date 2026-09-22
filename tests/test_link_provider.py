@@ -189,3 +189,37 @@ def test_subtitle_text_returns_none_on_fetch_failure(monkeypatch):
     monkeypatch.setattr(L.httpx, "get", boom)
     ref = L.SubtitleRef(lang="hi-orig", url="https://yt.example/sub", ext="json3")
     assert L.subtitle_text(ref) is None
+
+
+# -- Facebook reels, probed 2026-09-22 -----------------------------------------
+
+def test_a_facebook_post_that_cannot_be_parsed_is_explained():
+    """Real reels answered 'Cannot parse data' (removed, restricted or
+    login-only) — by share link and by /reel/<id>, on the latest yt-dlp."""
+    from app.providers.links import _classified
+
+    err = _classified(Exception(
+        "ERROR: [facebook] 925703473004518: Cannot parse data; please report "
+        "this issue on https://github.com/yt-dlp/yt-dlp/issues?q= , filling out "
+        "the appropriate issue template. Confirm you are on the latest version"))
+    assert err.kind == "gated"
+    assert "public" in str(err) and "yt-dlp" not in str(err)
+
+
+def test_the_probe_predicts_exactly_what_the_app_would_do():
+    """The probe said "could skip Sarvam" for ANY caption track; the app
+    trusts only uploader tracks, YouTube '-orig' and Facebook '_FB' — a
+    locale-named track may be a machine translation of the speech."""
+    from scripts.link_probe import caption_verdict
+
+    spanish_fb = {"automatic_captions": {
+        "es_CL": [{"ext": "vtt", "url": "https://x/es"}],
+        "vi_VN": [{"ext": "vtt", "url": "https://x/vi"}]}}
+    assert "transcribe the audio" in caption_verdict(spanish_fb)
+
+    hindi_fb = {"automatic_captions": {"hi_FB": [{"ext": "vtt", "url": "https://x/hi"}]}}
+    assert "'hi_FB' captions" in caption_verdict(hindi_fb)
+
+    youtube = {"automatic_captions": {"hi-orig": [{"ext": "json3", "url": "https://x"}],
+                                      "en": [{"ext": "json3", "url": "https://y"}]}}
+    assert "'hi-orig' captions" in caption_verdict(youtube)

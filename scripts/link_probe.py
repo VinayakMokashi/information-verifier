@@ -35,7 +35,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings  # noqa: E402
-from app.providers.links import ALLOWED_HOSTS, _classified  # noqa: E402
+from app.providers.links import ALLOWED_HOSTS, _classified, _pick_subtitle  # noqa: E402
 
 # Sarvam bills ~Rs 30/hour by the second (PROJECT_PLAN section 8).
 _ASR_RUPEES_PER_SECOND = 30.0 / 3600.0
@@ -78,6 +78,22 @@ def _host_of(url: str) -> str:
         return (urlparse(url).hostname or "").lower()
     except ValueError:
         return ""
+
+
+def caption_verdict(info: dict) -> str:
+    """What /verify/link would do with this post's captions — asked of the
+    app's own `_pick_subtitle`, never re-derived here.
+
+    MEASURED 2026-09-22: this probe said "COULD SKIP SARVAM" for any post
+    with any caption track, while the app only trusts an uploader's track,
+    YouTube's '-orig' or Facebook's '_FB' (anything else may be a machine
+    TRANSLATION of the speech). A Spanish Facebook video carrying
+    ['es_CL', 'vi_VN'] was promised free when the app would pay for ASR.
+    """
+    ref = _pick_subtitle(info)
+    if ref is None:
+        return "the app would transcribe the audio (Sarvam ASR)"
+    return f"the app would read the '{ref.lang}' captions instead - Rs 0 of ASR"
 
 
 def _captions(info: dict) -> tuple[list[str], list[str]]:
@@ -189,9 +205,7 @@ def probe(url: str, cookies_from: str | None = None) -> None:
     indic = _indic(manual) or _indic(auto)
     if manual or auto:
         print(f"  -> Indic languages present : {indic or 'none'}")
-        print("  -> COULD SKIP SARVAM: read the claim from captions, Rs 0 of ASR")
-    else:
-        print("  -> no captions: would need audio download + Sarvam ASR")
+    print(f"  -> {caption_verdict(info)}")
 
     # What the audio path would cost if we had to take it.
     audio = [f for f in (info.get("formats") or [])
