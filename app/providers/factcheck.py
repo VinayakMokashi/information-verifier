@@ -65,28 +65,55 @@ def _parse_and_filter(data: dict) -> tuple[list[Source], list[str]]:
     return sources, dropped
 
 
+async def _fetch(query: str) -> dict:
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            _ENDPOINT,
+            # No languageCode: the old pipeline always queried in English
+            # because an English pivot ran first. The chat engine has no
+            # pivot, so pinning "en" would silently return nothing for a
+            # Hindi or Spanish claim. Unset lets Google match any language
+            # its ClaimReview index covers.
+            params={
+                "query": query,
+                "key": settings.google_factcheck_api_key,
+                "pageSize": _PAGE_SIZE,
+            },
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def search_factcheck(query: str) -> list[Source]:
+    """Prior published fact-checks for `query`, trust-filtered. Never raises.
+
+    MEASURED 2026-09-22, first paid run: this returned nothing, and the same
+    query minutes later returned five trusted reviews (AP, AFP, BBC, BOOM,
+    Full Fact). Every failure was swallowed without a word, so the cheapest
+    evidence this service has — free, and a human verdict — vanished with no
+    trace. Failures are now logged and a dropped connection is retried once.
+
+    The log carries the exception TYPE and the HTTP status only: an httpx
+    error's text includes the request URL, and that URL carries the API key.
+    """
     if not settings.google_factcheck_api_key:
         return []
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                _ENDPOINT,
-                # No languageCode: the old pipeline always queried in
-                # English because an English pivot ran first. The chat engine
-                # has no pivot, so pinning "en" would silently return nothing
-                # for a Hindi or Spanish claim. Unset lets Google match any
-                # language its ClaimReview index covers.
-                params={
-                    "query": query,
-                    "key": settings.google_factcheck_api_key,
-                    "pageSize": _PAGE_SIZE,
-                },
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, ValueError):
-        return []  # fail soft — retrieval still has web search
+    data = None
+    for attempt in (1, 2):
+        try:
+            data = await _fetch(query)
+            break
+        except httpx.HTTPStatusError as exc:
+            print(f"[factcheck] lookup failed: HTTP {exc.response.status_code}")
+            return []          # a 4xx will not improve on a retry
+        except (httpx.TransportError, ValueError) as exc:
+            print(f"[factcheck] lookup failed (attempt {attempt}/2): "
+                  f"{type(exc).__name__}")
+        except httpx.HTTPError as exc:
+            print(f"[factcheck] lookup failed: {type(exc).__name__}")
+            return []
+    if data is None:
+        return []  # fail soft — the engine still has web search
 
     sources, dropped = _parse_and_filter(data)
     if dropped:

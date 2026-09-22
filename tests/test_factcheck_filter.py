@@ -128,3 +128,84 @@ def test_publisher_fallback_strips_www_like_web_search_path():
 def test_empty_and_missing_keys():
     assert _parse_and_filter({}) == ([], [])
     assert _parse_and_filter({"claims": []}) == ([], [])
+
+
+# -- a failed lookup is visible, retried once, and never leaks the key --------
+
+def _patch_fetch(monkeypatch, outcomes):
+    """outcomes: a list of exceptions to raise or dicts to return, in order."""
+    import asyncio
+
+    from app.providers import factcheck as FC
+
+    calls = []
+
+    async def fetch(query):
+        calls.append(query)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(FC, "_fetch", fetch)
+    monkeypatch.setattr(FC.settings, "google_factcheck_api_key", "SECRET-KEY-123")
+    return FC, calls, asyncio
+
+
+GOOD = {"claims": [{"text": "5G spreads covid", "claimReview": [{
+    "url": "https://www.boomlive.in/fake-5g", "title": "No, 5G does not",
+    "textualRating": "False", "publisher": {"name": "BOOM"}}]}]}
+
+
+def test_a_dropped_connection_is_retried_once(monkeypatch, capsys):
+    """MEASURED on the first paid run: the lookup returned nothing and the
+    same query minutes later returned five trusted reviews. A transient
+    failure should not cost the one free, human-verdict piece of evidence."""
+    import httpx
+
+    FC, calls, asyncio = _patch_fetch(
+        monkeypatch, [httpx.ConnectTimeout("slow"), GOOD])
+    sources = asyncio.run(FC.search_factcheck("5G spreads covid"))
+    assert [s.publisher for s in sources] == ["BOOM"]
+    assert len(calls) == 2
+    assert "attempt 1/2" in capsys.readouterr().out
+
+
+def test_a_failure_is_logged_never_swallowed(monkeypatch, capsys):
+    import httpx
+
+    FC, calls, asyncio = _patch_fetch(
+        monkeypatch, [httpx.ConnectError("down"), httpx.ConnectError("down")])
+    assert asyncio.run(FC.search_factcheck("x")) == []
+    out = capsys.readouterr().out
+    assert "lookup failed" in out and "ConnectError" in out
+
+
+def test_the_log_never_carries_the_api_key(monkeypatch, capsys):
+    """httpx puts the request URL in its error text, and the URL carries
+    `key=`. The log gets the exception TYPE and the status — nothing else."""
+    import httpx
+
+    url = "https://factchecktools.googleapis.com/v1alpha1/claims:search?key=SECRET-KEY-123"
+    request = httpx.Request("GET", url)
+    status_error = httpx.HTTPStatusError(
+        f"Client error '403 Forbidden' for url '{url}'",
+        request=request, response=httpx.Response(403, request=request))
+    transport_error = httpx.ConnectError(f"failed to reach {url}", request=request)
+
+    for outcomes in ([status_error], [transport_error, transport_error]):
+        FC, _, asyncio = _patch_fetch(monkeypatch, outcomes)
+        asyncio.run(FC.search_factcheck("x"))
+        assert "SECRET-KEY-123" not in capsys.readouterr().out
+
+
+def test_a_4xx_is_not_retried(monkeypatch):
+    """A rejected key or a bad request will not improve on a second try."""
+    import httpx
+
+    request = httpx.Request("GET", "https://example.test")
+    status_error = httpx.HTTPStatusError(
+        "403", request=request, response=httpx.Response(403, request=request))
+    FC, calls, asyncio = _patch_fetch(monkeypatch, [status_error, GOOD])
+    assert asyncio.run(FC.search_factcheck("x")) == []
+    assert len(calls) == 1
