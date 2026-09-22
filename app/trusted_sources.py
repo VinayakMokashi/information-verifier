@@ -32,7 +32,8 @@ attack surface. They still surface in the general-web tier, labelled as such,
 which is the honest placement.
 """
 import re
-from urllib.parse import urlparse
+
+from app.hosts import strict_host
 
 # Crawler access VERIFIED against the live API (2026-07-24).
 CORE_SEARCH_DOMAINS: list[str] = [
@@ -132,12 +133,6 @@ TRUSTED_DOMAINS: list[str] = sorted(
 )
 
 
-# A hostname is dot-separated labels of [a-z0-9-] only. Anything else (\ or
-# space or unicode) means Python's urlparse and a browser's WHATWG parser can
-# disagree about where the host ends — and that disagreement is exploitable.
-_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
-
-
 def trusted_domain_of(url: str) -> str | None:
     """The whitelist entry a URL belongs to, or None if the URL is untrusted.
 
@@ -146,22 +141,12 @@ def trusted_domain_of(url: str) -> str | None:
     An entry that is itself a subdomain (factcheck.thequint.com) trusts only
     that subtree — the rest of thequint.com stays untrusted.
 
-    This is a security boundary, so anything a browser could read differently
-    than urlparse does fails closed: only http(s), no userinfo (rejects
-    https://evil.com\\@altnews.in/, where browsers navigate to evil.com), and
-    the host must be a plain hostname (rejects https://evil.example\\.altnews.in/,
-    which browsers cut at the backslash).
+    Reading the host is a security boundary, so it is done in exactly one
+    place — app/hosts.py — shared with the link fetcher (see its docstring
+    for what fails closed and why).
     """
-    try:
-        parts = urlparse(url)
-        host = parts.hostname  # lowercased; port and userinfo stripped
-    except ValueError:
-        return None
-    if parts.scheme not in ("http", "https"):
-        return None
-    if parts.username is not None:  # no legitimate fact-check URL has userinfo
-        return None
-    if not host or not _HOST_RE.match(host):
+    host = strict_host(url, schemes=("https", "http"))
+    if host is None:
         return None
     for domain in TRUSTED_DOMAINS:
         if host == domain or host.endswith("." + domain):

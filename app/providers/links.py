@@ -32,9 +32,10 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 
 import httpx
+
+from app.hosts import strict_host
 
 # Exact hosts, not suffix matching: the endpoint fetches whatever this allows,
 # so a lookalike (youtube.com.evil.com) must fail. m.instagram.com and short
@@ -140,29 +141,14 @@ class _Silent:
 def allowed_link_host(url: str) -> str | None:
     """The host this URL really points at, or None. Fails closed.
 
-    Same discipline as trusted_sources.trusted_domain_of, for the same
-    reason: browsers and Python can disagree about where a host ends
-    (`https://evil.com\\@youtube.com/` reads as youtube.com to a naive
-    parser), and here the stakes are higher — this check decides what the
-    SERVER will fetch, not what a verdict may cite.
+    Here the stakes are higher than for a citation: this decides what the
+    SERVER will fetch. The host is read by the one shared parser
+    (app/hosts.py, also used by trusted_domain_of) — the two used to parse
+    separately and had already drifted — and must then be an EXACT allowed
+    host: no suffix matching, so youtube.com.evil.com fails.
     """
-    if not isinstance(url, str) or len(url) > 2048:
-        return None
-    try:
-        parts = urlsplit(url.strip())
-    except ValueError:
-        return None
-    if parts.scheme != "https":         # these platforms are https-only
-        return None
-    try:
-        if parts.username is not None or parts.password is not None:
-            return None
-        host = (parts.hostname or "").lower().rstrip(".")
-    except ValueError:
-        return None
-    if not host or not re.fullmatch(r"[a-z0-9.-]+", host):
-        return None
-    return host if host in _ALLOWED_HOSTS else None
+    host = strict_host(url, schemes=("https",))   # these platforms are https-only
+    return host if host in ALLOWED_HOSTS else None
 
 
 def _classified(exc: Exception) -> LinkError:

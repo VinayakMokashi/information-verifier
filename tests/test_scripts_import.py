@@ -78,3 +78,21 @@ def test_every_runnable_script_that_prints_forces_utf8(script):
     guards = ("force_utf8_stdout(", "_utf8_console(", "print_answer(")
     assert any(g in src for g in guards), \
         f"{script.name} prints but never forces UTF-8 on stdout"
+
+
+ALL_PY = sorted(p for d in ("app", "scripts", "tests")
+                for p in (Path(__file__).resolve().parent.parent / d).rglob("*.py")
+                if "__pycache__" not in p.parts)
+
+
+@pytest.mark.parametrize("path", ALL_PY, ids=lambda p: f"{p.parent.name}/{p.name}")
+def test_no_file_has_an_invalid_escape(path):
+    """"\." in a normal string is a SyntaxWarning today and an error in a
+    future Python. Edits made through a shell heredoc kept producing them in
+    this project (the tool layer collapses "\\\\" to "\\") — a regex or a
+    Windows path silently changes meaning when that happens."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        compile(path.read_text(encoding="utf-8"), str(path), "exec")
