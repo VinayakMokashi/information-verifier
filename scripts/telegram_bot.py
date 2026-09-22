@@ -16,6 +16,7 @@ Costs whatever the checks cost — Telegram itself is free. No token → prints
 setup instructions and exits at $0.
 """
 import asyncio
+import contextlib
 import html
 import os
 import re
@@ -349,6 +350,11 @@ def _server_trouble(status: int) -> str:
     return "Yeh bheja nahi ja saka — thodi der baad dobara try kariye."
 
 
+class JobGone(Exception):
+    """The API has no such job (404) — deleted after the retention period, or
+    the app is now pointed at another database. Never "still running"."""
+
+
 class AppClient:
     """The same two-call REST contract the web page uses."""
 
@@ -388,6 +394,12 @@ class AppClient:
         already been paid for — and the generic handler then told the user
         to resubmit, buying the whole check a second time. A network error
         here is never a reason to abandon money already spent.
+
+        -> the report, or None if it is still running when the attempts run
+        out. A 404 raises JobGone: it used to return None as well, and since
+        answers are deleted after 30 days that is a normal outcome — a chat
+        whose remembered job had been deleted was told "still running" on
+        every message until the bot restarted (found by review, reproduced).
         """
         for attempt in range(attempts if attempts is not None else _POLL_MAX):
             try:
@@ -397,8 +409,7 @@ class AppClient:
                     if report["status"] in ("COMPLETE", "FAILED"):
                         return report
                 elif resp.status_code == 404:
-                    print(f"[bot] job {job_id} not found; giving up")
-                    return None
+                    raise JobGone(job_id)
             except (httpx.HTTPError, ValueError) as exc:
                 print(f"[bot] poll blip, retrying: {type(exc).__name__}: {exc}")
             if attempt + 1 < (attempts if attempts is not None else _POLL_MAX):
@@ -507,50 +518,91 @@ async def _submit(kind: str, payload: str, app: AppClient,
     return await app.submit_file("media", name, content, "audio/ogg")
 
 
+_NOT_CHECKED = ("ℹ️ Yeh naya message check nahi hua, kyunki pichla check chal "
+                "raha tha. Ise check karwana ho to ab dobara bhejiye.")
+
+
 async def handle_message(
     msg: dict, app: AppClient, tg: TelegramClient,
     pending: dict[int, str] | None = None,
     locks: dict[int, asyncio.Lock] | None = None,
+    *, slots: asyncio.Semaphore | None = None,
+    watching: set[str] | None = None,
 ) -> None:
     """One message, end to end. Every failure becomes words in the chat.
 
-    `pending` remembers a chat's in-flight job_id so a check that outran the
+    `pending` remembers a chat's undelivered job_id so a check that outran the
     poll window is RESUMED rather than resubmitted. Telling a user to
     "send it again" bought the whole check a second time — ASR, retrieval,
     adjudication — precisely for the slow, expensive jobs.
 
-    Messages now run concurrently (see Dispatcher), which opens a way to pay
+    Messages run concurrently (see Dispatcher), which opens a way to pay
     twice: two messages from ONE chat arriving together would both see no
     pending job and both submit. So everything that decides whether to spend
     — reading `pending`, submitting, recording the job — runs under a
-    per-chat lock, and only the long wait happens outside it. A second
-    message then finds the first job and says it is still running.
+    per-chat lock, and only the long wait happens outside it.
+
+    A message that arrives while the chat's previous check is undelivered is
+    NEVER checked automatically — at 2 checks a day, an impatient "kya hua?"
+    would spend half the day. It either hands over the finished answer or is
+    told, in words, to send again. Found by review, reproduced: it used to be
+    swallowed silently when the first handler delivered while it peeked.
+    `watching` (jobs whose own handler is still waiting) tells the two apart:
+    once a wait gives up it asks the chat for "any message", and the next one
+    is that poke; while it is still waiting, nobody asked for one.
     """
     chat_id = msg.get("chat", {}).get("id")
     if chat_id is None:
         return
     pending = pending if pending is not None else {}
     locks = locks if locks is not None else {}
+    watching = watching if watching is not None else set()
     kind, payload = classify_message(msg)
 
     if kind == "help":           # instant — it never waits behind anyone's check
         await tg.send(chat_id, HELP)
         return
 
-    async with locks.setdefault(chat_id, asyncio.Lock()):
+    # Lock BEFORE slot: a message queued behind its own chat must not hold
+    # one of the bot's slots while it waits (found by review: one chat
+    # re-sending could hold every slot and starve all the others).
+    async with locks.setdefault(chat_id, asyncio.Lock()), \
+            (slots if slots is not None else contextlib.nullcontext()):
         # A job already paid for comes first, whatever this message says.
         stale_job = pending.get(chat_id)
         if stale_job:
-            report = await app.wait_for_report(stale_job, attempts=2)
-            if report is None:
+            gone = False
+            try:
+                report = await app.wait_for_report(stale_job, attempts=2)
+            except JobGone:
+                report, gone = None, True
+            # Re-read after the await: the first message's own wait may have
+            # delivered it meanwhile — then there is nothing to hand over, and
+            # this message still arrived during a check.
+            if pending.get(chat_id) != stale_job:
+                if kind != "unsupported":
+                    await tg.send(chat_id, _NOT_CHECKED)
+                return
+            if gone:
+                # Deleted after the retention period: the old answer is lost,
+                # and this is plainly a new message, not a poke for it.
+                pending.pop(chat_id, None)
+                print(f"[bot] job {stale_job} no longer exists; "
+                      "checking the new message instead")
+            elif report is None:
                 await tg.send(chat_id, "⏳ Aapka pichla check abhi bhi chal raha hai. "
                                        "Wo pura hone ke baad naya bhejiye — "
                                        "warna dobara paisa lagega.")
-            elif pending.get(chat_id) == stale_job:   # not delivered yet
+                return
+            else:
                 pending.pop(chat_id, None)
                 await tg.send(chat_id, "Aapka pichla check pura hua:")
                 await tg.send(chat_id, format_reply(report))
-            return
+                # Its wait had asked for "any message": this was that poke.
+                # Otherwise the person sent something new mid-check — say so.
+                if stale_job in watching and kind != "unsupported":
+                    await tg.send(chat_id, _NOT_CHECKED)
+                return
 
         if kind == "unsupported":
             await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
@@ -570,11 +622,20 @@ async def handle_message(
         # Remembered BEFORE the wait: if this process dies mid-poll, the job
         # is still recoverable on the next message instead of being re-bought.
         pending[chat_id] = job_id
+        watching.add(job_id)
 
-    # The long wait, outside the lock: this chat's next message must be able
-    # to say "still running" instead of queueing silently for minutes.
+    # The long wait, outside the lock AND the slot: this chat's next message
+    # must be able to say "still running" instead of queueing silently for
+    # minutes, and a report that takes minutes must not hold a slot.
     try:
-        report = await app.wait_for_report(job_id)
+        try:
+            report = await app.wait_for_report(job_id)
+        except JobGone:
+            if pending.get(chat_id) == job_id:
+                pending.pop(chat_id, None)
+            print(f"[bot] job {job_id} vanished right after it was accepted")
+            await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
+            return
         if report is None:
             await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai. Mujhe koi "
                                    "bhi message bhejiye aur main wahi report "
@@ -587,6 +648,8 @@ async def handle_message(
     except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
         print(f"[bot] handling failed: {type(exc).__name__}: {exc}")
         await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
+    finally:
+        watching.discard(job_id)
 
 
 class Dispatcher:
@@ -598,14 +661,17 @@ class Dispatcher:
     is now persisted and atomic (2 a day, 2026-09-22), and the per-chat lock
     in handle_message stops one chat paying twice.
 
-    `max_in_flight` bounds the tasks doing real work, so a flood of chats
-    cannot open unbounded connections; /help skips the bound entirely.
+    `max_in_flight` bounds the handlers deciding and submitting at once (a
+    voice note is downloaded and re-uploaded then). A message queued behind
+    its own chat's lock holds no slot, the minutes-long wait for a report
+    holds none, and /help skips the bound entirely.
     """
 
     def __init__(self, app: AppClient, tg: TelegramClient, max_in_flight: int = 16):
         self.app, self.tg = app, tg
         self.pending: dict[int, str] = {}
         self.locks: dict[int, asyncio.Lock] = {}
+        self.watching: set[str] = set()
         self._slots = asyncio.Semaphore(max_in_flight)
         self._tasks: set[asyncio.Task] = set()
 
@@ -616,20 +682,24 @@ class Dispatcher:
 
     async def _run(self, message: dict) -> None:
         try:
-            if classify_message(message)[0] == "help":
-                await handle_message(message, self.app, self.tg,
-                                     self.pending, self.locks)
-                return
-            async with self._slots:
-                await handle_message(message, self.app, self.tg,
-                                     self.pending, self.locks)
+            await handle_message(message, self.app, self.tg, self.pending,
+                                 self.locks, slots=self._slots,
+                                 watching=self.watching)
         except Exception as exc:  # noqa: BLE001 — one message must not kill the bot
             print(f"[bot] task failed: {type(exc).__name__}: {exc}")
 
     async def drain(self) -> None:
-        """Wait for everything in flight (tests; a graceful shutdown)."""
+        """Wait for everything in flight (tests; a graceful shutdown).
+
+        The sleep(0) is load-bearing. A finished task leaves `_tasks` in its
+        done-callback, which runs on the NEXT loop turn — and on 3.12 gather()
+        over tasks that are all already done completes without yielding at
+        all. A drain() called just as the last task finished therefore spun
+        forever, blocking the loop (measured: a new test did exactly that).
+        """
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            await asyncio.sleep(0)
 
 
 def _utf8_console() -> None:

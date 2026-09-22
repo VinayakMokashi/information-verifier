@@ -489,6 +489,7 @@ class _GatedApp(StubApp):
         self.done: dict[str, asyncio.Event] = {}
         self.release: dict[str, asyncio.Event] = {}
         self._n = 0
+        self._all_finished = False
 
     async def submit_json(self, endpoint, payload):
         await asyncio.sleep(0)                 # a real POST suspends too
@@ -496,6 +497,9 @@ class _GatedApp(StubApp):
         self._n += 1
         job = f"job{self._n}"
         self.done[job], self.release[job] = asyncio.Event(), asyncio.Event()
+        if self._all_finished:                 # so drain() can never hang on a
+            self.done[job].set()               # job submitted after finish_all —
+            self.release[job].set()            # a broken bot must FAIL, not hang
         return job, ""
 
     async def wait_for_report(self, job_id, attempts=None):
@@ -505,6 +509,7 @@ class _GatedApp(StubApp):
         return self.report
 
     def finish_all(self):
+        self._all_finished = True
         for job in self.done:
             self.done[job].set()
             self.release[job].set()
@@ -597,6 +602,161 @@ def test_a_finished_check_is_delivered_exactly_once():
     app, tg = asyncio.run(scenario())
     assert sum("This is false." in t for _, t in tg.sent) == 1
     assert len(app.submissions) == 1               # "kya hua?" bought nothing
+
+
+class _PeekGatedApp(_GatedApp):
+    """_GatedApp whose short peek takes real time (2 polls, ~3 s in life):
+    it starts, then waits on `peek_gate` before answering."""
+
+    def __init__(self):
+        super().__init__()
+        self.peek_gate = asyncio.Event()
+        self.peeking = 0
+
+    async def wait_for_report(self, job_id, attempts=None):
+        if attempts is not None:
+            self.peeking += 1
+            await self.peek_gate.wait()
+        return await super().wait_for_report(job_id, attempts)
+
+
+def test_a_new_message_is_never_silently_dropped():
+    """Found by review, reproduced: chat 7's second message peeked at the
+    first job; the first handler finished and delivered it meanwhile; the
+    peek then saw nothing left to deliver and returned — the second message
+    got no reply at all. It is not checked automatically (at 2 a day, "kya
+    hua?" would spend half the day), but the chat is told, in words."""
+    async def scenario():
+        app, tg = _PeekGatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, "first rumour"))
+        await _until(lambda: "job1" in app.done)
+        bot.dispatch(_msg(7, "a DIFFERENT rumour"))
+        await _until(lambda: app.peeking == 1)       # second handler is peeking
+        app.done["job1"].set()
+        app.release["job1"].set()                    # first handler delivers job1
+        await _until(lambda: any("This is false." in t for _, t in tg.sent))
+        app.peek_gate.set()                          # the peek comes back
+        await _until(lambda: any(t == B._NOT_CHECKED for _, t in tg.sent))
+        app.finish_all()
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert len(app.submissions) == 1                             # nothing spent
+    assert sum("This is false." in t for _, t in tg.sent) == 1   # job1, once
+    assert tg.sent[-1] == (7, B._NOT_CHECKED)
+
+
+def test_a_message_sent_mid_check_hands_over_the_answer_and_says_so():
+    """The first handler is still waiting when the second message's peek
+    finds the job done: the peek delivers it, exactly once, and says that
+    the new message itself was not checked — nobody had asked for a poke."""
+    async def scenario():
+        app, tg = _GatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, "first rumour"))
+        await _until(lambda: "job1" in app.done)
+        app.done["job1"].set()                       # done; first wait not awake
+        bot.dispatch(_msg(7, "a DIFFERENT rumour"))
+        await _until(lambda: any(t == B._NOT_CHECKED for _, t in tg.sent))
+        app.release["job1"].set()                    # the first wait wakes: silent
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert len(app.submissions) == 1
+    assert sum("This is false." in t for _, t in tg.sent) == 1
+    assert [t for _, t in tg.sent][-3:-1] == ["Aapka pichla check pura hua:",
+                                              tg.sent[-2][1]]
+    assert tg.sent[-1] == (7, B._NOT_CHECKED)
+
+
+def test_the_poke_a_timed_out_wait_asked_for_gets_no_extra_note():
+    """When the wait gave up it asked for "any message"; that message IS the
+    request, and telling the person it "was not checked" would only confuse."""
+    app, tg, pending = _PendingApp(), StubTG(), {}
+    _handle(_msg(7, "WHO ne kaha 5G"), app, tg, pending)
+    _handle(_msg(7, "kya hua?"), app, tg, pending)
+    assert "This is false." in tg.sent[-1][1]
+    assert not any(t == B._NOT_CHECKED for _, t in tg.sent)
+
+
+class _GoneApp(StubApp):
+    """The chat's remembered job no longer exists on the server."""
+
+    async def wait_for_report(self, job_id, attempts=None):
+        if job_id == "pruned-job":
+            raise B.JobGone(job_id)
+        return self.report
+
+
+def test_a_job_the_server_deleted_does_not_lock_the_chat():
+    """Found by review, reproduced: answers are deleted after 30 days now, so
+    a 404 is a normal outcome. It read as "still running", and the chat was
+    told so on every message until the bot restarted."""
+    app, tg, pending = _GoneApp(), StubTG(), {7: "pruned-job"}
+    _handle(_msg(7, "naya rumour"), app, tg, pending)
+    assert app.submissions == [("text", {"text": "naya rumour"})]
+    assert "This is false." in tg.sent[-1][1]
+    assert not any("abhi bhi chal raha hai" in t for _, t in tg.sent)
+    assert pending == {}
+
+
+def test_a_404_is_gone_not_still_running():
+    import httpx
+
+    class Http404:
+        async def get(self, *a, **kw):
+            return httpx.Response(404, json={"detail": "Report not found."})
+
+    app = B.AppClient(Http404(), base="http://x")
+    with pytest.raises(B.JobGone):
+        asyncio.run(app.wait_for_report("pruned-job", attempts=2))
+
+
+def test_one_chat_cannot_hold_every_slot():
+    """Found by review, reproduced: each queued message took a global slot
+    BEFORE waiting on its chat's lock, so one impatient chat re-sending could
+    hold all of them and starve every other chat. Queued messages now wait
+    on their own chat's lock without a slot, and the minutes-long wait for a
+    report holds none either."""
+    async def scenario():
+        app, tg = _PeekGatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg, max_in_flight=2)
+        bot.dispatch(_msg(7, "chat 7 rumour"))
+        await _until(lambda: "job1" in app.done)     # chat 7 waiting on its check
+        for i in range(5):
+            bot.dispatch(_msg(7, f"chat 7 again {i}"))
+        await _until(lambda: app.peeking == 1)
+        bot.dispatch(_msg(8, "chat 8 rumour"))
+        await _until(lambda: len(app.submissions) == 2)
+        submitted = [p["text"] for _, p in app.submissions]
+        app.peek_gate.set()
+        app.finish_all()
+        await bot.drain()
+        return submitted
+
+    assert asyncio.run(scenario()) == ["chat 7 rumour", "chat 8 rumour"]
+
+
+def test_drain_returns_when_the_last_task_has_only_just_finished():
+    """drain() spun forever — synchronously, so no timeout could fire — when
+    called in the one loop turn between a task finishing and its
+    done-callback removing it. A thread, so that a spin FAILS this test
+    instead of hanging the suite."""
+    import threading
+
+    async def scenario():
+        bot = B.Dispatcher(StubApp(), StubTG())
+        bot.dispatch(_msg(7, "/help"))
+        await _until(lambda: all(t.done() for t in bot._tasks))
+        await bot.drain()
+
+    runner = threading.Thread(target=asyncio.run, args=(scenario(),), daemon=True)
+    runner.start()
+    runner.join(10)
+    assert not runner.is_alive(), "drain() never returned"
 
 
 def test_one_failing_message_does_not_stop_the_others():
