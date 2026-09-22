@@ -24,7 +24,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~50s) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 594 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 688 passing
 
 The engine has run for real now (2026-09-22): about $0.05 when a fact-checker
 covered the claim, $0.15 for a two-pass fresh rumour, $0.08 for a real reel.
@@ -91,7 +91,16 @@ ASR metering seam; thread-pool contention; garbled source titles.
 ## 4. WHERE THE LAST SESSION ENDED
 
 **Session of 2026-09-22 — every to-do Vinayak listed is DONE, committed and
-pushed.** `main` is clean, **594 tests pass** (pytest exit 0).
+pushed.** `main` is clean, **688 tests pass** (pytest exit 0).
+
+**Then two adversarial reviews of the day's work (evening):** 13 defects,
+every one reproduced with a free script and fixed with a test that fails
+against the old code — a trust label borrowed from a page the answer did not
+use, a DNS-rebinding hole in the dashboard, four ways the verdict tag could
+reach a reader, the 2-a-day cap leaking at midnight, a bot message that
+could vanish, a deleted job freezing its chat. PROJECT_PLAN §7 ("Two
+adversarial reviews") has each one. A second review of those FIXES was
+running when this was written; its outcome is recorded in the same entry.
 
 What he asked, and what happened:
 

@@ -3,7 +3,7 @@
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
 > Keep it updated as the project moves. Last updated: **2026-09-22**
-> (first paid runs, the 2-a-day cap, dashboard — see §7).
+> (first paid runs, the 2-a-day cap, dashboard, two adversarial reviews — see §7).
 
 ---
 
@@ -38,8 +38,14 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
   machine only (a 404 to anyone else, including through the share tunnel).
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**594 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free —
+**688 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free —
 every paid seam is faked).
+
+**Reviewed adversarially the same evening:** two independent reviews of the
+day's work found 13 defects — among them a trust-label bypass, a
+DNS-rebinding hole in the dashboard, four ways the verdict tag could reach a
+reader, and the daily cap leaking at midnight. Every one was reproduced with
+a free script and fixed with a test that fails against the old code (§7).
 
 Working end to end:
 - **Text, image, voice/video and pasted Reel/Shorts/Facebook links** all reach
@@ -401,6 +407,87 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-09-22 (evening) — Two adversarial reviews: 13 defects, every one reproduced, every one fixed
+
+Two independent reviewers went through the day's 20 commits — one for money
+and concurrency, one for security and data — each proving its claims with
+free scripts (fakes, temp databases). Every finding reproduced when I re-ran
+it before touching code; every fix has a test that fails against the old
+code; and the fixes went through the same review (below).
+
+**The ones that mattered most:**
+
+- **A trust label borrowed from a page the answer did not use.** Pass 2's
+  `trusted="yes"` means "some source addressed it" — any web page. When its
+  `used=` missed (the brand `timesofindia.com` for the host
+  `timesofindia.indiatimes.com`), the keep-everything fallback kept an
+  unrelated who.int result, and that labelled a Times of India answer
+  "Fact-checkers" at 90% — past the 75 cap — cached for a week. **Kept is not
+  relied on:** pass 2 now raises the label only for a trusted page the answer
+  demonstrably rests on (a citation, or a domain its `used=` names). The real
+  database holds one answer of this shape; its cache key predates today's
+  prompt, so it can never be served.
+- **The dashboard fell to DNS rebinding.** "From 127.0.0.1 with no proxy
+  header" is also true of a malicious page the owner visits whose domain
+  re-resolves to 127.0.0.1. The spend data listed job ids, and
+  `/reports/{id}` — public, through the tunnel too — returns the person's
+  message; the reviewer fetched one. The browser still sends the attacker's
+  name as Host, so the gate now requires a local Host, and job ids are gone.
+- **Four shapes of the verdict tag reached readers** (invariant 7): `used=`
+  over 600 characters (full URLs), `used=` before `trusted=`, `<Verdict`
+  split across deltas (the hold-back was case-sensitive; the regex was not),
+  and a tag cut off by max_tokens (flush handed it over as text). **Three
+  existing tests had pinned the leak as intended** — "visible, not silently
+  eaten". Every tag shape now goes whether or not it parses, and the web
+  page, which had no backstop at all, has the bot's. Fuzzed: 20,000 random
+  splits and shapes, no leak, no lost confidence, tag-free prose
+  byte-identical. Checked in headless Chrome.
+- **The 2-a-day cap leaked at midnight.** A rejection refunded `today()`, not
+  the day it was charged, so a bad link straddling midnight gave D+1 a third
+  check.
+- **A Telegram message could vanish** (its peek found the answer already
+  delivered and returned in silence), **a deleted job froze its chat**
+  ("still running" on every message — retention makes a 404 normal), and
+  **one impatient chat could hold all 16 slots**.
+
+**A design call on the bot.** A message that arrives while the chat's
+previous check is undelivered is never checked automatically — at 2 a day,
+an impatient "kya hua?" would spend half the day — but it always either
+hands over the finished answer or says, in words, to send again. The poke a
+timed-out wait asked for gets no extra note.
+
+**A test that hangs is not a test that fails.** One new bot test hung
+instead of failing. The cause was `Dispatcher.drain()`, latent since the
+morning: on 3.12, `gather()` over tasks that are all already done completes
+without yielding, and the done-callbacks that empty the task set run on the
+NEXT loop turn — so a drain called in that turn spun forever, synchronously,
+out of reach of any asyncio timeout. Its test runs the drain in a thread
+and fails on the join timeout.
+
+**Smaller ones:** `strict_host`'s `.strip()` removed Unicode whitespace that
+browsers keep (a no-break space before `https://altnews.in/…` counted as Alt
+News — and crashed the fact-check parser, dropping every prior fact-check);
+a crawler-400 sequence could send `allowed_domains: []`; a transcription
+that heard nothing was remembered as the post (its caption alone) for 30
+days, against the cache's own stated rule; the ledger backfill labelled
+every finished link and screenshot check "Voice / video"; `used="Alt News"`
+stripped every source; claiming a slot froze the event loop while another
+writer held the database (1 loop tick in 0.4 s, measured); and the bot gave
+up on a slow link resolve at 30 s while the server went on to bill the job.
+
+**Checked and sound, per the reviewers:** the cap's atomicity across threads
+and processes; no double refund and no refund of paid work; exactly-once
+delivery; the engine's spend bounds; the dashboard's other gates (tunnel
+headers, case, HEAD/OPTIONS); `strict_host` against userinfo, backslashes,
+IP forms and percent-encoding; the ledger storing no content; retention
+deleting only finished rows. Answers stored before the error-text rewrite
+still carry old technical text until retention deletes them — the real
+database has none.
+
+**Residuals, in §11:** an idempotency key on submissions; the answer cache
+key does not cover the labelling code; the screenshot route's inline vision
+call runs on the SDK's default timeout.
 
 ### 2026-09-22 — The first paid runs, the 2-a-day cap, and what only reality could show
 
@@ -1184,6 +1271,8 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    a repeat of the same message is free and does not count.
    `uvicorn app.main:app` in one terminal, `scripts\telegram_bot.py` in the
    other, then message `@Information_Verifier_bot`. Watch the dashboard.
+   A message sent while that chat's check is still running is NOT checked
+   automatically (the cap) — the bot says so and asks for it again.
 
 **On hold, deliberately:**
 
@@ -1212,6 +1301,17 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 9. **Garbled source titles** — a WHO PDF surfaced as "Rum½ÝÀÛ ISSUE#2 FA@kS"
    (its own metadata). Cosmetic; a title that fails a sanity check could fall
    back to the publisher.
+10. **An idempotency key on submissions.** A caller that stops waiting for
+   the 202 leaves a job the server finished and billed but nobody delivers.
+   The bot now waits (300 s) far longer than the server's bounded inline
+   work (a link resolve, 60 s) — except the screenshot route's vision call,
+   which runs on the SDK's default timeout. A client-sent key (the bot's
+   `chat:message_id`) that returns the existing job would close it for good.
+11. **The answer cache key does not cover the labelling code.** It covers the
+   prompt, model, effort and whitelist; a change to how the tier or
+   confidence is computed can serve an old label for up to a week (trusted
+   TTL). Checked on 2026-09-22 that nothing reachable was affected. An
+   `ENGINE_VERSION` in `cache_key` would make it structural.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.
@@ -1223,6 +1323,8 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
   time~~, ~~raw exception text in answer.error~~ (all user-facing errors
   audited), ~~two SSRF host parsers~~ (one, `app/hosts.py`), ~~Facebook
   /reel/ form unprobed~~ (share links verified), ~~spending dashboard~~.
+- ~~The 13 review findings of the evening~~ — all fixed, each with a test
+  that fails against the old code (§7, "Two adversarial reviews").
 
 **Settled earlier, kept for the record:**
 - ~~Hindi ASR accuracy~~ → 2026-07-28: real Hinglish speech preserved every

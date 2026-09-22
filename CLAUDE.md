@@ -68,7 +68,10 @@ limiter are both in-memory.
    heading saying none had covered it. Its `used=` list narrows the sources to
    what the answer rests on and can never add one. After the fact a label only
    goes down: relabelling on serve re-tiers each source, but never promotes a
-   stored answer over prose that says no fact-checker covered it.
+   stored answer over prose that says no fact-checker covered it. And KEPT is
+   not RELIED ON: an open-web answer is "fact-checked" only if it rests on a
+   trusted page — a citation, or a domain its `used=` names (found by review:
+   an unrelated who.int result labelled a Times of India answer at 90%).
 2. **The engine may say it could not verify.** Tier `none` is a real answer.
    Never force a decisive-looking call out of nothing.
 3. **Prose is never a receipt.** The model can write a convincing fake URL.
@@ -95,11 +98,14 @@ limiter are both in-memory.
    an empty result. The answer cache is exact-match only, so its TTL is not
    optional — "no fact-checker has covered this" is wrong the day BOOM
    publishes. The transcript cache (by platform video id) never stores a
-   failed or empty transcription.
+   failed transcription, or one that heard nothing beyond the caption.
 7. **The sentinel is never user-visible and never user-plantable.** It trails
-   the answer (a header cannot survive streaming — §4); `MarkerFilter` holds
-   back a trailing `<` and strips it; `as_prompt_data()` turns every `<`/`>` in
-   user input into `‹`/`›` so it cannot be forged.
+   the answer (a header cannot survive streaming — §4). `MarkerFilter` removes
+   EVERY `<verdict…>` tag whether or not it parses (any case, any attribute
+   order, any length), holds back a possible opener, and drops a tag cut off
+   mid-stream; the page, the bot and the console strip any tag shape again.
+   `as_prompt_data()` turns every `<`/`>` in user input into `‹`/`›` so it
+   cannot be forged.
 8. **Streaming never forks the truth.** The persisted `Answer` is canonical;
    every surface re-renders from it when the stream ends. A reload after the
    job finished must behave exactly like watching it live.
@@ -141,6 +147,10 @@ limiter are both in-memory.
 - **Concurrency tests need fakes that suspend** (`await asyncio.sleep(0)`), or
   a race cannot happen and the test passes with the guard removed — measured.
   And wait on conditions, not durations: asyncio's clock here steps 15–16 ms.
+- **A test that hangs on the bug is not a test that fails.** Make the broken
+  version FAIL: stubs that finish work submitted late, and a thread with a
+  join timeout around anything that could spin synchronously (measured:
+  `Dispatcher.drain()` spun where no asyncio timeout could fire).
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,
