@@ -17,12 +17,12 @@ Two counters, deliberately stored differently:
 """
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
 
 from app.config import settings
-from app.store.repository import DailyQuota
+from app.store.repository import DailyQuota, operator_day
 
 _MAX_TRACKED_CLIENTS = 512
 
@@ -32,9 +32,9 @@ _daily = DailyQuota()
 
 
 def today() -> str:
-    """The operator's calendar day, as the daily cap counts it."""
-    offset = timedelta(minutes=settings.day_boundary_utc_offset_min)
-    return (datetime.now(timezone.utc) + offset).date().isoformat()
+    """The operator's calendar day, as the daily cap counts it — the same
+    definition the spending dashboard uses (store.operator_day)."""
+    return operator_day(datetime.now(timezone.utc))
 
 
 def _reset_label() -> str:

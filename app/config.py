@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # What a pasted link said, by its platform video id. A post's audio does
     # not change; its caption can, so this still expires.
     transcript_cache_ttl_days: int = 30
+    # Every stranger's message used to be kept forever. Answers (which hold
+    # the message, what a machine read from it, and the reply) are deleted
+    # after this many days; the spend ledger keeps the costs, with no content.
+    answer_retention_days: int = 30
 
     # Media — audio/video via ffmpeg + Sarvam Saaras
     max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap

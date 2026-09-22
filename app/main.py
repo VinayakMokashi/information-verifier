@@ -92,18 +92,51 @@ class LimitUploadSize:
             await _send_413(send)
 
 
+_HOUSEKEEPING_EVERY_S = 6 * 3600
+
+
+async def _housekeeping_loop() -> None:
+    """Forget old messages on a schedule, not only when the server restarts.
+
+    A server that stays up for weeks (a shared link, the Telegram bot) must
+    not depend on a restart to delete people's messages after
+    answer_retention_days.
+    """
+    import asyncio
+
+    from app.store.repository import housekeeping
+
+    while True:
+        await asyncio.sleep(_HOUSEKEEPING_EVERY_S)
+        done = await asyncio.to_thread(housekeeping)
+        if any(done.values()):
+            print(f"[housekeeping] {done}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    import contextlib
+
     init_db()
     # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
     # is dead by definition — it would otherwise be polled forever by a page
     # that will never get an answer.
-    from app.store.repository import AnswerRepository
+    from app.store.repository import AnswerRepository, housekeeping
 
     healed = AnswerRepository().sweep_orphans()
     if healed:
         print(f"[startup] failed {healed} job(s) orphaned by a restart")
-    yield
+    done = housekeeping()
+    if any(done.values()):
+        print(f"[startup] housekeeping: {done}")
+    task = asyncio.create_task(_housekeeping_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(

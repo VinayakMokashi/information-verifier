@@ -78,17 +78,22 @@ class UsageMeter:
         self._asr_seconds += max(0.0, float(seconds))
 
     def snapshot(self) -> ReportUsage:
-        usd = self._searches * _SEARCH_USD + self._asr_seconds * _ASR_USD_PER_S
+        search = self._searches * _SEARCH_USD
+        asr = self._asr_seconds * _ASR_USD_PER_S
+        llm = 0.0
         for model, row in self._models.items():
             p = _PRICES.get(model, _FALLBACK_PRICE)
-            usd += (row.input_tokens * p["in"] + row.output_tokens * p["out"]
+            llm += (row.input_tokens * p["in"] + row.output_tokens * p["out"]
                     + row.cache_write_tokens * p["cache_w"]
                     + row.cache_read_tokens * p["cache_r"]) / 1e6
         return ReportUsage(
             models={m: r.model_copy() for m, r in self._models.items()},
             web_searches=self._searches,
             asr_seconds=round(self._asr_seconds, 2),
-            estimated_usd=round(usd, 4),
+            estimated_usd=round(llm + search + asr, 4),
+            llm_usd=round(llm, 6),
+            search_usd=round(search, 6),
+            asr_usd=round(asr, 6),
         )
 
 

@@ -54,6 +54,32 @@ CREATE TABLE IF NOT EXISTS daily_checks (
 -- the platform's own video id — known for free at resolve time, before any
 -- download or ASR is bought. One viral reel forwarded by fifty people used to
 -- re-download and re-buy its transcription fifty times.
+-- One row per finished check: what it cost and what kind it was, and NOTHING
+-- the person sent. Answers (which hold messages) are deleted after
+-- answer_retention_days; this ledger is what lets the spending dashboard keep
+-- its history anyway. Written by run_check and fail_job.
+CREATE TABLE IF NOT EXISTS spend_ledger (
+    job_id              TEXT PRIMARY KEY,
+    day                 TEXT NOT NULL,   -- the operator's day, as the cap counts
+    finished_at         TEXT NOT NULL,   -- UTC ISO
+    kind                TEXT NOT NULL,   -- text | image | media | link | ab-test
+    status              TEXT NOT NULL,   -- COMPLETE | FAILED
+    tier                TEXT NOT NULL,
+    cached              INTEGER NOT NULL,
+    usd                 REAL NOT NULL,
+    llm_usd             REAL NOT NULL,
+    search_usd          REAL NOT NULL,
+    asr_usd             REAL NOT NULL,
+    input_tokens        INTEGER NOT NULL,
+    output_tokens       INTEGER NOT NULL,
+    cache_write_tokens  INTEGER NOT NULL,
+    cache_read_tokens   INTEGER NOT NULL,
+    web_searches        INTEGER NOT NULL,
+    asr_seconds         REAL NOT NULL,
+    models              TEXT NOT NULL    -- comma-joined model ids
+);
+CREATE INDEX IF NOT EXISTS spend_ledger_day ON spend_ledger (day);
+
 CREATE TABLE IF NOT EXISTS transcript_cache (
     key          TEXT PRIMARY KEY,       -- "v1:<platform>:<video id>"
     text         TEXT NOT NULL,

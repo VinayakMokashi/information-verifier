@@ -70,8 +70,12 @@ async def run_one(model: str, text: str, from_link: bool) -> dict:
             result, error = None, f"{type(exc).__name__}: {exc}"
     elapsed = time.monotonic() - started
     bill = meter.snapshot()
+    import uuid
+
     answer = Answer(
-        job_id=f"ab-{model}", created_at=datetime.now(timezone.utc),
+        job_id=f"ab-{model}-{uuid.uuid4().hex[:12]}",
+        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
         status=JobStatus.COMPLETE if result else JobStatus.FAILED,
         input_text=text[:300], error=error,
         sections=result.sections if result else [AnswerSection(tier="none", markdown="")],
@@ -81,6 +85,11 @@ async def run_one(model: str, text: str, from_link: bool) -> dict:
         truncated=result.truncated if result else False,
         usage=bill,
     )
+    # Real money, so it belongs on the spending dashboard — as an experiment,
+    # not a user's check.
+    from app.store.repository import SpendLedger
+
+    SpendLedger().record(answer, "ab-test")
     return {"model": model, "answer": answer, "usd": bill.estimated_usd,
             "searches": bill.web_searches, "seconds": elapsed,
             "passes": len(answer.sections)}
@@ -94,6 +103,9 @@ async def main() -> None:
     if not settings.anthropic_api_key:
         print("No ANTHROPIC_API_KEY in .env. Aborting (no cost).")
         return
+    from app.store.db import init_db
+
+    init_db()
     target, models = sys.argv[1], sys.argv[2:] or DEFAULT_MODELS
     print(f">> PAID A/B: {', '.join(models)}")
     text, from_link, asr_usd = await text_for(target)

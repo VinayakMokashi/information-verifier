@@ -104,10 +104,10 @@ async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
 
 async def _check(job_id: str, text: str, repo, stream=None, *,
                  derived_text: str | None = None, meter=None,
-                 quota_day: str | None = None) -> None:
+                 quota_day: str | None = None, kind: str = "text") -> None:
     """run_check, then settle the day's slot. Every route's engine call."""
     await run_check(job_id, text, repo, stream, derived_text=derived_text,
-                    meter=meter)
+                    meter=meter, kind=kind)
     await _settle_quota(job_id, repo, quota_day)
 
 
@@ -133,7 +133,7 @@ async def _new_job(input_text: str = ""):
 
 
 async def fail_job(job_id: str, message: str, repo, meter: UsageMeter,
-                   stream=None) -> None:
+                   stream=None, kind: str = "media") -> None:
     """Finalize a job that failed BEFORE the engine ran, on every surface.
 
     The stream half is not optional, and leaving it out was a real defect in
@@ -153,6 +153,7 @@ async def fail_job(job_id: str, message: str, repo, meter: UsageMeter,
         answer.usage = meter.snapshot()      # a failed fetch still spent ASR
         answer.completed_at = datetime.now(timezone.utc)
         await asyncio.to_thread(repo.save, answer)
+        await safe_cache_call(repo.ledger.record, answer, kind)
     if stream is not None:
         await stream.publish("error", {"message": message})
 
@@ -192,7 +193,7 @@ async def _run_media_job(
     checking a different claim than the one the person sent.
     """
     async def fail(message: str) -> None:
-        await fail_job(job_id, message, repo, meter, stream)
+        await fail_job(job_id, message, repo, meter, stream, kind="media")
 
     try:
         text = await transcribe_wav(wav, duration)
@@ -214,7 +215,7 @@ async def _run_media_job(
         await fail("No speech could be transcribed from this audio.")
         return
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day)
+                 quota_day=quota_day, kind="media")
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -254,7 +255,7 @@ async def verify_image(
         answer, stream = await _new_job(extracted)
         background.add_task(_check, answer.job_id, extracted, _repo, stream,
                             derived_text=extracted, meter=meter,
-                            quota_day=spend.day)
+                            quota_day=spend.day, kind="image")
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
@@ -392,12 +393,13 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
             with meter.activate():   # the download's normalize notes ASR seconds
                 text = await gather_link_text(info)
         except Exception as exc:  # noqa: BLE001 — every failure must reach the report
-            await fail_job(job_id, _friendly_link_failure(exc), repo, meter, stream)
+            await fail_job(job_id, _friendly_link_failure(exc), repo, meter,
+                           stream, kind="link")
             return
         if key:
             await safe_cache_call(repo.transcripts.put, key, text)
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day)
+                 quota_day=quota_day, kind="link")
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)

@@ -41,7 +41,8 @@ def cache_key(text: str) -> str:
 
 async def run_check(job_id: str, text: str, repo, stream=None, *,
                     derived_text: str | None = None,
-                    meter: UsageMeter | None = None) -> None:
+                    meter: UsageMeter | None = None,
+                    kind: str = "text") -> None:
     """Check `text`, stream it, store it. Never raises."""
     answer = await asyncio.to_thread(repo.get, job_id)
     if answer is None:                      # defensive: the row is made first
@@ -118,6 +119,9 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         answer.usage = meter.snapshot()
         answer.completed_at = datetime.now(timezone.utc)
         await asyncio.to_thread(repo.save, answer)
+        # The spend ledger outlives the answer (which is deleted after
+        # answer_retention_days). A ledger failure must not lose the answer.
+        await safe_cache_call(repo.ledger.record, answer, kind)
         if answer.status is JobStatus.FAILED:
             await emit("error", {"message": answer.error})
         else:

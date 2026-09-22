@@ -58,6 +58,12 @@ class ReportUsage(BaseModel):
     web_searches: int = 0
     asr_seconds: float = 0.0
     estimated_usd: float = 0.0
+    # Where the money went — so the spending dashboard can say "searches cost
+    # more than thinking this week" without re-deriving prices. They sum to
+    # estimated_usd (before rounding).
+    llm_usd: float = 0.0
+    search_usd: float = 0.0
+    asr_usd: float = 0.0
 
 
 Tier = Literal["trusted", "web", "none"]
