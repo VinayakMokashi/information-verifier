@@ -20,12 +20,15 @@ os.environ.setdefault("DB_PATH", "./data/demo.db")
 import uvicorn  # noqa: E402
 
 from scripts.fake_stages import apply_fake_stages  # noqa: E402
+from scripts.render import force_utf8_stdout  # noqa: E402
 
 apply_fake_stages()
 
 from app.main import app  # noqa: E402  (import after patching)
 
 if __name__ == "__main__":
+    # Seen live: the banner printed "simulated � $0" — its em dash mangled.
+    force_utf8_stdout()
     print(">> FREE demo mode: all LLM stages are simulated — $0, no keys needed.")
     print(">> Open http://127.0.0.1:8000 in your browser. Ctrl+C to stop.")
     uvicorn.run(app, host="127.0.0.1", port=8000)

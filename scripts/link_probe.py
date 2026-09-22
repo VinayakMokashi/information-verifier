@@ -51,6 +51,7 @@ _ALLOWED_HOSTS = ALLOWED_HOSTS
 
 
 from app.providers.links import _Silent  # noqa: E402  (yt-dlp logger silencer)
+from scripts.render import force_utf8_stdout  # noqa: E402
 
 
 def _platform(url: str) -> str:
@@ -214,6 +215,7 @@ def probe(url: str, cookies_from: str | None = None) -> None:
 
 
 def main() -> None:
+    force_utf8_stdout()   # captions are routinely Hindi
     args = sys.argv[1:]
     cookies_from = None
     if "--cookies-from" in args:

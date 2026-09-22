@@ -59,3 +59,22 @@ def test_every_import_in_every_script_resolves(script):
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_every_script_parses(script):
     ast.parse(script.read_text(encoding="utf-8"))
+
+
+RUNNABLE = [p for p in SCRIPTS if '__name__ == "__main__"' in p.read_text(encoding="utf-8")]
+
+
+@pytest.mark.parametrize("script", RUNNABLE, ids=lambda p: p.name)
+def test_every_runnable_script_that_prints_forces_utf8(script):
+    """Windows falls back to cp1252 whenever stdout is redirected or piped,
+    and these scripts print transcripts, captions, titles and answers — in
+    Hindi, Tamil, Bengali. MEASURED three times: demo_offline.py died on
+    `> out.txt`; serve_demo.py's banner printed "simulated \ufffd $0"; and
+    crawl_probe.py's FIRST run made its paid API call and then crashed on a
+    '≈' before it could report what it had found."""
+    src = script.read_text(encoding="utf-8")
+    if "print(" not in src:
+        return
+    guards = ("force_utf8_stdout(", "_utf8_console(", "print_answer(")
+    assert any(g in src for g in guards), \
+        f"{script.name} prints but never forces UTF-8 on stdout"

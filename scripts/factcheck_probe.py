@@ -21,9 +21,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings  # noqa: E402
 from app.providers.factcheck import _ENDPOINT, _PAGE_SIZE  # noqa: E402
 from app.trusted_sources import trusted_domain_of  # noqa: E402
+from scripts.render import force_utf8_stdout  # noqa: E402
 
 
 async def main() -> None:
+    force_utf8_stdout()   # fact-check titles arrive in any language
     if not settings.google_factcheck_api_key:
         print("No GOOGLE_FACTCHECK_API_KEY found in .env. Aborting (no cost anyway).")
         return

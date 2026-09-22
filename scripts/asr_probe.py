@@ -15,9 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings  # noqa: E402
 from app.providers.asr import get_asr_provider  # noqa: E402
 from app.providers.media import normalize_to_wav  # noqa: E402
+from scripts.render import force_utf8_stdout  # noqa: E402
 
 
 async def main() -> None:
+    force_utf8_stdout()   # it prints a Hindi transcript
     if not settings.sarvam_api_key:
         print("No SARVAM_API_KEY in .env. Aborting (no cost).")
         return
