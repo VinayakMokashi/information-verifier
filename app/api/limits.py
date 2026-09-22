@@ -42,9 +42,33 @@ _daily = DailyQuota()
 _pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="quota")
 
 
+def _rollback(request: Request, future) -> None:
+    """Hand back a slot whose claimant is already gone. Runs in the pool."""
+    try:
+        day = future.result()
+    except Exception:       # noqa: BLE001 — it never got a slot to give back
+        return
+    if day:
+        print("[limits] the caller went away before its slot arrived; returning it")
+        refund(request, day)
+
+
 async def claim(request: Request) -> str | None:
-    """reserve(), off the loop and out of the shared pool. -> the day charged."""
-    return await asyncio.get_running_loop().run_in_executor(_pool, reserve, request)
+    """reserve(), off the loop and out of the shared pool. -> the day charged.
+
+    A plain thread future, not run_in_executor, so that a caller cancelled
+    while the claim is in flight (a shutdown, mostly) still gives its slot
+    back: the claim finishes in the pool either way, and the callback runs
+    there too, beyond the reach of the dying event loop. Found by review,
+    measured — a cancelled submission silently spent one of the day's two
+    checks, with no job row to show for it.
+    """
+    future = _pool.submit(reserve, request)
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        future.add_done_callback(lambda done: _rollback(request, done))
+        raise
 
 
 async def give_back(request: Request, day: str | None) -> None:

@@ -96,9 +96,15 @@ async def _quota(request: Request):
     spend = _Spend(await claim(request))
     try:
         yield spend
-    except HTTPException:
+    except BaseException:
+        # ANY failure that bought nothing hands the slot back, not only an
+        # HTTPException: found by review, a database error inside the route —
+        # or a request cancelled at shutdown — burned half the day's budget
+        # with no job row and nothing in the log. Shielded so a cancellation
+        # still lets the refund finish; over-counting is the safe direction
+        # if it does not.
         if not spend.started:
-            await give_back(request, spend.day)
+            await asyncio.shield(give_back(request, spend.day))
         raise
 
 

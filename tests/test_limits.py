@@ -309,6 +309,62 @@ def test_a_burst_of_claims_cannot_stall_the_answers(limited):
     assert took < 1.0, f"reading an answer waited {took:.1f}s behind the claims"
 
 
+def test_a_crash_that_never_spent_anything_gives_the_slot_back(limited, monkeypatch):
+    """Found by review, measured: only an HTTPException was refunded. A
+    database error inside the route — or a request cancelled at shutdown —
+    burned half the day's budget with nothing bought, no job row, and no
+    line in the log to explain where the check went."""
+    from app.api import routes
+
+    async def boom(*a, **kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(routes, "_new_job", boom)
+    with pytest.raises(RuntimeError):
+        limited.post("/api/v1/verify/text", json={"text": "a claim"})
+    assert limits.used_today() == 0
+
+
+def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypatch):
+    """The cancellation lands while the claim is still in flight, so the
+    route body never runs and cannot refund. The claim finishes in the
+    limiter's pool anyway — and hands the slot straight back from there,
+    beyond the reach of the dying event loop (found by review, measured:
+    a cancelled submission silently spent one of the day's two checks)."""
+    import asyncio
+    import time
+
+    import httpx
+
+    from app.api import limits as L
+    from app.main import app
+
+    real = L.reserve
+
+    def slow_reserve(request):
+        time.sleep(0.4)                  # a contended write
+        return real(request)
+
+    monkeypatch.setattr(L, "reserve", slow_reserve)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as http:
+            task = asyncio.create_task(
+                http.post("/api/v1/verify/text", json={"text": "cancelled claim"}))
+            await asyncio.sleep(0.1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        for _ in range(50):              # the rollback runs in the pool thread
+            if limits.used_today() == 0:
+                return 0
+            await asyncio.sleep(0.05)
+        return limits.used_today()
+
+    assert asyncio.run(scenario()) == 0
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""
