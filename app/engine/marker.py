@@ -33,20 +33,24 @@ import re
 # is withheld, so streaming stays word-by-word rather than line-by-line. A
 # markdown paragraph is one line, so a line-buffered filter would visibly
 # stutter.
-_OPEN = "<verdict"
+_OPEN_BODY = "verdict"          # after the `<` (or `</`)
 # Only a run that opens `<verdict` is ever held this long, and a real one is
-# always the last thing in the answer. It used to be 700, with `used` capped
-# at 600 INSIDE the regex — so a model that wrote full URLs (which parse_used
-# deliberately tolerates) produced a tag nothing recognised, and the reader
-# saw it (found by review). The cap now only bounds how long a stray
-# `<verdict` in the middle of prose can delay the rest of the answer.
-_MAX_HOLD = 4000
+# always the last thing in the answer. It used to be 700 with `used` capped at
+# 600 INSIDE the regex, then 4000 — both let a long tag through to the reader
+# (two review rounds). A used= of full URLs runs to thousands of characters.
+# The cap now only bounds how long a stray `<verdict` in the middle of prose
+# could delay the rest of the answer.
+_MAX_HOLD = 16000
 
 # Recognising the TAG is separate from reading it, because every tag must go
 # whether or not it parses: invariant 7 says the sentinel is never shown, and
-# a malformed one is still the sentinel. Attributes are read in ANY order —
-# a tag with used= before trusted= used to match nothing and leak.
-_TAG_RE = re.compile(r"<verdict\b([^<>]*)>", re.IGNORECASE)
+# a malformed one is still the sentinel. Attributes are read in ANY order (a
+# tag with used= before trusted= used to match nothing and leak), a closing
+# `</verdict>` counts, and a QUOTED value may contain `<` or `>` — `[^<>]*`
+# could not span those, so the whole tag was shown. The alternation is
+# prefix-disjoint (a quote or not), so matching stays linear.
+_ATTRS = r'(?:[^<>"]|"[^"]*")*'
+_TAG_RE = re.compile(r"</?verdict\b(" + _ATTRS + r")>", re.IGNORECASE)
 _CONFIDENCE_RE = re.compile(r'\bconfidence\s*=\s*"(\d{1,3})"', re.IGNORECASE)
 _TRUSTED_RE = re.compile(r'\btrusted\s*=\s*"(yes|no)"', re.IGNORECASE)
 _USED_RE = re.compile(r'\bused\s*=\s*"([^"]*)"', re.IGNORECASE)
@@ -58,22 +62,53 @@ _NOTHING = frozenset({"", "none", "nothing", "nil", "n/a", "na", "null", "-",
 _WORD_CHAR = re.compile(r"\w")
 
 
-def _could_still_become_sentinel(tail: str) -> bool:
-    """Is `tail` a prefix of a sentinel that later deltas might complete?
+def _closes_outside_quotes(buf: str, start: int) -> bool:
+    """Is there a `>` from `start` on that is not inside a quoted value?"""
+    in_quote = False
+    for ch in buf[start:]:
+        if ch == '"':
+            in_quote = not in_quote
+        elif ch == ">" and not in_quote:
+            return True
+    return False
+
+
+def _could_still_become_sentinel(buf: str, i: int = 0) -> bool:
+    """Could the run at `buf[i:]` still become the sentinel?
 
     Case-insensitive, like the tag itself — the hold-back used to compare
     exactly while the regex ignored case, so `<Ver` + `dict …` split across
-    two deltas went straight to the reader (found by review).
+    two deltas went straight to the reader (found by review). Indices rather
+    than slices: this runs per `<` in the buffer.
     """
-    if len(tail) > _MAX_HOLD:
+    if len(buf) - i > _MAX_HOLD:
         return False
-    low = tail.lower()
-    if low.startswith(_OPEN):
-        after = tail[len(_OPEN):len(_OPEN) + 1]
+    j = i + 2 if buf.startswith("</", i) else i + 1     # past `<` or `</`
+    body = buf[j:j + len(_OPEN_BODY)].lower()
+    if body == _OPEN_BODY:
+        after = buf[j + len(_OPEN_BODY):j + len(_OPEN_BODY) + 1]
         if after and _WORD_CHAR.match(after):
             return False            # "<verdicts": a word, not the tag
-        return ">" not in tail      # an opened tag, not yet closed
-    return _OPEN.startswith(low)    # a partial opener: `<`, `<Ver`, ...
+        # An opened tag, not yet closed. A `>` inside a quoted value does not
+        # close it — that is how a used= containing `>` used to escape.
+        return not _closes_outside_quotes(buf, j + len(_OPEN_BODY))
+    return _OPEN_BODY.startswith(body)   # a partial opener: `<`, `</Ver`, ...
+
+
+def _hold_from(buf: str) -> int:
+    """The EARLIEST `<` that could still become the sentinel, or -1.
+
+    Earliest, not last: the last `<` in an unfinished tag can be one inside
+    its own quoted used= value, and holding from there would emit the first
+    half of the tag. A stray `<` in prose stops being a candidate as soon as
+    any non-matching character follows it, so this holds nothing extra.
+    """
+    i = buf.find("<")
+    while i != -1:
+        if _could_still_become_sentinel(buf, i):
+            return i
+        i = buf.find("<", i + 1)
+    return -1
 
 
 def _is_cut_sentinel(held: str) -> bool:
@@ -83,8 +118,11 @@ def _is_cut_sentinel(held: str) -> bool:
     fragment to the reader. Anything from `<v` on that can only be the
     sentinel's opening is dropped; a lone `<` could be prose, and is kept.
     """
+    if len(held) < 2:
+        return False
     low = held.lower()
-    return len(held) >= 2 and (low.startswith(_OPEN) or _OPEN.startswith(low))
+    body = low[2:] if low.startswith("</") else low[1:]
+    return body.startswith(_OPEN_BODY) or _OPEN_BODY.startswith(body)
 
 
 def _read_tag(attrs: str) -> tuple[int | None, bool, str | None] | None:
@@ -118,9 +156,8 @@ class MarkerFilter:
         buf = _TAG_RE.sub("", self._held + delta)   # every complete tag goes
         self._held = ""
 
-        # Whatever trails after the last `<` may still be a sentinel opening.
-        cut = buf.rfind("<")
-        if cut != -1 and _could_still_become_sentinel(buf[cut:]):
+        cut = _hold_from(buf)       # a run that may still become a sentinel
+        if cut != -1:
             self._held = buf[cut:]
             buf = buf[:cut]
         return buf
@@ -197,7 +234,10 @@ def parse_used(raw: str | None) -> list[str] | None:
 # or an opener cut off at the very END is stripped too. static/index.html
 # carries the same pattern as SENTINEL_RE — a test keeps them in step.
 _ANY_SENTINEL_RE = re.compile(
-    r"<verdict\b[^<>]*(?:>|$)|<v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$", re.IGNORECASE)
+    r"</?verdict\b" + _ATTRS + r">"          # a tag, quoted brackets and all
+    r"|</?verdict\b[^<]*$"                   # one cut off at the very end
+    r"|</?v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$",  # an opener cut off at the end
+    re.IGNORECASE)
 
 
 def strip_any_sentinel(text: str) -> str:

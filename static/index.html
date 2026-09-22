@@ -247,7 +247,7 @@ function displayName(s) {
 // the page's backstop — it had none, so a tag the engine failed to recognise
 // reached the reader as text. The same pattern as the server's
 // strip_any_sentinel, which a test keeps in step.
-const SENTINEL_RE = /<verdict\b[^<>]*(?:>|$)|<v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$/gi;
+const SENTINEL_RE = /<\/?verdict\b(?:[^<>"]|"[^"]*")*>|<\/?verdict\b[^<]*$|<\/?v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$/gi;
 
 // A deliberately small markdown subset: paragraphs, bold, italic, inline code
 // and simple lists. NO links, NO images, NO raw HTML — the model's prose is

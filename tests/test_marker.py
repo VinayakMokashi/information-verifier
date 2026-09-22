@@ -238,3 +238,62 @@ def test_what_the_model_writes_for_used(raw, expected):
     from app.engine.marker import parse_used
 
     assert parse_used(raw) == expected
+
+
+# -- found by the review of the first sentinel fix ----------------------------
+
+QUOTED = [
+    '<verdict confidence="82" trusted="yes" used="who.int/a>b"/>',
+    '<verdict confidence="82" trusted="yes" used="a<b who.int"/>',
+    '<verdict used="who.int>x" confidence="82" trusted="yes"/>',
+]
+
+
+@pytest.mark.parametrize("sentinel", QUOTED)
+@pytest.mark.parametrize("size", [1, 3, 40, 10_000])
+def test_a_bracket_inside_the_quoted_used_value_never_leaks(sentinel, size):
+    """`[^<>]*` could not span a quoted value containing `<` or `>`, so the
+    whole tag was shown to the reader and the confidence was lost."""
+    payload = PROSE + sentinel
+    text, f = _stream([payload[i:i + size] for i in range(0, len(payload), size)])
+    assert text == PROSE, f"leaked: {text[len(PROSE):]!r}"
+    assert f.parse() == (80, True)
+
+
+@pytest.mark.parametrize("sentinel", [
+    "</verdict>",
+    '<verdict confidence="82" trusted="yes">False</verdict>',
+])
+def test_a_closing_tag_is_a_sentinel_too(sentinel):
+    text, _ = _stream([PROSE + sentinel])
+    assert "verdict" not in text.lower()
+
+
+@pytest.mark.parametrize("size", [1, 40, 100_000])
+def test_a_tag_longer_than_the_hold_still_never_leaks(size):
+    """The hold cap released a longer run as prose. A model writing a used=
+    list of full URLs can reach thousands of characters."""
+    used = " ".join(f"https://www.boomlive.in/fact-check/slug-{i:04d}" for i in range(120))
+    sentinel = f'<verdict confidence="82" trusted="yes" used="{used}"/>'
+    assert len(sentinel) > 5000
+    payload = PROSE + sentinel
+    text, f = _stream([payload[i:i + size] for i in range(0, len(payload), size)])
+    assert text == PROSE, f"leaked {len(text) - len(PROSE)} chars"
+    assert f.parse() == (80, True)
+
+
+@pytest.mark.parametrize("stored", QUOTED + [
+    "</verdict>", '<verdict confidence="82" trusted="yes">False</verdict>'])
+def test_the_renderers_strip_the_quoted_shapes_too(stored):
+    """Both renderers strip every TAG. Text a model wrote between a pair of
+    them is prose, and stays — exactly as the streaming filter treats it."""
+    import re
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "static" / "index.html"
+            ).read_text(encoding="utf-8")
+    page_re = re.compile(re.search(r"const SENTINEL_RE = /(.+)/gi;", page).group(1), re.I)
+    for cleaned in (strip_any_sentinel("It is false. " + stored),
+                    page_re.sub("", "It is false. " + stored)):
+        assert "verdict" not in cleaned.lower(), cleaned
+        assert cleaned.startswith("It is false.")

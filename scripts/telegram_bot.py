@@ -213,7 +213,12 @@ def _answer_paragraphs(answer: dict) -> list[str]:
     out: list[str] = []
     seen_web = False
     for section in answer.get("sections") or []:
-        markdown = section.get("markdown") or ""
+        # Strip any leaked verdict tag from the WHOLE section first: the
+        # per-piece strip below runs after the text is split into paragraphs
+        # and ≤700-char pieces, so a tag longer than a piece lost only its
+        # first fragment and the rest reached the chat (found by review, on a
+        # row stored before the engine stopped leaking them).
+        markdown = strip_any_sentinel(section.get("markdown") or "")
         if not markdown.strip():
             continue
         if section.get("tier") == "web" and not seen_web:
