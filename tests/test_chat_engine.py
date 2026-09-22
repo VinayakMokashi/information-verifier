@@ -290,7 +290,12 @@ def test_a_refusal_raises_rather_than_returning_half_an_answer(no_factcheck, mon
         asyncio.run(C.answer("something"))
 
 
-def test_an_api_error_still_yields_whatever_streamed(no_factcheck, monkeypatch):
+def test_a_total_api_failure_is_a_failure_not_an_empty_answer(no_factcheck, monkeypatch):
+    """MEASURED before the first paid run: every call failing — an outage, a
+    bad parameter, a revoked key — came back COMPLETE with zero sections, no
+    error and tier "none". The page rendered a blank answer as if the check
+    had worked and simply found nothing. This test used to PIN that: it
+    asserted `tier == "none"` and passed."""
     import anthropic
 
     class Boom:
@@ -300,8 +305,50 @@ def test_an_api_error_still_yields_whatever_streamed(no_factcheck, monkeypatch):
                 raise anthropic.APIConnectionError(request=None)
 
     monkeypatch.setattr(C, "async_client", Boom())
-    answer = asyncio.run(C.answer("something"))
-    assert answer.tier == "none"
+    with pytest.raises(C.CheckUnavailable) as caught:
+        asyncio.run(C.answer("something"))
+    message = str(caught.value)
+    assert "try again" in message.lower()
+    # Safe to show a reader: no exception class, no API internals.
+    assert "APIConnectionError" not in message and "request" not in message
+
+
+def test_an_api_error_still_yields_whatever_already_streamed(no_factcheck, monkeypatch):
+    """The half that was right: prose that arrived before a failure is kept."""
+    import anthropic
+
+    class HalfThenBoom:
+        def __init__(self):
+            self.calls = 0
+
+            outer = self
+
+            class Messages:
+                def stream(self, **kw):
+                    outer.calls += 1
+                    if outer.calls == 1:
+                        return _Stream(_final("It is false.", stop="pause_turn",
+                                              citations=[_citation(TRUSTED_URL)]),
+                                       _deltas("It is false."))
+                    raise anthropic.APIConnectionError(request=None)
+
+            self.messages = Messages()
+
+    result, _ = _run(HalfThenBoom(), monkeypatch)
+    assert result.markdown == "It is false."
+    assert result.tier == "trusted"
+
+
+def test_a_model_that_says_nothing_is_not_an_answer(no_factcheck, monkeypatch):
+    """No error, no prose — only a sentinel. Rendering that would show a
+    confidence badge over an empty box."""
+    client = StubClient([
+        (_final('<verdict confidence="90" trusted="yes"/>'),
+         _deltas('<verdict confidence="90" trusted="yes"/>')),
+    ])
+    monkeypatch.setattr(C, "async_client", client)
+    with pytest.raises(C.CheckUnavailable):
+        asyncio.run(C.answer("something"))
 
 
 # -- the free Fact Check head start -------------------------------------------

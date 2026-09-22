@@ -100,6 +100,11 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
             answer.usage = meter.snapshot()
             await safe_cache_call(repo.cache.put, key, result.tier,
                                   answer.model_dump_json())
+    except chat.CheckUnavailable as exc:
+        # Its message is written for the reader by contract (see chat.py).
+        print(f"[job] no answer produced: {exc}")
+        answer.status = JobStatus.FAILED
+        answer.error = str(exc)
     except chat.AnswerRefused as exc:
         answer.status = JobStatus.FAILED
         answer.error = ("This one can't be checked here — it was declined for "

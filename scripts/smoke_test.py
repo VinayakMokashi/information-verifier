@@ -8,10 +8,17 @@ from the API's own usage fields; trust that over the model.
 Run from the project root:
     .venv\\Scripts\\python.exe scripts\\smoke_test.py
     .venv\\Scripts\\python.exe scripts\\smoke_test.py "your claim here"
+    .venv\\Scripts\\python.exe scripts\\smoke_test.py --raw "your claim here"
+
+--raw prints every API request's usage block exactly as the API returned it,
+including fields this app does not bill yet. Use it when measuring: it is how
+a new billable line (the 20260209 search tool filters results with code
+execution) would first be noticed.
 """
 import asyncio
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -47,8 +54,23 @@ async def main() -> None:
         print("No ANTHROPIC_API_KEY found in .env. Add it first. Aborting (no cost).")
         return
 
-    claim = sys.argv[1] if len(sys.argv) > 1 else \
-        "WHO ne kaha hai ki 5G se coronavirus phailta hai."
+    args = [a for a in sys.argv[1:] if a != "--raw"]
+    raw = "--raw" in sys.argv[1:]
+    claim = args[0] if args else "WHO ne kaha hai ki 5G se coronavirus phailta hai."
+
+    if raw:
+        # chat.py imported note_llm by name, so the name to wrap is chat's.
+        from app.engine import chat
+
+        real_note = chat.note_llm
+
+        def noisy_note(model, usage):
+            dump = (usage.model_dump(exclude_none=True)
+                    if hasattr(usage, "model_dump") else usage)
+            print(f"\n[raw usage] {model}: {dump}")
+            real_note(model, usage)
+
+        chat.note_llm = noisy_note
 
     print(">> This calls the PAID Anthropic API + web search.")
     print(f">> Model: {settings.chat_model} (effort {settings.chat_effort}), "
@@ -61,10 +83,13 @@ async def main() -> None:
                     created_at=datetime.now(timezone.utc), input_text=claim)
     repo.save(answer)
 
+    started = time.monotonic()
     await run_check(answer.job_id, claim, repo, ConsoleStream())
+    elapsed = time.monotonic() - started
     stored = repo.get(answer.job_id)
     print_answer(stored)
     print_usage(stored.usage.model_dump() if stored.usage else None)
+    print(f"wall clock     : {elapsed:.1f}s  (what the person waits for)")
 
 
 if __name__ == "__main__":

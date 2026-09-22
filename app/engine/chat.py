@@ -63,6 +63,17 @@ class AnswerRefused(Exception):
     """The model declined the request (stop_reason == "refusal")."""
 
 
+class CheckUnavailable(Exception):
+    """No prose came back at all. `str(exc)` is written for the reader.
+
+    Measured before the first paid run: every call failing — an outage, a bad
+    parameter, a revoked key — used to return COMPLETE with zero sections, no
+    error and tier "none", and the page rendered a blank answer as though the
+    check had worked and simply found nothing. A check that produced no words
+    is a failure and has to say so.
+    """
+
+
 @dataclass
 class PassResult:
     markdown: str = ""
@@ -70,6 +81,7 @@ class PassResult:
     confidence: int | None = None
     model_says_trusted: bool | None = None
     truncated: bool = False
+    error: str | None = None       # for the server log only, never the reader
 
 
 @dataclass
@@ -155,6 +167,11 @@ def _collect_sources(message) -> list[Source]:
                 for result in content:
                     add(getattr(result, "url", ""),
                         getattr(result, "title", "") or "")
+            elif content is not None:
+                # Logged, because otherwise a search outage or quota is
+                # indistinguishable from "the fact-checkers had nothing".
+                print(f"[chat] web search returned an error: "
+                      f"{getattr(content, 'error_code', content)}")
     return list(found.values())
 
 
@@ -250,6 +267,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
             # A search-tool outage must not sink an answer we can still give.
             print(f"[chat] pass failed ({'trusted' if trusted else 'web'}): "
                   f"{type(exc).__name__}: {exc}")
+            result.error = f"{type(exc).__name__}: {exc}"
             break
 
         # Streaming is NOT covered by usage.instrument(); without this the
@@ -341,6 +359,7 @@ async def answer(text: str, *, heard: str | None = None,
         and first.model_says_trusted is not True
     )
 
+    second: PassResult | None = None
     if should_escalate:
         await emit("tier", {"tier": "web"})
         await emit("status", {"text": "Nothing from the fact-checkers — "
@@ -379,8 +398,21 @@ async def answer(text: str, *, heard: str | None = None,
     if tier != "trusted" and cap is not None and confidence is not None:
         confidence = min(confidence, cap)
 
+    sections = [s for s in sections if s.markdown.strip()]
+    if not sections:
+        # Sources alone (Google's prior fact-checks, a result list) are not an
+        # answer; a confidence badge over an empty box is worse than nothing.
+        errored = first.error or (second is not None and second.error)
+        if errored:
+            raise CheckUnavailable(
+                "The checking service couldn't be reached just now. "
+                "Please try again in a few minutes.")
+        raise CheckUnavailable(
+            "No answer could be written for this message. Please try again, "
+            "or send it with a little more context.")
+
     return ChatAnswer(
-        sections=[s for s in sections if s.markdown.strip()],
+        sections=sections,
         sources=unique_sources,
         confidence=confidence,
         tier=tier,
