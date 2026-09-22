@@ -759,6 +759,31 @@ def test_drain_returns_when_the_last_task_has_only_just_finished():
     assert not runner.is_alive(), "drain() never returned"
 
 
+def test_the_bot_waits_longer_for_a_202_than_the_server_may_take():
+    """Traced by review: the bot's HTTP timeout was 30 s, and /verify/link
+    resolves the link INLINE (yt-dlp; a Facebook reel measured 14 s). A
+    slower resolve timed the bot out and it said "try again" — while the
+    server went on to create and bill the job, whose answer nobody would
+    ever deliver, and the retry paid again."""
+    import httpx
+
+    from app.api import routes
+
+    seen = {}
+
+    class Recorder:
+        async def post(self, *a, **kw):
+            seen.update(kw)
+            return httpx.Response(202, json={"job_id": "j", "status": "QUEUED"})
+
+    asyncio.run(B.AppClient(Recorder(), base="http://x").submit_json("link", {"url": "u"}))
+    assert seen["timeout"].read >= 2 * routes._RESOLVE_WALL_S
+    seen.clear()
+    asyncio.run(B.AppClient(Recorder(), base="http://x").submit_file(
+        "image", "a.png", b"x", "image/png"))
+    assert seen["timeout"].read >= 2 * routes._RESOLVE_WALL_S
+
+
 def test_one_failing_message_does_not_stop_the_others():
     class Exploding(StubApp):
         async def submit_json(self, endpoint, payload):

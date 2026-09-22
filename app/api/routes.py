@@ -325,6 +325,13 @@ async def verify_media(
 # platform we could not reach is the server's fault (502).
 _LINK_HTTP = {"network": 502}
 
+# The resolve runs INLINE — a caller is waiting for the 202 — and yt-dlp's
+# own socket timeout is per operation, not per resolve. Traced by review: the
+# Telegram bot gave up at 30 s and told the person to try again while this
+# route went on to create and bill a job whose answer nobody would deliver.
+# A Facebook reel measured 14 s. The bot now waits far longer than this.
+_RESOLVE_WALL_S = 60.0
+
 # The post's own caption text is a supplement, not the main source — cap its
 # contribution so a stuffed caption cannot inflate the extract call. (The
 # spoken text is bounded by max_media_seconds already.)
@@ -439,7 +446,14 @@ async def verify_link(
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
         try:
-            info = await asyncio.to_thread(resolve_link, url)
+            # On timeout the thread runs on until yt-dlp gives up; its result
+            # is discarded, and no job exists yet, so nothing is billed.
+            info = await asyncio.wait_for(asyncio.to_thread(resolve_link, url),
+                                          _RESOLVE_WALL_S)
+        except TimeoutError:
+            print(f"[link] resolve took over {_RESOLVE_WALL_S:.0f}s; refused")
+            raise HTTPException(502, "The platform could not be reached right "
+                                     "now. Try again in a minute.")
         except LinkError as exc:
             raise HTTPException(_LINK_HTTP.get(exc.kind, 422), str(exc))
 

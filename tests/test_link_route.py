@@ -95,6 +95,25 @@ def test_a_rejected_link_is_refunded_nothing_was_spent(client, monkeypatch):
     assert limits.used_today() == 0
 
 
+def test_a_resolve_that_outlives_its_bound_is_a_refunded_502(client, monkeypatch):
+    """The resolve runs INLINE, before the 202, so a caller is waiting on it.
+    Traced by review: the Telegram bot gave up at 30 s and told the person to
+    try again — while the server finished the resolve, created the job and
+    billed a check whose answer nobody would ever deliver. The inline part
+    is now bounded, well inside the bot's patience (tested bot-side)."""
+    import time
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    limits.reset()
+    monkeypatch.setattr(R, "_RESOLVE_WALL_S", 0.2)
+    monkeypatch.setattr(R, "resolve_link", lambda u: time.sleep(1.0) or _info())
+
+    resp = _submit(client)
+    assert resp.status_code == 502
+    assert "could not be reached" in resp.json()["detail"]
+    assert limits.used_today() == 0                 # nothing was spent
+
+
 def test_a_known_overlong_video_is_rejected_free(client, monkeypatch):
     """YouTube advertises duration, so the cap can fire before any download."""
     monkeypatch.setattr(settings, "rate_limit_enabled", True)

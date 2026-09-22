@@ -355,6 +355,15 @@ class JobGone(Exception):
     the app is now pointed at another database. Never "still running"."""
 
 
+# How long a submission may take to be ACCEPTED. The API does real work
+# before its 202 — a link is resolved (bounded server-side at 60 s), a
+# screenshot is read by a paid vision call — and a bot that gives up first
+# tells the person to try again while the server creates, and bills, a job
+# whose answer nobody will ever deliver (traced by review; the bot's timeout
+# was 30 s, and a Facebook reel's resolve measured 14 s).
+_SUBMIT_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+
+
 class AppClient:
     """The same two-call REST contract the web page uses."""
 
@@ -364,7 +373,8 @@ class AppClient:
 
     async def submit_json(self, endpoint: str, payload: dict) -> tuple[str | None, str]:
         """-> (job_id, "") on 202, (None, readable-detail) on rejection."""
-        resp = await self._http.post(f"{self._base}/verify/{endpoint}", json=payload)
+        resp = await self._http.post(f"{self._base}/verify/{endpoint}", json=payload,
+                                     timeout=_SUBMIT_TIMEOUT)
         if resp.status_code != 202:
             try:
                 detail = resp.json().get("detail") or _server_trouble(resp.status_code)
@@ -378,6 +388,7 @@ class AppClient:
         resp = await self._http.post(
             f"{self._base}/verify/{endpoint}",
             files={"file": (filename, content, content_type)},
+            timeout=_SUBMIT_TIMEOUT,
         )
         if resp.status_code != 202:
             try:
