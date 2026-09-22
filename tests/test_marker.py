@@ -6,7 +6,7 @@ than at a few hand-picked ones.
 """
 import pytest
 
-from app.engine.marker import MarkerFilter, strip_sentinels
+from app.engine.marker import MarkerFilter, strip_any_sentinel, strip_sentinels
 from app.engine.prompts import as_prompt_data
 
 SENTINEL = '<verdict confidence="82" trusted="yes"/>'
@@ -56,10 +56,22 @@ def test_a_lone_angle_bracket_in_prose_is_released():
     assert f.parse() == (80, True)
 
 
-def test_an_unclosed_opener_is_eventually_flushed_as_text():
-    """Held text must never be silently swallowed."""
-    text, _ = _stream(["Answer. <verdict confidence=\"9"])
-    assert text == "Answer. <verdict confidence=\"9"
+def test_a_sentinel_cut_off_mid_tag_never_shows():
+    """Found by review: max_tokens can end the stream INSIDE the tag, and
+    flush() used to hand the held fragment to the reader as text — and with
+    used= the tag is hundreds of characters, not forty. A run that opens
+    like the sentinel is the sentinel; it is dropped, never shown."""
+    for cut in ['<verdict confidence="9', '<verdict confidence="80" trusted="yes" '
+                'used="boomlive.in who.int nasa.go', "<verdict", "<Verd", "<v"]:
+        text, f = _stream(["Answer. " + cut])
+        assert text == "Answer. ", f"leaked {cut!r}"
+        assert f.parse() == (None, None)
+
+
+def test_a_lone_bracket_at_the_very_end_is_kept():
+    """Held text that could never have been the sentinel is not swallowed."""
+    text, _ = _stream(["Answer: 5 <"])
+    assert text == "Answer: 5 <"
 
 
 def test_a_long_run_after_a_bracket_stops_being_held():
@@ -92,9 +104,12 @@ def test_no_sentinel_means_no_confidence_and_no_claim():
     '<verdict confidence="82" trusted="maybe"/>',
     "<verdict/>",
 ])
-def test_malformed_sentinels_are_left_as_text_and_parse_to_nothing(bad):
+def test_malformed_sentinels_are_removed_and_parse_to_nothing(bad):
+    """This used to assert the opposite — "visible, not silently eaten" —
+    which pinned a leak: invariant 7 says the sentinel is NEVER shown, and a
+    malformed one is still the sentinel. It just carries no confidence."""
     text, f = _stream(["Answer. " + bad])
-    assert bad in text                       # visible, not silently eaten
+    assert text == "Answer. "
     assert f.parse() == (None, None)
 
 
@@ -123,3 +138,85 @@ def test_the_input_cannot_forge_a_sentinel():
 def test_strip_sentinels_for_non_streaming_paths():
     assert strip_sentinels(f"Answer here. {SENTINEL}") == "Answer here."
     assert strip_sentinels("No trailer.") == "No trailer."
+
+
+# -- found by review, 2026-09-22: shapes the old regex did not recognise -------
+
+LONG_USED = " ".join(f"https://www.boomlive.in/fact-check/a-long-slug-about-the-claim-{i:03d}"
+                     for i in range(12))
+
+
+@pytest.mark.parametrize("size", [1, 5, 64, 10_000])
+def test_a_long_used_list_is_still_the_sentinel(size):
+    """used= was capped at 600 characters INSIDE the regex, so a model that
+    wrote full URLs (which parse_used deliberately tolerates) produced a tag
+    nothing recognised: shown to the reader, and its confidence lost."""
+    sentinel = f'<verdict confidence="82" trusted="yes" used="{LONG_USED}"/>'
+    assert len(sentinel) > 700
+    payload = PROSE + sentinel
+    text, f = _stream([payload[i:i + size] for i in range(0, len(payload), size)])
+    assert text == PROSE
+    assert f.parse() == (80, True)
+    assert f.used() == ["boomlive.in"]
+
+
+@pytest.mark.parametrize("sentinel", [
+    '<verdict confidence="82" used="who.int" trusted="yes"/>',
+    '<verdict trusted="yes" confidence="82" used="who.int"/>',
+    '<verdict used="who.int" trusted="yes" confidence="82">',
+])
+def test_the_attribute_order_does_not_matter(sentinel):
+    text, f = _stream([PROSE + sentinel])
+    assert text == PROSE
+    assert f.parse() == (80, True)
+    assert f.used() == ["who.int"]
+
+
+CAPITAL = '<Verdict confidence="82" trusted="yes"/>'
+
+
+@pytest.mark.parametrize("cut", range(1, len(CAPITAL)))
+def test_a_capitalised_opener_split_anywhere_never_leaks(cut):
+    """The regex ignored case; the hold-back did not. `<Ver` + `dict ...`
+    across two deltas went straight to the reader."""
+    text, f = _stream([PROSE + CAPITAL[:cut], CAPITAL[cut:]])
+    assert text == PROSE, f"leaked at cut={cut}: {text!r}"
+    assert f.parse() == (80, True)
+
+
+def test_a_word_that_merely_starts_like_the_tag_is_prose():
+    text, f = _stream(["The <verdicts> of three courts agree."])
+    assert text == "The <verdicts> of three courts agree."
+    assert f.parse() == (None, None)
+
+
+@pytest.mark.parametrize("stored", [
+    'It is false. <verdict confidence="82" trusted="yes"/>',
+    'It is false. <Verdict used="who.int" trusted="yes" confidence="82"/>',
+    'It is false. <verdict confidence="80" trusted="yes" used="boomlive.in who',
+    "It is false. <verd",
+])
+def test_renderers_strip_every_shape_including_rows_stored_before_a_fix(stored):
+    """The bot and the console strip what reached storage. The old backstop
+    needed a closing `>`, so a row cut mid-tag showed it."""
+    assert strip_any_sentinel(stored).strip() == "It is false."
+
+
+def test_the_web_page_has_the_same_backstop():
+    """The page rendered stored and streamed prose with no sentinel strip at
+    all — escaped, so never markup, but shown to the reader as text."""
+    import re
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "static" / "index.html"
+            ).read_text(encoding="utf-8")
+    m = re.search(r"const SENTINEL_RE = /(.+)/gi;", page)
+    assert m, "no SENTINEL_RE in the page"
+    page_re = re.compile(m.group(1), re.I)
+    for stored in ['A. <verdict confidence="82" trusted="yes"/>',
+                   'A. <Verdict used="who.int" trusted="yes" confidence="82"/>',
+                   'A. <verdict confidence="80" trusted="yes" used="boomlive.in who',
+                   "A. <verd"]:
+        assert page_re.sub("", stored).strip() == "A.", stored
+    body = page[page.index("function md(src)"):page.index("// -- the current turn")]
+    assert "SENTINEL_RE" in body, "md() does not apply it"

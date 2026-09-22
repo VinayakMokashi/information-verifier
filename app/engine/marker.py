@@ -34,30 +34,65 @@ import re
 # markdown paragraph is one line, so a line-buffered filter would visibly
 # stutter.
 _OPEN = "<verdict"
-# Comfortably longer than the longest sentinel, `used` list included. Only a
-# run that begins `<verdict` is ever held this long, and a real one is always
-# the last thing in the answer.
-_MAX_USED_CHARS = 600
-_MAX_HOLD = 700
+# Only a run that opens `<verdict` is ever held this long, and a real one is
+# always the last thing in the answer. It used to be 700, with `used` capped
+# at 600 INSIDE the regex — so a model that wrote full URLs (which parse_used
+# deliberately tolerates) produced a tag nothing recognised, and the reader
+# saw it (found by review). The cap now only bounds how long a stray
+# `<verdict` in the middle of prose can delay the rest of the answer.
+_MAX_HOLD = 4000
 
-_SENTINEL_RE = re.compile(
-    r"<verdict\s+confidence=\"(?P<confidence>\d{1,3})\"\s+"
-    r"trusted=\"(?P<trusted>yes|no)\""
-    r"(?:\s+used=\"(?P<used>[^\"<>]{0,%d})\")?\s*/?>" % _MAX_USED_CHARS,
-    re.IGNORECASE,
-)
+# Recognising the TAG is separate from reading it, because every tag must go
+# whether or not it parses: invariant 7 says the sentinel is never shown, and
+# a malformed one is still the sentinel. Attributes are read in ANY order —
+# a tag with used= before trusted= used to match nothing and leak.
+_TAG_RE = re.compile(r"<verdict\b([^<>]*)>", re.IGNORECASE)
+_CONFIDENCE_RE = re.compile(r'\bconfidence\s*=\s*"(\d{1,3})"', re.IGNORECASE)
+_TRUSTED_RE = re.compile(r'\btrusted\s*=\s*"(yes|no)"', re.IGNORECASE)
+_USED_RE = re.compile(r'\bused\s*=\s*"([^"]*)"', re.IGNORECASE)
 _DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+_WORD_CHAR = re.compile(r"\w")
 
 
 def _could_still_become_sentinel(tail: str) -> bool:
-    """Is `tail` a prefix of a sentinel that later deltas might complete?"""
+    """Is `tail` a prefix of a sentinel that later deltas might complete?
+
+    Case-insensitive, like the tag itself — the hold-back used to compare
+    exactly while the regex ignored case, so `<Ver` + `dict …` split across
+    two deltas went straight to the reader (found by review).
+    """
     if len(tail) > _MAX_HOLD:
         return False
-    # An unterminated but already-matching opener (`<verdict conf...`).
-    if tail.startswith(_OPEN):
-        return ">" not in tail
-    # A partial opener (`<`, `<ver`, ...).
-    return _OPEN.startswith(tail)
+    low = tail.lower()
+    if low.startswith(_OPEN):
+        after = tail[len(_OPEN):len(_OPEN) + 1]
+        if after and _WORD_CHAR.match(after):
+            return False            # "<verdicts": a word, not the tag
+        return ">" not in tail      # an opened tag, not yet closed
+    return _OPEN.startswith(low)    # a partial opener: `<`, `<Ver`, ...
+
+
+def _is_cut_sentinel(held: str) -> bool:
+    """At the end of the stream: did the answer stop INSIDE the sentinel?
+
+    max_tokens can end a stream mid-tag, and flush() used to hand that
+    fragment to the reader. Anything from `<v` on that can only be the
+    sentinel's opening is dropped; a lone `<` could be prose, and is kept.
+    """
+    low = held.lower()
+    return len(held) >= 2 and (low.startswith(_OPEN) or _OPEN.startswith(low))
+
+
+def _read_tag(attrs: str) -> tuple[int | None, bool, str | None] | None:
+    """(confidence, trusted, used) from one tag's attributes; None if the
+    tag lacks a well-formed confidence or trusted — then it says nothing."""
+    confidence = _CONFIDENCE_RE.search(attrs)
+    trusted = _TRUSTED_RE.search(attrs)
+    if confidence is None or trusted is None:
+        return None
+    used = _USED_RE.search(attrs)
+    return (int(confidence.group(1)), trusted.group(1).lower() == "yes",
+            used.group(1) if used else None)
 
 
 class MarkerFilter:
@@ -76,57 +111,52 @@ class MarkerFilter:
         if not delta:
             return ""
         self._full += delta
-        buf = self._held + delta
+        buf = _TAG_RE.sub("", self._held + delta)   # every complete tag goes
         self._held = ""
-
-        # Emit complete sentinels' surrounding text, drop the sentinels.
-        out = []
-        pos = 0
-        for match in _SENTINEL_RE.finditer(buf):
-            out.append(buf[pos:match.start()])
-            pos = match.end()
-        buf = buf[pos:] if pos else buf
-        emitted = "".join(out)
 
         # Whatever trails after the last `<` may still be a sentinel opening.
         cut = buf.rfind("<")
         if cut != -1 and _could_still_become_sentinel(buf[cut:]):
             self._held = buf[cut:]
             buf = buf[:cut]
-        return emitted + buf
+        return buf
 
     def flush(self) -> str:
-        """End of stream: a held run that never became a sentinel is text."""
+        """End of stream: a held run that never became a sentinel is text —
+        unless the stream stopped inside one (see _is_cut_sentinel)."""
         held, self._held = self._held, ""
-        if _SENTINEL_RE.fullmatch(held.strip()):
-            return ""
-        return held
+        return "" if _is_cut_sentinel(held) else held
+
+    def _last(self) -> tuple[int | None, bool, str | None] | None:
+        """The LAST tag that says something. Last, not first: a paused turn
+        resumes and the model may restate its verdict."""
+        for match in reversed(list(_TAG_RE.finditer(self._full))):
+            read = _read_tag(match.group(1))
+            if read is not None:
+                return read
+        return None
 
     def parse(self) -> tuple[int | None, bool | None]:
         """(confidence, trusted) from the LAST sentinel, or (None, None).
 
-        Last, not first: a paused turn resumes and the model may restate it.
         A missing or malformed sentinel is not an error — it means the answer
         carries no stated confidence, and (crucially) that nothing may be
         escalated on the strength of it.
         """
-        matches = list(_SENTINEL_RE.finditer(self._full))
-        if not matches:
+        last = self._last()
+        if last is None:
             return None, None
-        last = matches[-1]
-        confidence = int(last.group("confidence"))
+        confidence, trusted, _ = last
         if not 0 <= confidence <= 100:      # a nonsense number is no number
-            return None, last.group("trusted").lower() == "yes"
+            return None, trusted
         # Round to 5: a model's "82%" is false precision, and displaying it
         # to the digit implies a calibration nobody has measured.
-        return round(confidence / 5) * 5, last.group("trusted").lower() == "yes"
+        return round(confidence / 5) * 5, trusted
 
     def used(self) -> list[str] | None:
         """Domains from the LAST sentinel's `used`, or None if not given."""
-        matches = list(_SENTINEL_RE.finditer(self._full))
-        if not matches:
-            return None
-        return parse_used(matches[-1].group("used"))
+        last = self._last()
+        return None if last is None else parse_used(last[2])
 
 
 def parse_used(raw: str | None) -> list[str] | None:
@@ -150,11 +180,13 @@ def parse_used(raw: str | None) -> list[str] | None:
     return domains or None
 
 
-# Looser than _SENTINEL_RE on purpose: renderers strip ANYTHING that opens
-# like a sentinel, malformed or not, as defence in depth for invariant 7 —
-# including rows written before a fix. It used to be copy-pasted into the
-# Telegram bot and the console renderer.
-_ANY_SENTINEL_RE = re.compile(r"<verdict\b[^>]*/?>", re.IGNORECASE)
+# Renderers strip ANYTHING that opens like a sentinel, as defence in depth for
+# invariant 7 — including rows stored before a fix. It needed a closing `>`,
+# so a row cut off mid-tag by max_tokens showed it (found by review); a tag
+# or an opener cut off at the very END is stripped too. static/index.html
+# carries the same pattern as SENTINEL_RE — a test keeps them in step.
+_ANY_SENTINEL_RE = re.compile(
+    r"<verdict\b[^<>]*(?:>|$)|<v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$", re.IGNORECASE)
 
 
 def strip_any_sentinel(text: str) -> str:
@@ -164,4 +196,4 @@ def strip_any_sentinel(text: str) -> str:
 
 def strip_sentinels(text: str) -> str:
     """Remove any sentinel from a finished string (non-streaming paths)."""
-    return _SENTINEL_RE.sub("", text).strip()
+    return _TAG_RE.sub("", text).strip()

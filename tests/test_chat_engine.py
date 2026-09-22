@@ -706,6 +706,23 @@ def test_a_used_list_of_names_not_domains_keeps_the_receipts(no_factcheck, monke
     assert answer.tier == "trusted"
 
 
+def test_a_long_used_list_neither_leaks_nor_loses_the_confidence(no_factcheck, monkeypatch):
+    """Found by review, reproduced through answer(): a used= of full URLs ran
+    past the regex's 600-character cap, so the tag was saved into the answer
+    AND streamed live — and the confidence became None."""
+    urls = " ".join(f"https://www.altnews.in/fact-check/a-long-slug-about-this-claim-{i:03d}"
+                    for i in range(10))
+    text = f'It is false. <verdict confidence="85" trusted="yes" used="{urls}"/>'
+    client = StubClient([(_final(text, results=[TRUSTED_URL], searches=1),
+                          [e for i in range(0, len(text), 40) for e in _deltas(text[i:i + 40])])])
+    answer, events = _run(client, monkeypatch)
+    streamed = "".join(d["text"] for k, d in events if k == "text")
+    assert "verdict" not in answer.markdown.lower()
+    assert "verdict" not in streamed.lower()
+    assert answer.confidence == 85
+    assert answer.tier == "trusted"
+
+
 def test_prior_factchecks_are_never_filtered_by_used(monkeypatch):
     """Google matched them to the claim; they are a human verdict, not a
     search result the model skimmed past."""

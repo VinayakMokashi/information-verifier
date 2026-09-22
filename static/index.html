@@ -243,6 +243,12 @@ function displayName(s) {
   catch (e) { return "source"; }
 }
 
+// The verdict tag is never shown (invariant 7). The engine strips it; this is
+// the page's backstop — it had none, so a tag the engine failed to recognise
+// reached the reader as text. The same pattern as the server's
+// strip_any_sentinel, which a test keeps in step.
+const SENTINEL_RE = /<verdict\b[^<>]*(?:>|$)|<v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$/gi;
+
 // A deliberately small markdown subset: paragraphs, bold, italic, inline code
 // and simple lists. NO links, NO images, NO raw HTML — the model's prose is
 // never a receipt, and a markdown image would let an answer leak the reader's
@@ -254,7 +260,7 @@ function md(src) {
     .replace(/(^|\W)\*([^*\n]+)\*/g, "$1<em>$2</em>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");
   const out = [];
-  for (const block of String(src ?? "").split(/\n{2,}/)) {
+  for (const block of String(src ?? "").replace(SENTINEL_RE, "").split(/\n{2,}/)) {
     const lines = block.split("\n").filter((l) => l.trim());
     if (!lines.length) continue;
     if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
