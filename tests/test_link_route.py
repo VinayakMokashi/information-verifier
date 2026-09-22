@@ -463,5 +463,7 @@ def test_a_post_without_an_id_is_not_cached():
     base = dict(url=REEL, title="", uploader="", duration=None, caption="",
                 has_media=True, subtitle=None)
     assert transcript_key(LinkInfo(platform="Instagram", video_id="", **base)) is None
+    # v2: v1 entries could hold a caption alone, stored when the
+    # transcription heard nothing — a rule that changed, so they are retired.
     assert transcript_key(LinkInfo(platform="Instagram", video_id="DbsVyqLpbRa",
-                                   **base)) == "v1:instagram:DbsVyqLpbRa"
+                                   **base)) == "v2:instagram:DbsVyqLpbRa"

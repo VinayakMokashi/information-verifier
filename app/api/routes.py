@@ -398,10 +398,14 @@ def transcript_key(info: LinkInfo) -> str | None:
     Versioned, so a change to how link text is gathered (the caption cap, the
     subtitle choice) can retire every entry at once. None when the platform
     gave no id — an unkeyable post is simply not cached.
+
+    v2 since 2026-09-22: v1 entries could be a caption alone, stored when the
+    transcription heard nothing. That rule changed, and old entries would
+    have gone on serving it for their 30 days (found by review).
     """
     if not info.video_id or not info.platform:
         return None
-    return f"v1:{info.platform.lower()}:{info.video_id}"
+    return f"v2:{info.platform.lower()}:{info.video_id}"
 
 
 async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
