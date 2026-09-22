@@ -15,8 +15,10 @@ Two counters, deliberately stored differently:
     memory. Losing it on restart costs nothing, and a visitor's IP is personal
     data this app has no reason to write to disk.
 """
+import asyncio
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
@@ -29,6 +31,30 @@ _MAX_TRACKED_CLIENTS = 512
 _lock = threading.Lock()
 _per_client: dict[str, list[float]] = {}
 _daily = DailyQuota()
+
+# Claiming a slot is a blocking SQLite WRITE, so it runs off the event loop —
+# a contended write there froze every request and every live stream. It does
+# NOT run in asyncio's default pool either: MEASURED, a burst of claims while
+# another writer held the database filled all of its workers, and
+# GET /reports (a thread call too, and the only way an answer reaches anyone)
+# stalled for the full 30 s busy timeout. Two workers is plenty — claims are
+# tiny, and they serialize on `_lock` anyway.
+_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="quota")
+
+
+async def claim(request: Request) -> str | None:
+    """reserve(), off the loop and out of the shared pool. -> the day charged."""
+    return await asyncio.get_running_loop().run_in_executor(_pool, reserve, request)
+
+
+async def give_back(request: Request, day: str | None) -> None:
+    """refund(), on the same pool."""
+    await asyncio.get_running_loop().run_in_executor(_pool, refund, request, day)
+
+
+async def give_back_day(day: str | None) -> None:
+    """refund_daily(), on the same pool."""
+    await asyncio.get_running_loop().run_in_executor(_pool, refund_daily, day)
 
 
 def today() -> str:

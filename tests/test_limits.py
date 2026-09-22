@@ -262,6 +262,53 @@ def test_claiming_a_slot_never_freezes_the_server(limited):
     assert ticks >= 10, f"the event loop froze: {ticks} ticks in 0.4 s"
 
 
+def test_a_burst_of_claims_cannot_stall_the_answers(limited):
+    """Found by the review of that fix, measured: moving the claim into
+    asyncio's DEFAULT pool traded a frozen loop for a full pool. A burst of
+    claims while a writer held the database filled every worker, and
+    GET /reports — the only way an answer reaches the page or the bot — is a
+    thread call too, so answers stalled for the whole 30 s busy timeout."""
+    import asyncio
+    import sqlite3
+    import threading
+    import time
+
+    import httpx
+
+    from app.main import app
+
+    held = threading.Event()
+
+    def hold_write_lock():
+        conn = sqlite3.connect(settings.db_path, timeout=30)
+        conn.execute("BEGIN IMMEDIATE")
+        held.set()
+        time.sleep(2.5)
+        conn.commit()
+        conn.close()
+
+    async def scenario():
+        threading.Thread(target=hold_write_lock, daemon=True).start()
+        await asyncio.to_thread(held.wait, 5)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as http:
+            burst = [asyncio.create_task(
+                http.post("/api/v1/verify/text", json={"text": f"claim {i}"}))
+                for i in range(25)]
+            await asyncio.sleep(0)                   # let them reach the claim
+            started = time.monotonic()
+            report = await http.get("/api/v1/reports/" + "0" * 32)
+            took = time.monotonic() - started
+            for task in burst:
+                task.cancel()
+            await asyncio.gather(*burst, return_exceptions=True)
+        return took, report.status_code
+
+    took, status = asyncio.run(scenario())
+    assert status == 404                             # the read itself ran
+    assert took < 1.0, f"reading an answer waited {took:.1f}s behind the claims"
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 
-from app.api.limits import refund, refund_daily, reserve
+from app.api.limits import claim, give_back, give_back_day
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
@@ -80,9 +80,11 @@ async def _quota(request: Request):
     after an upload has been read leaves a window where any number of
     concurrent requests pass the same empty counter.
 
-    Both the claim and the refund are SQLite writes, so both run in a thread.
-    Found by review, measured: on the event loop, a claim that waited for
-    another writer's lock froze every request and every live stream with it.
+    Both the claim and the refund are SQLite writes, so both run on the
+    limiter's own small pool (`limits.claim`). Two review rounds, measured:
+    on the event loop, a claim waiting for another writer's lock froze every
+    request and every live stream; in asyncio's shared pool, a burst of
+    claims filled it and reading a finished answer stalled 30 s behind them.
 
     The `started` flag is load-bearing, not bookkeeping: /verify/image raises
     422 ("no text in this image") AFTER a paid Opus vision call, and refunding
@@ -91,12 +93,12 @@ async def _quota(request: Request):
     honest when nothing was bought. (The media ASR spend that used to share
     this trap now runs behind the 202, where no refund path exists at all.)
     """
-    spend = _Spend(await asyncio.to_thread(reserve, request))
+    spend = _Spend(await claim(request))
     try:
         yield spend
     except HTTPException:
         if not spend.started:
-            await asyncio.to_thread(refund, request, spend.day)
+            await give_back(request, spend.day)
         raise
 
 
@@ -116,7 +118,7 @@ async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
     answer = await asyncio.to_thread(repo.get, job_id)
     if (answer is not None and answer.cached and answer.usage is not None
             and answer.usage.estimated_usd == 0):
-        await asyncio.to_thread(refund_daily, quota_day)
+        await give_back_day(quota_day)
 
 
 async def _check(job_id: str, text: str, repo, stream=None, *,
