@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 
-from app.api.limits import refund, reserve
+from app.api.limits import refund, refund_daily, reserve
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
@@ -28,7 +28,7 @@ from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, spli
 from app.providers.usage import UsageMeter
 from app.providers.vision import ocr_image
 from app.trusted_sources import is_trusted_url
-from app.store.repository import AnswerRepository
+from app.store.repository import AnswerRepository, safe_cache_call
 
 router = APIRouter(prefix="/api/v1")
 _repo = AnswerRepository()
@@ -41,12 +41,18 @@ _ALLOWED_MEDIA_TYPES = {"application/ogg", "application/octet-stream"}
 
 
 class _Spend:
-    """Whether this request has already cost money."""
+    """Whether this request has already cost money, and which day it counted.
 
-    __slots__ = ("started",)
+    `day` is the daily-cap day the slot was charged to (None when rate
+    limiting is off), carried to the background job so a check that turns
+    out to be FREE can hand its slot back — see `_settle_quota`.
+    """
 
-    def __init__(self) -> None:
+    __slots__ = ("started", "day")
+
+    def __init__(self, day: str | None = None) -> None:
         self.started = False
+        self.day = day
 
     def begin(self) -> None:
         """Call immediately BEFORE the first paid call of the request."""
@@ -68,14 +74,41 @@ def _quota(request: Request):
     honest when nothing was bought. (The media ASR spend that used to share
     this trap now runs behind the 202, where no refund path exists at all.)
     """
-    reserve(request)
-    spend = _Spend()
+    spend = _Spend(reserve(request))
     try:
         yield spend
     except HTTPException:
         if not spend.started:
             refund(request)
         raise
+
+
+async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
+    """Hand the day's slot back when the check turned out to cost nothing.
+
+    With a cap of 2 a day (Vinayak, 2026-09-22), a forward someone sends twice
+    would otherwise spend half the day's allowance on an answer served from
+    cache for $0. Deliberately narrow: only a CLEAN cache hit whose measured
+    bill is exactly zero. Anything that paid for OCR or a transcript keeps its
+    slot, and so does a failure — a stream that died mid-answer may have been
+    billed without its usage ever being recorded, and the cap exists for
+    exactly the cases nobody measured.
+    """
+    if quota_day is None:
+        return
+    answer = await asyncio.to_thread(repo.get, job_id)
+    if (answer is not None and answer.cached and answer.usage is not None
+            and answer.usage.estimated_usd == 0):
+        refund_daily(quota_day)
+
+
+async def _check(job_id: str, text: str, repo, stream=None, *,
+                 derived_text: str | None = None, meter=None,
+                 quota_day: str | None = None) -> None:
+    """run_check, then settle the day's slot. Every route's engine call."""
+    await run_check(job_id, text, repo, stream, derived_text=derived_text,
+                    meter=meter)
+    await _settle_quota(job_id, repo, quota_day)
 
 
 async def _new_job(input_text: str = ""):
@@ -147,7 +180,8 @@ async def transcribe_wav(wav: bytes, duration: float) -> str:
 
 
 async def _run_media_job(
-    job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None
+    job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
+    quota_day: str | None = None,
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> pipeline.
 
@@ -179,14 +213,15 @@ async def _run_media_job(
     if not text:
         await fail("No speech could be transcribed from this audio.")
         return
-    await run_check(job_id, text, repo, stream, derived_text=text, meter=meter)
+    await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
+                 quota_day=quota_day)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
 async def verify_text(
     req: VerifyTextRequest, background: BackgroundTasks, request: Request
 ) -> JobAccepted:
-    with _quota(request):
+    with _quota(request) as spend:
         if len(req.text) > settings.max_input_chars:
             raise HTTPException(
                 413,
@@ -194,7 +229,8 @@ async def verify_text(
                 f"{settings.max_input_chars}. Send the part you want checked.",
             )
         answer, stream = await _new_job(req.text)
-        background.add_task(run_check, answer.job_id, req.text, _repo, stream)
+        background.add_task(_check, answer.job_id, req.text, _repo, stream,
+                            quota_day=spend.day)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
@@ -216,8 +252,9 @@ async def verify_image(
             raise HTTPException(422, "No text or visual claim could be read from the image.")
 
         answer, stream = await _new_job(extracted)
-        background.add_task(run_check, answer.job_id, extracted, _repo, stream,
-                            derived_text=extracted, meter=meter)
+        background.add_task(_check, answer.job_id, extracted, _repo, stream,
+                            derived_text=extracted, meter=meter,
+                            quota_day=spend.day)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
@@ -225,10 +262,10 @@ async def verify_image(
 async def verify_media(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    # No `as spend`: since the Sarvam loop moved behind the 202, this route
-    # spends nothing before returning, so every rejection here is honestly
-    # refundable. Binding it would advertise a boundary that is not there.
-    with _quota(request):
+    # `spend.begin()` is never called: since the Sarvam loop moved behind the
+    # 202, this route spends nothing before returning, so every rejection here
+    # is honestly refundable. `spend` is bound only to carry the day.
+    with _quota(request) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, f"Unsupported media type: {file.content_type}")
@@ -263,7 +300,7 @@ async def verify_media(
         # cost: the quota slot stays consumed even if transcription fails.
         answer, stream = await _new_job()
         background.add_task(_run_media_job, answer.job_id, wav, duration, _repo,
-                            meter, stream)
+                            meter, stream, quota_day=spend.day)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
@@ -322,7 +359,20 @@ def _friendly_link_failure(exc: Exception) -> str:
     return "Something went wrong reading that link. Please try again."
 
 
-async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None) -> None:
+def transcript_key(info: LinkInfo) -> str | None:
+    """The transcript cache key: the platform's own id, known for free.
+
+    Versioned, so a change to how link text is gathered (the caption cap, the
+    subtitle choice) can retire every entry at once. None when the platform
+    gave no id — an unkeyable post is simply not cached.
+    """
+    if not info.video_id or not info.platform:
+        return None
+    return f"v1:{info.platform.lower()}:{info.video_id}"
+
+
+async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
+                        quota_day: str | None = None) -> None:
     """Background half: fetch the text, then run the normal pipeline.
 
     A failure here becomes a FAILED report with a readable error (the page
@@ -330,13 +380,24 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None) -> None:
     itself; this guard covers the fetch/ASR work before it.
     """
     meter = UsageMeter()
-    try:
-        with meter.activate():   # the download's normalize notes ASR seconds
-            text = await gather_link_text(info)
-    except Exception as exc:  # noqa: BLE001 — every failure must reach the report
-        await fail_job(job_id, _friendly_link_failure(exc), repo, meter, stream)
-        return
-    await run_check(job_id, text, repo, stream, derived_text=text, meter=meter)
+    key = transcript_key(info)
+    # A cache failure degrades to doing the work (invariant 6), never to a
+    # failed check — so the lookup and the store both go through
+    # safe_cache_call.
+    text = await safe_cache_call(repo.transcripts.get, key) if key else None
+    if text:
+        print(f"[link] transcript cache hit for {key}: no download, no ASR")
+    else:
+        try:
+            with meter.activate():   # the download's normalize notes ASR seconds
+                text = await gather_link_text(info)
+        except Exception as exc:  # noqa: BLE001 — every failure must reach the report
+            await fail_job(job_id, _friendly_link_failure(exc), repo, meter, stream)
+            return
+        if key:
+            await safe_cache_call(repo.transcripts.put, key, text)
+    await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
+                 quota_day=quota_day)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)
@@ -355,7 +416,7 @@ async def verify_link(
     a background task, and of the two errors, over-counting is the one the
     wallet survives.
     """
-    with _quota(request):
+    with _quota(request) as spend:
         url = req.url.strip()
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
@@ -380,7 +441,8 @@ async def verify_link(
             raise HTTPException(422, "That post has no video and no caption to check.")
 
         answer, stream = await _new_job(url)
-        background.add_task(_run_link_job, answer.job_id, info, _repo, stream)
+        background.add_task(_run_link_job, answer.job_id, info, _repo, stream,
+                            quota_day=spend.day)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 

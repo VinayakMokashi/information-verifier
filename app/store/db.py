@@ -49,6 +49,16 @@ CREATE TABLE IF NOT EXISTS daily_checks (
     day          TEXT PRIMARY KEY,
     used         INTEGER NOT NULL
 );
+
+-- What a pasted link SAID (caption + subtitles or ASR transcript), keyed by
+-- the platform's own video id — known for free at resolve time, before any
+-- download or ASR is bought. One viral reel forwarded by fifty people used to
+-- re-download and re-buy its transcription fifty times.
+CREATE TABLE IF NOT EXISTS transcript_cache (
+    key          TEXT PRIMARY KEY,       -- "v1:<platform>:<video id>"
+    text         TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
 """
 
 # Bumped when the stored shape changes incompatibly. The DB is local and

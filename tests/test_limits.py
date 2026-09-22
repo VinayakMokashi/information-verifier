@@ -14,8 +14,15 @@ def limited(client, monkeypatch):
     return client
 
 
-def _check(client):
-    return client.post("/api/v1/verify/text", json={"text": "5G claim"})
+_n = iter(range(10**9))
+
+
+def _check(client, text=None):
+    # A DIFFERENT message each time by default: since 2026-09-22 a repeat is a
+    # free cache hit that hands its daily slot back, so identical submissions
+    # no longer use the cap up — which is the point of the cache.
+    return client.post("/api/v1/verify/text",
+                       json={"text": text or f"5G claim number {next(_n)}"})
 
 
 def test_per_visitor_hourly_limit(limited):
@@ -88,9 +95,10 @@ def test_rejected_submissions_do_not_burn_quota(limited, monkeypatch):
     for _ in range(5):
         assert limited.post("/api/v1/verify/text",
                             json={"text": "x" * 100}).status_code == 413
-    # Quota untouched: all 3 real checks still available.
-    for _ in range(3):
-        assert _check(limited).status_code == 202
+    # Quota untouched: all 3 real checks still available (short, distinct
+    # texts — the 10-char cap above applies to these too).
+    for i in range(3):
+        assert _check(limited, f"claim {i}").status_code == 202
 
 
 def test_visitor_table_does_not_grow_without_bound(limited, monkeypatch):
@@ -195,3 +203,60 @@ def test_the_database_itself_refuses_a_slot_past_the_cap(client):
     assert [quota.take("2026-01-01", 2) for _ in range(5)] == [True, True, False, False, False]
     assert quota.used("2026-01-01") == 2
     assert quota.take("2026-01-02", 0) is False       # a zero cap grants nothing
+
+
+# -- a free check hands its slot back (2026-09-22) ----------------------------
+
+def test_the_same_forward_twice_uses_one_slot_not_two(limited, monkeypatch):
+    """With 2 checks a day, a message sent twice would otherwise spend half
+    the day's allowance on an answer served from cache for $0."""
+    monkeypatch.setattr(settings, "max_checks_per_day", 2)
+    monkeypatch.setattr(settings, "max_checks_per_hour", 100)
+    first = _check(limited, "The same forward")
+    second = _check(limited, "The same forward")
+    assert first.status_code == second.status_code == 202
+    assert limited.get(f"/api/v1/reports/{second.json()['job_id']}").json()["cached"]
+    assert limits.used_today() == 1
+    # ...so a different message still fits today.
+    assert _check(limited, "A different forward").status_code == 202
+
+
+def test_a_paid_step_keeps_its_slot_even_on_a_cache_hit(limited, monkeypatch):
+    """An image's OCR is a paid vision call. If the text it read then hits
+    the answer cache, the ANSWER was free but the check was not."""
+    from app.api import routes as R
+    from app.providers.usage import note_llm
+
+    monkeypatch.setattr(settings, "max_checks_per_hour", 100)
+
+    async def metered_ocr(image_bytes, media_type):
+        note_llm("claude-sonnet-5", type("U", (), {
+            "input_tokens": 1500, "output_tokens": 40,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "server_tool_use": None})())
+        return "WHO ne kaha 5G se corona"
+
+    monkeypatch.setattr(R, "ocr_image", metered_ocr)
+    _check(limited, "WHO ne kaha 5G se corona")          # primes the cache
+    before = limits.used_today()
+    resp = limited.post("/api/v1/verify/image",
+                        files={"file": ("m.png", b"\x89PNG", "image/png")})
+    report = limited.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["cached"] and report["usage"]["estimated_usd"] > 0
+    assert limits.used_today() == before + 1, "a paid OCR must keep its slot"
+
+
+def test_a_failed_check_keeps_its_slot(limited, monkeypatch):
+    """A stream that dies mid-answer may have been billed without its usage
+    ever being recorded. Refunding failures would let exactly the unmeasured
+    cases spend past the cap."""
+    from app.engine import chat as C
+
+    async def broken(text, *, heard=None, emit=None):
+        raise C.CheckUnavailable("The checking service couldn't be reached.")
+
+    monkeypatch.setattr(C, "answer", broken)
+    monkeypatch.setattr(settings, "max_checks_per_hour", 100)
+    before = limits.used_today()
+    _check(limited)
+    assert limits.used_today() == before + 1

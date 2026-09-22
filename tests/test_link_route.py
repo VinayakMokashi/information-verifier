@@ -339,3 +339,81 @@ def test_the_probe_predicts_the_server_exactly():
     assert "gated" in probe._diagnose(RuntimeError("Instagram sent an empty "
                                                    "media response, use cookies"))
     assert "network" in probe._diagnose(RuntimeError("HTTP Error 429: Too Many"))
+
+
+# -- the transcript cache (2026-09-22) ----------------------------------------
+
+def test_the_same_reel_twice_is_transcribed_once(client, monkeypatch):
+    """One viral reel forwarded by many people re-downloaded and re-bought its
+    whole ASR every time (~₹0.58 for a 70 s clip). The platform's own video
+    id is known for free at resolve time, so it keys what the post said."""
+    from app.api import routes as R
+
+    calls = []
+
+    async def counting_gather(info):
+        calls.append(info.video_id)
+        return "WHO ne kaha 5G se corona phailta hai (transcribed)"
+
+    monkeypatch.setattr(R, "gather_link_text", counting_gather)
+    for _ in range(3):
+        resp = client.post("/api/v1/verify/link", json={"url": REEL})
+        assert resp.status_code == 202
+    assert len(calls) == 1, f"transcribed {len(calls)} times"
+    last = client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    # What the machine read is still shown back on a cache hit (invariant 4).
+    assert last["source_text"].endswith("(transcribed)")
+    assert last["usage"]["asr_seconds"] == 0
+
+
+def test_a_failed_transcription_is_not_remembered(client, monkeypatch):
+    """A failure must be retried next time, not cached as the post's text."""
+    from app.api import routes as R
+    from app.providers.links import LinkError
+
+    outcomes = [LinkError("network", "The platform could not be reached."),
+                "Now it worked"]
+    calls = []
+
+    async def flaky_gather(info):
+        calls.append(1)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(R, "gather_link_text", flaky_gather)
+    first = client.post("/api/v1/verify/link", json={"url": REEL}).json()["job_id"]
+    assert client.get(f"/api/v1/reports/{first}").json()["status"] == "FAILED"
+    second = client.post("/api/v1/verify/link", json={"url": REEL}).json()["job_id"]
+    assert client.get(f"/api/v1/reports/{second}").json()["status"] == "COMPLETE"
+    assert len(calls) == 2
+
+
+def test_an_empty_transcript_is_never_stored(client):
+    from app.store.repository import TranscriptCache
+
+    cache = TranscriptCache()
+    cache.put("v1:instagram:x", "   ")
+    assert cache.get("v1:instagram:x") is None
+
+
+def test_transcripts_expire(client, monkeypatch):
+    from app.store.repository import TranscriptCache
+
+    cache = TranscriptCache()
+    cache.put("v1:youtube:abc", "what the video said")
+    assert cache.get("v1:youtube:abc") == "what the video said"
+    monkeypatch.setattr(settings, "transcript_cache_ttl_days", -1)
+    assert cache.get("v1:youtube:abc") is None
+
+
+def test_a_post_without_an_id_is_not_cached():
+    from app.api.routes import transcript_key
+    from app.providers.links import LinkInfo
+
+    base = dict(url=REEL, title="", uploader="", duration=None, caption="",
+                has_media=True, subtitle=None)
+    assert transcript_key(LinkInfo(platform="Instagram", video_id="", **base)) is None
+    assert transcript_key(LinkInfo(platform="Instagram", video_id="DbsVyqLpbRa",
+                                   **base)) == "v1:instagram:DbsVyqLpbRa"

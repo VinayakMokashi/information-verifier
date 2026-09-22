@@ -120,6 +120,51 @@ class AnswerCache:
             return cur.rowcount or 0
 
 
+class TranscriptCache:
+    """What a public post said, by (platform, video id). Saves ASR, not answers.
+
+    The audio of a posted video does not change, so entries keep a while —
+    but the caption can be edited, so they do expire. An empty text is never
+    stored: a transcription that heard nothing must be retried next time, not
+    remembered as the post's content.
+    """
+
+    def get(self, key: str) -> str | None:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT text, created_at FROM transcript_cache WHERE key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(row["created_at"])
+        except ValueError:
+            return None
+        if age > timedelta(days=settings.transcript_cache_ttl_days):
+            return None
+        return row["text"]
+
+    def put(self, key: str, text: str) -> None:
+        if not text or not text.strip():
+            return
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO transcript_cache (key, text, created_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET text = excluded.text, "
+                "created_at = excluded.created_at",
+                (key, text, _now_iso()),
+            )
+
+    def prune(self) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.transcript_cache_ttl_days)
+        with get_conn() as conn:
+            cur = conn.execute("DELETE FROM transcript_cache WHERE created_at < ?",
+                               (cutoff.isoformat(),))
+            return cur.rowcount or 0
+
+
 class DailyQuota:
     """The deployment-wide checks-per-day counter, in SQLite.
 
@@ -173,6 +218,7 @@ class AnswerRepository:
 
     def __init__(self) -> None:
         self.cache = AnswerCache()
+        self.transcripts = TranscriptCache()
 
     def save(self, answer) -> None:
         with get_conn() as conn:

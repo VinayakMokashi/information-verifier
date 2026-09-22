@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # covered this" is wrong the day one does.
     answer_cache_ttl_trusted_h: int = 168   # 7 days
     answer_cache_ttl_web_h: int = 24
+    # What a pasted link said, by its platform video id. A post's audio does
+    # not change; its caption can, so this still expires.
+    transcript_cache_ttl_days: int = 30
 
     # Media — audio/video via ffmpeg + Sarvam Saaras
     max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap
