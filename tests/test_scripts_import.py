@@ -87,10 +87,12 @@ ALL_PY = sorted(p for d in ("app", "scripts", "tests")
 
 @pytest.mark.parametrize("path", ALL_PY, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_no_file_has_an_invalid_escape(path):
-    """"\." in a normal string is a SyntaxWarning today and an error in a
-    future Python. Edits made through a shell heredoc kept producing them in
-    this project (the tool layer collapses "\\\\" to "\\") — a regex or a
-    Windows path silently changes meaning when that happens."""
+    r"""A backslash-dot in a normal string is a SyntaxWarning today and an
+    error in a future Python. Edits made through a shell heredoc kept
+    producing them in this project (the tool layer collapses a doubled
+    backslash to a single one) — a regex or a Windows path silently changes
+    meaning when that happens. This test's own first draft had one, written
+    through a heredoc, and was the first thing it caught."""
     import warnings
 
     with warnings.catch_warnings():
