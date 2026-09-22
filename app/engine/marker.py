@@ -51,6 +51,10 @@ _CONFIDENCE_RE = re.compile(r'\bconfidence\s*=\s*"(\d{1,3})"', re.IGNORECASE)
 _TRUSTED_RE = re.compile(r'\btrusted\s*=\s*"(yes|no)"', re.IGNORECASE)
 _USED_RE = re.compile(r'\bused\s*=\s*"([^"]*)"', re.IGNORECASE)
 _DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+# What a model writes when it means used="" — "relied on nothing", not
+# "unreadable". Nothing here can be a domain, so no real list is swallowed.
+_NOTHING = frozenset({"", "none", "nothing", "nil", "n/a", "na", "null", "-",
+                      "--", "no sources", "no source", "not applicable"})
 _WORD_CHAR = re.compile(r"\w")
 
 
@@ -164,13 +168,20 @@ def parse_used(raw: str | None) -> list[str] | None:
 
     Forgiving about what the model writes (commas, URLs, `www.`, a path) and
     strict about what comes out: plain hostnames only. None means "no list was
-    given" and must leave the sources alone; [] means "relied on nothing" —
-    which ONLY an empty attribute can say. Found by review: used="Alt News"
-    (names, not domains) parsed to [] and stripped every source from an
-    answer that had named its source. Words we cannot read are unsaid.
+    given" and must leave the sources alone; [] means "relied on nothing".
+
+    Two review findings, in opposite directions. used="Alt News" (names, not
+    domains) parsed to [] and stripped every source from an answer that had
+    NAMED its source — words we cannot read are unsaid. But then used="none"
+    became "unsaid" too, and every raw result came back as a receipt —
+    Manchester City Council for a Nagpur claim, the exact thing used= exists
+    to stop. The prompt asks for used=""; models write the words instead, so
+    the words are read as what they plainly mean.
     """
-    if raw is None or not raw.strip():
-        return None if raw is None else []
+    if raw is None:
+        return None
+    if raw.strip().lower() in _NOTHING:
+        return []
     domains: list[str] = []
     for token in re.split(r"[\s,;]+", raw.strip().lower()):
         token = re.sub(r"^[a-z]+://", "", token).split("/")[0].split("?")[0]

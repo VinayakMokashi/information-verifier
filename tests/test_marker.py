@@ -220,3 +220,21 @@ def test_the_web_page_has_the_same_backstop():
         assert page_re.sub("", stored).strip() == "A.", stored
     body = page[page.index("function md(src)"):page.index("// -- the current turn")]
     assert "SENTINEL_RE" in body, "md() does not apply it"
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("", []), ("   ", []),
+    # The prompt asks for used="" — models write the words instead.
+    ("none", []), ("None", []), ("nothing", []), ("N/A", []), ("nil", []),
+    ("null", []), ("-", []), ("no sources", []),
+    # Unreadable is NOT "nothing": keep the receipts (a review of the first
+    # fix caught this — "none" briefly meant "unsaid", so every raw result
+    # came back, Manchester City Council for a Nagpur claim included).
+    ("Alt News", None), ("BOOM and the WHO", None),
+    ("boomlive.in", ["boomlive.in"]),
+    ("Alt News altnews.in", ["altnews.in"]),
+])
+def test_what_the_model_writes_for_used(raw, expected):
+    from app.engine.marker import parse_used
+
+    assert parse_used(raw) == expected
