@@ -740,6 +740,46 @@ def test_one_chat_cannot_hold_every_slot():
     assert asyncio.run(scenario()) == ["chat 7 rumour", "chat 8 rumour"]
 
 
+def test_a_poke_queued_behind_its_own_chat_is_not_paid_for():
+    """Found by the review of the concurrency fix, reproduced: the rule was
+    enforced when the lock was ACQUIRED, not when the message arrived. Two
+    quick pokes — the first holds the chat lock for its ~3 s peek, the check
+    finishes and is delivered in that window, and the second then finds an
+    empty `pending` and is submitted as a new check. Paid, at 2 a day."""
+    async def scenario():
+        app, tg = _PeekGatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, "Kya 5G se corona failta hai?"))
+        await _until(lambda: "job1" in app.done)
+        bot.dispatch(_msg(7, "?"))                    # poke 1: takes the lock
+        await _until(lambda: app.peeking == 1)
+        bot.dispatch(_msg(7, "??"))                   # poke 2: queues on it
+        await _until(lambda: len(bot._tasks) == 2)
+        app.done["job1"].set()
+        app.release["job1"].set()                     # delivered in that window
+        await _until(lambda: any("This is false." in t for _, t in tg.sent))
+        app.peek_gate.set()
+        await _until(lambda: sum(t == B._NOT_CHECKED for _, t in tg.sent) == 2)
+        app.finish_all()
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert [p["text"] for _, p in app.submissions] == ["Kya 5G se corona failta hai?"]
+    assert sum(t == B._NOT_CHECKED for _, t in tg.sent) == 2   # both were answered
+
+
+def test_the_timeout_message_says_the_next_message_is_not_checked():
+    """It asks for "any message" to re-deliver the report — so it has to say
+    that the message itself will not be checked, or a new claim sent in
+    answer to it is consumed as the poke in silence (found by review)."""
+    app, tg, pending = _PendingApp(), StubTG(), {}
+    _handle(_msg(7, "WHO ne kaha 5G"), app, tg, pending)
+    prompt = tg.sent[-1][1]
+    assert "koi bhi message bhejiye" in prompt
+    assert "khud check nahi hoga" in prompt
+
+
 def test_drain_returns_when_the_last_task_has_only_just_finished():
     """drain() spun forever — synchronously, so no timeout could fire — when
     called in the one loop turn between a task finishing and its

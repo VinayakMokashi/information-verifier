@@ -544,6 +544,7 @@ async def handle_message(
     locks: dict[int, asyncio.Lock] | None = None,
     *, slots: asyncio.Semaphore | None = None,
     watching: set[str] | None = None,
+    busy_on_arrival: bool = False,
 ) -> None:
     """One message, end to end. Every failure becomes words in the chat.
 
@@ -566,6 +567,10 @@ async def handle_message(
     `watching` (jobs whose own handler is still waiting) tells the two apart:
     once a wait gives up it asks the chat for "any message", and the next one
     is that poke; while it is still waiting, nobody asked for one.
+    `busy_on_arrival` comes from the Dispatcher, decided when the message
+    ARRIVED: a second poke that queued behind the first one's lock would
+    otherwise find the answer already delivered, look like a fresh start,
+    and be paid for (found by review of the concurrency fix).
     """
     chat_id = msg.get("chat", {}).get("id")
     if chat_id is None:
@@ -619,6 +624,11 @@ async def handle_message(
                 if stale_job in watching and kind != "unsupported":
                     await tg.send(chat_id, _NOT_CHECKED)
                 return
+        elif busy_on_arrival and kind != "unsupported":
+            # Its check was delivered while this message waited for the lock.
+            # It still arrived mid-check, so it is not checked automatically.
+            await tg.send(chat_id, _NOT_CHECKED)
+            return
 
         if kind == "unsupported":
             await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
@@ -653,9 +663,13 @@ async def handle_message(
             await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
             return
         if report is None:
+            # Says outright that the poke itself is not checked: a new claim
+            # sent in answer to this was consumed as the poke, in silence.
             await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai. Mujhe koi "
                                    "bhi message bhejiye aur main wahi report "
-                                   "dikha dunga — dobara paisa nahi lagega.")
+                                   "dikha dunga — dobara paisa nahi lagega. "
+                                   "(Wo message khud check nahi hoga — use "
+                                   "baad mein dobara bhejiyega.)")
             return
         if pending.get(chat_id) != job_id:
             return        # a later message from this chat already delivered it
@@ -692,15 +706,21 @@ class Dispatcher:
         self._tasks: set[asyncio.Task] = set()
 
     def dispatch(self, message: dict) -> None:
-        task = asyncio.create_task(self._run(message))
+        # Whether the chat was busy is decided HERE, as the message arrives.
+        # Deciding it after the per-chat lock lets a poke that queued behind
+        # another one find the answer already delivered, look like a fresh
+        # start, and be paid for (found by review).
+        chat_id = (message.get("chat") or {}).get("id")
+        busy = chat_id is not None and chat_id in self.pending
+        task = asyncio.create_task(self._run(message, busy))
         self._tasks.add(task)                    # keep a reference until done
         task.add_done_callback(self._tasks.discard)
 
-    async def _run(self, message: dict) -> None:
+    async def _run(self, message: dict, busy: bool = False) -> None:
         try:
             await handle_message(message, self.app, self.tg, self.pending,
                                  self.locks, slots=self._slots,
-                                 watching=self.watching)
+                                 watching=self.watching, busy_on_arrival=busy)
         except Exception as exc:  # noqa: BLE001 — one message must not kill the bot
             print(f"[bot] task failed: {type(exc).__name__}: {exc}")
 
