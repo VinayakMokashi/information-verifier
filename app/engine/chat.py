@@ -329,6 +329,18 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
     excluded: set[str] = set()
 
     for _ in range(_MAX_CONTINUATIONS):
+        if trusted and not _offered(core_only, excluded):
+            # Never send an empty allowed_domains: it may well mean "no
+            # restriction", quietly turning this pass into an open-web one.
+            # Checked HERE, before every request, because the paths to an
+            # empty list are not obvious — found by review: a 400 naming the
+            # five core domains, then one naming nothing, fell back to "the
+            # core" minus those five and sent []. The trusted pass reports
+            # that it could not search; the labelled open-web pass follows.
+            print("[chat] every whitelisted domain was refused; "
+                  "the trusted pass cannot search")
+            result.error = "no searchable whitelist domain left"
+            break
         try:
             async with async_client.messages.stream(
                 model=settings.chat_model,
@@ -382,8 +394,6 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                           f"{len(CORE_SEARCH_DOMAINS)} crawler-verified core domains")
                     core_only = True
                     continue
-                # Never send an empty allowed_domains: it may well mean "no
-                # restriction", quietly turning this pass into an open-web one.
             # A search-tool outage must not sink an answer we can still give.
             print(f"[chat] pass failed ({'trusted' if trusted else 'web'}): "
                   f"{type(exc).__name__}: {exc}")

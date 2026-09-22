@@ -519,6 +519,35 @@ def test_an_empty_allowed_list_is_never_sent(no_factcheck, monkeypatch):
             assert tool["allowed_domains"], "sent an empty whitelist"
 
 
+def test_the_core_fallback_never_sends_an_empty_list_either(no_factcheck, monkeypatch):
+    """Found by review, reproduced: the first 400 named the five core
+    fact-checkers, so they were excluded; a second 400 named nothing, so the
+    engine fell back to "the core" — minus those five, i.e. nothing — and
+    SENT allowed_domains: []. Now an empty whitelist is never sent: the
+    trusted pass reports that it could not search, and the labelled open-web
+    pass takes over."""
+    import anthropic
+    import httpx
+
+    from app.trusted_sources import CORE_SEARCH_DOMAINS
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    vague = anthropic.BadRequestError("Error code: 400 - invalid request",
+                                      response=httpx.Response(400, request=request),
+                                      body=None)
+    client = _Scripted([_crawler_400(list(CORE_SEARCH_DOMAINS)), vague],
+                       _final("The wider web says it is false. "
+                              '<verdict confidence="60" trusted="no" used=""/>'))
+    answer, _ = _run(client, monkeypatch)
+
+    for sent in client.requests:
+        tool = sent["tools"][0]
+        if "allowed_domains" in tool:
+            assert tool["allowed_domains"], "sent an empty whitelist"
+    assert "blocked_domains" in client.requests[-1]["tools"][0]   # pass 2 ran
+    assert answer.markdown.startswith("The wider web says")
+
+
 def test_no_measured_blocked_domain_is_offered_to_search():
     """Pinned from the 2026-09-22 probe. If either comes back into
     SEARCH_DOMAINS, every whitelist search 400s again."""
