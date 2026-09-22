@@ -217,6 +217,51 @@ def test_a_refund_goes_back_to_the_day_it_was_charged(limited, monkeypatch):
     assert quota.used("2026-09-23") == 1, "the refund landed on the wrong day"
 
 
+def test_claiming_a_slot_never_freezes_the_server(limited):
+    """Found by review, measured: the daily slot was claimed by a SQLite
+    write ON the event loop, so while any other writer held the database
+    lock — a housekeeping DELETE, say — every request and every live answer
+    stream froze with it (2 s in the review's run; up to the busy timeout in
+    principle). Here a writer holds the lock for 0.8 s while a check is
+    submitted; the loop has to keep running the whole time."""
+    import asyncio
+    import sqlite3
+    import threading
+    import time
+
+    import httpx
+
+    from app.main import app
+
+    held = threading.Event()
+
+    def hold_write_lock():
+        conn = sqlite3.connect(settings.db_path, timeout=30)
+        conn.execute("BEGIN IMMEDIATE")
+        held.set()
+        time.sleep(0.8)
+        conn.commit()
+        conn.close()
+
+    async def scenario():
+        threading.Thread(target=hold_write_lock, daemon=True).start()
+        await asyncio.to_thread(held.wait, 5)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as http:
+            submit = asyncio.create_task(
+                http.post("/api/v1/verify/text", json={"text": "a claim, mid-lock"}))
+            ticks, until = 0, time.monotonic() + 0.4
+            while time.monotonic() < until:          # the lock is held throughout
+                await asyncio.sleep(0.01)
+                ticks += 1
+            resp = await submit
+        return ticks, resp.status_code
+
+    ticks, status = asyncio.run(scenario())
+    assert status == 202
+    assert ticks >= 10, f"the event loop froze: {ticks} ticks in 0.4 s"
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""

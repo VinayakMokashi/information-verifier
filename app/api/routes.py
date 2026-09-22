@@ -7,7 +7,7 @@ the exact same two-call contract.
 """
 import asyncio
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import httpx
@@ -72,13 +72,17 @@ class _Spend:
         self.started = True
 
 
-@contextmanager
-def _quota(request: Request):
+@asynccontextmanager
+async def _quota(request: Request):
     """Claim a check up front; hand it back only if we never spent anything.
 
     Reserving first is what makes the cap real — checking now and consuming
     after an upload has been read leaves a window where any number of
     concurrent requests pass the same empty counter.
+
+    Both the claim and the refund are SQLite writes, so both run in a thread.
+    Found by review, measured: on the event loop, a claim that waited for
+    another writer's lock froze every request and every live stream with it.
 
     The `started` flag is load-bearing, not bookkeeping: /verify/image raises
     422 ("no text in this image") AFTER a paid Opus vision call, and refunding
@@ -87,12 +91,12 @@ def _quota(request: Request):
     honest when nothing was bought. (The media ASR spend that used to share
     this trap now runs behind the 202, where no refund path exists at all.)
     """
-    spend = _Spend(reserve(request))
+    spend = _Spend(await asyncio.to_thread(reserve, request))
     try:
         yield spend
     except HTTPException:
         if not spend.started:
-            refund(request, spend.day)
+            await asyncio.to_thread(refund, request, spend.day)
         raise
 
 
@@ -112,7 +116,7 @@ async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
     answer = await asyncio.to_thread(repo.get, job_id)
     if (answer is not None and answer.cached and answer.usage is not None
             and answer.usage.estimated_usd == 0):
-        refund_daily(quota_day)
+        await asyncio.to_thread(refund_daily, quota_day)
 
 
 async def _check(job_id: str, text: str, repo, stream=None, *,
@@ -236,7 +240,7 @@ async def _run_media_job(
 async def verify_text(
     req: VerifyTextRequest, background: BackgroundTasks, request: Request
 ) -> JobAccepted:
-    with _quota(request) as spend:
+    async with _quota(request) as spend:
         if len(req.text) > settings.max_input_chars:
             raise HTTPException(
                 413,
@@ -253,7 +257,7 @@ async def verify_text(
 async def verify_image(
     background: BackgroundTasks, request: Request, file: UploadFile = File(...)
 ) -> JobAccepted:
-    with _quota(request) as spend:
+    async with _quota(request) as spend:
         if file.content_type not in _ALLOWED_IMAGE_TYPES:
             raise HTTPException(415, _MSG_NOT_AN_IMAGE)
         image_bytes = await file.read()
@@ -280,7 +284,7 @@ async def verify_media(
     # `spend.begin()` is never called: since the Sarvam loop moved behind the
     # 202, this route spends nothing before returning, so every rejection here
     # is honestly refundable. `spend` is bound only to carry the day.
-    with _quota(request) as spend:
+    async with _quota(request) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, _MSG_NOT_MEDIA)
@@ -452,7 +456,7 @@ async def verify_link(
     a background task, and of the two errors, over-counting is the one the
     wallet survives.
     """
-    with _quota(request) as spend:
+    async with _quota(request) as spend:
         url = req.url.strip()
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
