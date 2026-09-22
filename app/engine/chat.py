@@ -34,6 +34,7 @@ create only), so every request here reports its own usage explicitly or the
 report bills $0.00 while real money leaves.
 """
 import asyncio
+import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
@@ -210,6 +211,57 @@ def _searches_used(message) -> int:
     return getattr(server_tools, "web_search_requests", 0) or 0
 
 
+# Romanized-Hindi function words that are not English words. Deliberately
+# excludes the ambiguous ones ("hum", "log", "par", "the"): a false positive
+# would tell the model an English sender wrote Hinglish.
+_HINGLISH_MARKERS = frozenset("""
+    hai hain nahi nahin kya kyun kyon mein aur yeh ye woh wo tha thi hota hoti
+    hote karo karna kar raha rahi rahe bhi sab jo toh kuch kaise kahan ki ka
+    ke ko se ne liye wala wali ji sahi galat sach jhooth abhi aap aapko tum
+    mera meri tera uska uski unka iska iski sarkar bataya kaha diya gaya
+""".split())
+# English function words that other Latin-script languages do not share.
+# Excluded on purpose: "a", "no" (Spanish), "in" (Italian/German), "on"
+# (French), "is" (Dutch), "who" (the WHO in "WHO ne kaha hai...").
+_ENGLISH_MARKERS = frozenset("""
+    the and of to that this with will was were are have has been from for it
+    its by would could should which what when there their they about into
+    than being does did not
+""".split())
+_INDIC = re.compile(r"[ऀ-෿]")   # Devanagari .. Sinhala blocks
+_URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+_WORD = re.compile(r"[A-Za-z]+")
+
+
+def language_hint(text: str) -> str | None:
+    """Say plainly what language the message is in, when code can tell.
+
+    MEASURED 2026-09-22: "Drinking hot water kills the coronavirus" got a
+    Hinglish reply in 3 of 3 runs WITH the web_search tool attached, and an
+    English one in 5 of 5 probes of the identical prompt WITHOUT it — at both
+    effort levels, with the search queries and every result in English.
+    Rewording the system prompt did not move it. So this does not ask the
+    model to judge; it states a fact computed here, last, where it is read
+    last. None when unclear, which leaves the model's own judgment in charge.
+    """
+    if _INDIC.search(text):
+        return ("The message above is not in English. Reply in exactly its "
+                "language and script.")
+    words = [w.lower() for w in _WORD.findall(_URL.sub(" ", text))]
+    if len(words) < 3:
+        return None                  # too little to call — and a URL is no language
+    hinglish = sum(w in _HINGLISH_MARKERS for w in words)
+    english = sum(w in _ENGLISH_MARKERS for w in words)
+    if hinglish >= 2 and hinglish / len(words) >= 0.15:
+        return ("The message above is in Hinglish (Hindi written in Latin "
+                "letters), so reply in Hinglish.")
+    # English needs POSITIVE evidence. "No Hinglish words" alone would call
+    # "El agua caliente mata el virus" English.
+    if hinglish == 0 and english >= 1 and english / len(words) >= 0.1:
+        return "The message above is written in English, so write your whole reply in English."
+    return None
+
+
 def _render_input(text: str, heard: str | None, factchecks: list) -> str:
     parts = [f"<message>\n{as_prompt_data(text, _MAX_INPUT_CHARS)}\n</message>"]
     if heard and heard.strip() and heard.strip() != text.strip():
@@ -235,6 +287,9 @@ def _render_input(text: str, heard: str | None, factchecks: list) -> str:
         "language and script of the text inside <message> — whatever that is, "
         "including English."
     )
+    hint = language_hint(text)
+    if hint:
+        parts.append(hint)
     return "\n\n".join(parts)
 
 

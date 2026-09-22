@@ -565,9 +565,9 @@ def test_the_language_rule_names_english_and_forbids_guessing_the_reader():
         assert "Never pick the language from who you think the reader is" in prompt
 
 
-def test_the_user_turn_ends_with_the_language_instruction():
-    """Repeated last, where it is read last."""
-    content = C._render_input("Drinking hot water kills the coronavirus", None, [])
+def test_without_a_clear_hint_the_general_instruction_is_last():
+    """When code cannot tell, the model's own judgment is asked for — last."""
+    content = C._render_input("El agua caliente mata el virus del covid", None, [])
     assert content.rstrip().endswith("including English.")
 
 
@@ -664,3 +664,43 @@ def test_prior_factchecks_are_never_filtered_by_used(monkeypatch):
         trusted="yes", conf=90)])
     answer, _ = _run(client, monkeypatch)
     assert [s.url for s in answer.sources] == ["https://factly.in/prior", TRUSTED_URL]
+
+
+# -- the reply language, stated by code (measured 2026-09-22) -----------------
+
+ENGLISH, HINGLISH, NON_LATIN, UNCLEAR = "english", "hinglish", "non-latin", None
+
+
+def _kind(hint):
+    if hint is None:
+        return UNCLEAR
+    if "not in English" in hint:
+        return NON_LATIN
+    return HINGLISH if "Hinglish" in hint else ENGLISH
+
+
+@pytest.mark.parametrize("text, expected", [
+    # The measured failure: English in, Hinglish out, 3 runs of 3.
+    ("Drinking hot water kills the coronavirus", ENGLISH),
+    ("NASA confirmed six days of total darkness in December", ENGLISH),
+    ("WHO ne kaha hai ki 5G se corona phailta hai", HINGLISH),
+    ("Kya ye sach hai ki garam paani se corona khatam hota hai?", HINGLISH),
+    ("Modi ji ne kaha that petrol will be free", HINGLISH),
+    ("नागपुर मेट्रो अगले महीने से मुफ्त होगी", NON_LATIN),
+    ("5ஜி மூலம் கொரோனா பரவுகிறது", NON_LATIN),
+    # Must NOT be called English just because no Hinglish word appears.
+    ("El agua caliente mata el virus del covid", UNCLEAR),
+    ("Le vaccin contient une puce électronique", UNCLEAR),
+    # Too little to judge — and a bare URL is not a language.
+    ("5G 2026 !!!", UNCLEAR),
+    ("https://www.example.com/some/article-about-covid", UNCLEAR),
+    # Genuinely mixed: leave it to the model.
+    ("The PM said ki petrol will be free", UNCLEAR),
+])
+def test_the_language_hint(text, expected):
+    assert _kind(C.language_hint(text)) == expected
+
+
+def test_the_hint_is_the_last_thing_the_model_reads():
+    content = C._render_input("Drinking hot water kills the coronavirus", None, [])
+    assert content.rstrip().endswith("write your whole reply in English.")
