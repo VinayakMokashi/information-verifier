@@ -179,6 +179,28 @@ class TranscriptCache:
             return cur.rowcount or 0
 
 
+def _provable_kind(answer) -> str:
+    """What kind of check a stored answer was, as far as the row can PROVE.
+
+    A live check records its kind as it finishes; this is for rows without
+    one. The engine overwrites input_text with the text it gathered, so the
+    old guess — "starts with https://" — never fired for a FINISHED link
+    check, and every link and screenshot check came out as "media" (found by
+    review). What the row does show: a job that failed before any text
+    existed keeps what it was created with (a link's URL; a voice note's
+    empty string), and a text check has no machine-read text. A finished
+    link, screenshot or voice note looks the same — so it is "unknown".
+    """
+    if answer.source_text:
+        return "unknown"
+    if not answer.input_text:
+        return "media"
+    if answer.input_text.startswith("https://") and not any(
+            c.isspace() for c in answer.input_text):
+        return "link"
+    return "text"
+
+
 class SpendLedger:
     """What every finished check cost — and nothing the person sent.
 
@@ -219,7 +241,8 @@ class SpendLedger:
 
         So the checks already run — including the first paid ones — appear on
         the dashboard the first time it opens, not only checks run after it
-        existed. Their kind is inferred (a stored answer does not record it).
+        existed. Their kind is inferred (a stored answer does not record it),
+        and only as far as the row can prove it — see _provable_kind.
         """
         from app.models.answer import Answer
 
@@ -237,9 +260,7 @@ class SpendLedger:
                 continue
             if answer.usage is None:
                 continue
-            kind = ("link" if answer.input_text.startswith("https://")
-                    else "text" if not answer.source_text else "media")
-            self.record(answer, kind)
+            self.record(answer, _provable_kind(answer))
             added += 1
         return added
 

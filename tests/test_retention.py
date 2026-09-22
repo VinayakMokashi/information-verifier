@@ -106,6 +106,38 @@ def test_checks_that_predate_the_ledger_are_backfilled(repo):
     assert repo.ledger.totals()["usd"] == pytest.approx(0.0483)
 
 
+@pytest.mark.parametrize("input_text, source_text, kind", [
+    ("Drinking hot water kills the coronavirus", None, "text"),
+    ("https://www.instagram.com/reel/DbsVyqLpbRa/", None, "link"),  # its fetch failed
+    ("", None, "media"),                               # its transcription failed
+    # Finished with machine-read text: a link, a screenshot or a voice note —
+    # the stored row cannot say which, so the ledger does not pretend to.
+    ("WHO ne kaha 5G se corona", "WHO ne kaha 5G se corona", "unknown"),
+])
+def test_a_backfilled_kind_is_only_what_the_row_can_prove(repo, input_text,
+                                                          source_text, kind):
+    """Found by review, reproduced: run_check overwrites input_text with the
+    text it gathered, so the "starts with https://" test never fired for a
+    finished link check, and every link and screenshot check was backfilled
+    as "media" — "Voice / video" on the dashboard — while a voice note whose
+    transcription failed (input_text "") was backfilled as "text"."""
+    a = _answer(1, text=input_text)
+    a.source_text = source_text
+    repo.save(a)
+    repo.ledger.backfill_from_answers()
+    assert [r["kind"] for r in repo.ledger.recent(5)] == [kind]
+
+
+def test_the_dashboard_names_every_kind_the_ledger_can_hold():
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "app" / "api" / "dashboard.html"
+            ).read_text(encoding="utf-8")
+    table = page[page.index("const KIND = {"):page.index("};", page.index("const KIND = {"))]
+    for kind in ("text", "link", "image", "media", "unknown", '"ab-test"', "probe"):
+        assert f"{kind}:" in table, f"no label for {kind}"
+
+
 def test_a_failing_housekeeping_step_does_not_stop_the_others(repo, monkeypatch):
     from app.store import repository as R
 

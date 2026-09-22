@@ -478,7 +478,7 @@ function drawSplit(d) {
 // -- recent checks ------------------------------------------------------------
 const TIER = { trusted: "Fact-checkers", web: "General web", none: "Nothing found" };
 const KIND = { text: "Text", link: "Link", image: "Image", media: "Voice / video",
-               "ab-test": "A/B test", probe: "Probe" };
+               unknown: "Link, image or voice", "ab-test": "A/B test", probe: "Probe" };
 const EXPERIMENT = new Set(["ab-test", "probe"]);
 function drawRecent(d) {
   const host = $("recent");
