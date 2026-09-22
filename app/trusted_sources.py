@@ -15,9 +15,13 @@ widening this list genuinely risky, so it is split:
   * GLOBAL_SEARCH_CANDIDATES — added for general-purpose coverage, crawler
     access NOT yet verified.
 
-`app/engine/chat.py` retries with CORE only if a search 400s, so an
-unverified candidate degrades coverage for one request instead of breaking
-search outright. `scripts/crawl_probe.py` promotes candidates once measured.
+MEASURED 2026-09-22 with `scripts/crawl_probe.py`, before the first paid
+check: apnews.com and factcheck.afp.com block the crawler. With them listed,
+EVERY pass-1 request 400'd and fell back to the five core domains — the
+general-purpose widening had never actually searched WHO, NASA or Snopes.
+Both moved to FACTCHECK_ONLY (still trusted when cited). If a site starts
+blocking later, `app/engine/chat.py` drops exactly the domains the 400 names
+and keeps the rest; run the probe after any edit to this file.
 
 Curating this list is a trust decision, not a code change.
 
@@ -52,8 +56,8 @@ GLOBAL_SEARCH_CANDIDATES: list[str] = [
     "leadstories.com",
     "checkyourfact.com",
     "africacheck.org",
-    "factcheck.afp.com",
-    "apnews.com",
+    # factcheck.afp.com and apnews.com block the crawler (measured
+    # 2026-09-22) — they live in FACTCHECK_ONLY_DOMAINS below.
     "factcheckni.org",
     "truthorfiction.com",
     # -- Health and medicine ----------------------------------------------
@@ -107,6 +111,10 @@ FACTCHECK_ONLY_DOMAINS: list[str] = [
     # Added 2026-09-11 with the general-purpose widening:
     "bbc.com",
     "bbc.co.uk",
+    # Both block the crawler (measured 2026-09-22 — the 400 named
+    # 'apnews.com' and 'factcheck.afp.com'). afp.com covers AFP Fact Check's
+    # factcheck.afp.com subdomain: IFCN-certified, with an India desk, and
+    # KEPT trusted — Vinayak left the call to me; see PROJECT_PLAN §7.
     "apnews.com",
     "afp.com",
     "dw.com",
@@ -163,3 +171,18 @@ def trusted_domain_of(url: str) -> str | None:
 
 def is_trusted_url(url: str) -> bool:
     return trusted_domain_of(url) is not None
+
+
+def domains_named_in(message: str, domains: list[str]) -> list[str]:
+    """Which of `domains` an API error message names, e.g. the crawler 400:
+
+        "The following domains are not accessible to our user agent:
+         ['apnews.com', 'factcheck.afp.com']"   (measured 2026-09-22)
+
+    Intersected with what was sent rather than parsed structurally — the
+    wording is not a contract, the domain names are. Whole-name matches only,
+    so 'nih.gov' is not found inside 'ncbi.nlm.nih.gov'.
+    """
+    lowered = message.lower()
+    return [d for d in domains
+            if re.search(r"(?<![a-z0-9.-])" + re.escape(d) + r"(?![a-z0-9.-])", lowered)]

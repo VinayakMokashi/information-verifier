@@ -432,3 +432,102 @@ def test_a_web_only_answer_cannot_show_a_factchecker_grade_number(no_factcheck, 
     answer, _ = _run(client, monkeypatch)
     assert answer.tier == "web"
     assert answer.confidence == 75
+
+
+# -- the crawler 400 (measured 2026-09-22) ------------------------------------
+
+def _crawler_400(blocked):
+    import anthropic
+    import httpx
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    message = ("The following domains are not accessible to our user agent: "
+               f"{blocked!r}. Read more: https://support.anthropic.com/...")
+    return anthropic.BadRequestError(
+        f"Error code: 400 - {{'error': {{'message': \"{message}\"}}}}",
+        response=httpx.Response(400, request=request), body=None)
+
+
+class _Scripted:
+    """Raises the scripted errors in order, then plays one good turn."""
+
+    def __init__(self, errors, final):
+        self.errors, self.final, self.requests = list(errors), final, []
+        outer = self
+
+        class Messages:
+            def stream(self, **kw):
+                outer.requests.append(kw)
+                if outer.errors:
+                    raise outer.errors.pop(0)
+                return _Stream(outer.final, _deltas(outer.final.content[0].text))
+
+        self.messages = Messages()
+
+
+def test_a_crawler_400_drops_only_the_domains_it_names(no_factcheck, monkeypatch):
+    """MEASURED: one blocked domain 400s the whole allowed_domains list. The
+    engine used to answer that by falling back to the five core domains —
+    which silently shrank a general-purpose checker to Indian fact-checkers on
+    EVERY request, because two blocked sites were in the list from day one.
+    The 400 names the offenders; drop exactly those and keep the rest."""
+    from app.trusted_sources import SEARCH_DOMAINS
+
+    blocked = [SEARCH_DOMAINS[7], SEARCH_DOMAINS[12]]
+    client = _Scripted([_crawler_400(blocked)],
+                       _final("It is false. <verdict confidence=\"90\" trusted=\"yes\"/>",
+                              citations=[_citation(TRUSTED_URL)]))
+    result, _ = _run(client, monkeypatch)
+
+    assert result.markdown.startswith("It is false.")
+    retried = client.requests[1]["tools"][0]["allowed_domains"]
+    assert set(retried) == set(SEARCH_DOMAINS) - set(blocked)
+    assert len(retried) == len(SEARCH_DOMAINS) - 2, "kept the rest, not just the core"
+
+
+def test_a_400_that_names_no_domain_falls_back_to_the_verified_core(no_factcheck, monkeypatch):
+    """If the wording ever changes and names nothing, the old safety net still
+    holds: one retry on the crawler-verified core."""
+    import anthropic
+    import httpx
+
+    from app.trusted_sources import CORE_SEARCH_DOMAINS
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    vague = anthropic.BadRequestError("Error code: 400 - something about domains",
+                                      response=httpx.Response(400, request=request),
+                                      body=None)
+    client = _Scripted([vague], _final("Fine. <verdict confidence=\"80\" trusted=\"yes\"/>",
+                                       citations=[_citation(TRUSTED_URL)]))
+    _run(client, monkeypatch)
+    assert client.requests[1]["tools"][0]["allowed_domains"] == CORE_SEARCH_DOMAINS
+
+
+def test_an_empty_allowed_list_is_never_sent(no_factcheck, monkeypatch):
+    """An empty `allowed_domains` may well mean "no restriction" — which would
+    quietly turn the whitelist pass into an open-web search. Refuse instead."""
+    from app.trusted_sources import SEARCH_DOMAINS
+
+    client = _Scripted([_crawler_400(list(SEARCH_DOMAINS))] * 3,
+                       _final("unused"))
+    monkeypatch.setattr(C, "async_client", client)
+    with pytest.raises(C.CheckUnavailable):
+        asyncio.run(C.answer("something"))
+    for request in client.requests:
+        tool = request["tools"][0]
+        if "allowed_domains" in tool:
+            assert tool["allowed_domains"], "sent an empty whitelist"
+
+
+def test_no_measured_blocked_domain_is_offered_to_search():
+    """Pinned from the 2026-09-22 probe. If either comes back into
+    SEARCH_DOMAINS, every whitelist search 400s again."""
+    from app.trusted_sources import SEARCH_DOMAINS, is_trusted_url
+
+    for blocked in ("apnews.com", "factcheck.afp.com", "reuters.com",
+                    "ptinews.com", "thehindu.com", "indiatoday.in",
+                    "vishvasnews.com"):
+        assert blocked not in SEARCH_DOMAINS
+    # ...while staying trusted when cited.
+    assert is_trusted_url("https://factcheck.afp.com/doc.afp.com.34XJ2L")
+    assert is_trusted_url("https://apnews.com/article/fact-check-123")

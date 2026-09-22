@@ -15,27 +15,19 @@ model not to search — measured below, typically a fraction of a cent. Nothing
 is cached or stored.
 """
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings  # noqa: E402
-from app.trusted_sources import SEARCH_DOMAINS  # noqa: E402
-
-
-def blocked_in(message: str, requested: list[str]) -> list[str]:
-    """The requested domains an API error message names as inaccessible.
-
-    Intersected with what was sent rather than parsed structurally: the
-    message wording is not a contract, the domain names are.
-    """
-    lowered = message.lower()
-    return [d for d in requested
-            if re.search(r"(?<![a-z0-9.-])" + re.escape(d) + r"(?![a-z0-9-])", lowered)]
+from app.trusted_sources import SEARCH_DOMAINS, domains_named_in  # noqa: E402
+from scripts.render import force_utf8_stdout  # noqa: E402
 
 
 def main() -> int:
+    # Measured the hard way on this script's first run: the API call succeeded
+    # and the cp1252 console then killed the report of it.
+    force_utf8_stdout()
     if not settings.anthropic_api_key:
         print("No ANTHROPIC_API_KEY in .env. Aborting (no cost).")
         return 2
@@ -61,7 +53,7 @@ def main() -> int:
         )
     except anthropic.BadRequestError as exc:
         text = str(exc)
-        named = blocked_in(text, domains)
+        named = domains_named_in(text, domains)
         print(f"\nREJECTED (400, not billed). The API said:\n  {text[:1500]}\n")
         if named:
             print(f"{len(named)} domain(s) named as inaccessible:")
@@ -83,7 +75,7 @@ def main() -> int:
     searched, usd = bill.web_searches, bill.estimated_usd
     print(f"\nACCEPTED: all {len(domains)} domains passed validation.")
     print(f"  stop_reason={resp.stop_reason}  searches={searched}  "
-          f"in={usage.input_tokens} out={usage.output_tokens}  cost≈${usd:.4f}")
+          f"in={usage.input_tokens} out={usage.output_tokens}  cost~${usd:.4f}")
     # Every field, not just the ones this script knows about: the 20260209
     # search tool filters results with code execution, and if that ever
     # shows up as its own billable line, this is where it appears first.
