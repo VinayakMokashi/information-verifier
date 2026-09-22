@@ -537,9 +537,13 @@ async def answer(text: str, *, heard: str | None = None,
     for source in unique_sources:
         await emit("source", source.model_dump())
 
+    # "General web" must mean a general-web page is actually among what the
+    # answer kept. MEASURED in the Sonnet-vs-Opus A/B: pass 1 disowned its
+    # fact-checker results, pass 2 kept nothing, and the answer was labelled
+    # "General web only" over a list made entirely of fact-checkers.
     if first_backing or (second is not None and second.backs_trusted):
         tier: Tier = "trusted"
-    elif unique_sources:
+    elif any(s.tier == "web" for s in unique_sources):
         tier = "web"
     else:
         tier = "none"

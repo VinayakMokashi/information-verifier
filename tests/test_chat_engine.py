@@ -704,3 +704,19 @@ def test_the_language_hint(text, expected):
 def test_the_hint_is_the_last_thing_the_model_reads():
     content = C._render_input("Drinking hot water kills the coronavirus", None, [])
     assert content.rstrip().endswith("write your whole reply in English.")
+
+
+def test_general_web_needs_an_actual_general_web_source(no_factcheck, monkeypatch):
+    """MEASURED in the Sonnet-vs-Opus A/B (2026-09-22): pass 1 disowned its
+    fact-checker results (trusted="no"), pass 2 kept nothing, and the answer
+    was labelled "General web only" — over a source list that was entirely
+    fact-checkers and contained no general-web page at all. Nothing backed
+    the answer, and the label has to say that."""
+    client = StubClient([
+        _with_results("No trusted source covers this.", [BOOM_RELATED], trusted="no"),
+        _with_results("The wider web had nothing either.", [WEB_URL], used="",
+                      trusted="no", conf=35),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "none"
+    assert [s.tier for s in answer.sources] == ["trusted"]    # still shown, as context
