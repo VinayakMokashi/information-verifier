@@ -92,7 +92,7 @@ def _quota(request: Request):
         yield spend
     except HTTPException:
         if not spend.started:
-            refund(request)
+            refund(request, spend.day)
         raise
 
 

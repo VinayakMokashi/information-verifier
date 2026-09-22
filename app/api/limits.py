@@ -149,11 +149,16 @@ def refund_daily(day: str | None) -> None:
         print(f"[limits] refund not recorded: {type(exc).__name__}: {exc}")
 
 
-def refund(request: Request) -> None:
-    """Give back a reservation for a submission that never reached paid work."""
+def refund(request: Request, day: str | None) -> None:
+    """Give back a reservation for a submission that never reached paid work.
+
+    `day` is what reserve() returned. It used to be recomputed here, and a
+    rejection that straddled midnight gave its slot back to the NEXT day,
+    which then granted one check over the cap (found by review, reproduced).
+    """
     if not settings.rate_limit_enabled:
         return
-    refund_daily(today())
+    refund_daily(day)
     with _lock:
         mine = _per_client.get(_client_of(request))
         if mine:

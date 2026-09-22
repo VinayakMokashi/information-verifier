@@ -182,6 +182,41 @@ def test_a_day_is_the_operators_day_not_utcs(monkeypatch):
     assert limits.today() == "2026-09-22"
 
 
+def test_a_refund_goes_back_to_the_day_it_was_charged(limited, monkeypatch):
+    """Found by review, reproduced: the rejection refund recomputed today(),
+    so a bad link whose resolve straddled midnight took a slot from day D and
+    gave one back to D+1 — and D+1 then granted 3 checks against a cap of 2.
+    The day reserve() charged is the only day a refund may touch."""
+    import datetime as real
+
+    from app.api import routes
+    from app.providers.links import LinkError
+    from app.store.repository import DailyQuota
+
+    now = {"t": real.datetime(2026, 9, 22, 18, 29, 58, tzinfo=real.timezone.utc)}
+
+    class Clock(real.datetime):           # 23:59:58 in India when it arrives
+        @classmethod
+        def now(cls, tz=None):
+            return now["t"]
+
+    monkeypatch.setattr(limits, "datetime", Clock)
+    monkeypatch.setattr(settings, "day_boundary_utc_offset_min", 330)
+    quota = DailyQuota()
+
+    def resolve_across_midnight(url):
+        now["t"] = real.datetime(2026, 9, 22, 18, 30, 3, tzinfo=real.timezone.utc)
+        assert quota.take("2026-09-23", 5)          # someone's check, new day
+        raise LinkError("not_found", "No public post was found at that link.")
+
+    monkeypatch.setattr(routes, "resolve_link", resolve_across_midnight)
+    resp = limited.post("/api/v1/verify/link",
+                        json={"url": "https://www.instagram.com/reel/abc/"})
+    assert resp.status_code == 422
+    assert quota.used("2026-09-22") == 0, "the slot it took was not given back"
+    assert quota.used("2026-09-23") == 1, "the refund landed on the wrong day"
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""
