@@ -336,6 +336,11 @@ class StubTG:
         self.sent = []
 
     async def send(self, chat_id, text):
+        # A real send is a network call, and a network call SUSPENDS. Without
+        # this the fake never yields, and the double-payment race in
+        # handle_message (check pending -> send ack -> submit) could not
+        # happen in a test — measured: a no-op lock still passed.
+        await asyncio.sleep(0)
         self.sent.append((chat_id, text))
         return True
 
@@ -466,3 +471,149 @@ def test_a_bare_http_error_never_reaches_the_chat():
     assert job_id is None
     assert "HTTP" not in err and "500" not in err
     assert "dobara" in err
+
+
+# -- concurrency (to-do 8, 2026-09-22) ----------------------------------------
+
+class _GatedApp(StubApp):
+    """A check whose FINISHING and whose long-wait WAKING are separate.
+
+    `done[job]`    — the server has finished it: a quick peek sees the answer.
+    `release[job]` — the handler's long wait wakes up.
+    Real life has a gap between the two (the wait polls every few seconds);
+    the exactly-once test lives in that gap.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.done: dict[str, asyncio.Event] = {}
+        self.release: dict[str, asyncio.Event] = {}
+        self._n = 0
+
+    async def submit_json(self, endpoint, payload):
+        await asyncio.sleep(0)                 # a real POST suspends too
+        self.submissions.append((endpoint, payload))
+        self._n += 1
+        job = f"job{self._n}"
+        self.done[job], self.release[job] = asyncio.Event(), asyncio.Event()
+        return job, ""
+
+    async def wait_for_report(self, job_id, attempts=None):
+        if attempts is not None:           # the short "is it done yet?" peek
+            return self.report if self.done[job_id].is_set() else None
+        await self.release[job_id].wait()
+        return self.report
+
+    def finish_all(self):
+        for job in self.done:
+            self.done[job].set()
+            self.release[job].set()
+
+
+def _msg(chat, text):
+    return {"chat": {"id": chat}, "text": text}
+
+
+async def _until(condition, turns=500):
+    """Let the event loop run until `condition()` holds (or give up quietly
+    and let the assertions that follow report what happened).
+
+    NOT asyncio.sleep(0.01): asyncio's clock on Windows is time.monotonic,
+    measured here stepping in 15-16 ms jumps, so a 10 ms sleep can return
+    after a single loop turn — before a handler reaches its third await. The
+    first version of these tests failed on exactly that, not on the bot.
+    """
+    for _ in range(turns):
+        if condition():
+            return
+        await asyncio.sleep(0)
+
+
+def test_one_chats_slow_check_does_not_block_another_chat():
+    """The bot handled messages one at a time: one person's 4-minute reel
+    check blocked every other chat, /help included."""
+    async def scenario():
+        app, tg = _GatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(1, "a slow rumour"))
+        await _until(lambda: "job1" in app.done)   # chat 1 is now waiting
+        bot.dispatch(_msg(2, "/help"))
+        bot.dispatch(_msg(3, "another rumour"))
+        await _until(lambda: len(app.submissions) == 2
+                     and any(c == 2 for c, _ in tg.sent))
+        # Chat 2 got help and chat 3 got its own check started — while chat
+        # 1's check is still running.
+        assert any(c == 2 and "Information Verifier" in t for c, t in tg.sent)
+        assert [p for _, p in app.submissions] == [{"text": "a slow rumour"},
+                                                    {"text": "another rumour"}]
+        app.finish_all()
+        await bot.drain()
+        return tg
+
+    tg = asyncio.run(scenario())
+    replies = [c for c, t in tg.sent if "This is false." in t]
+    assert sorted(replies) == [1, 3]
+
+
+def test_two_messages_from_one_chat_at_once_pay_for_one_check():
+    """The money risk that concurrency opened: both handlers would see no
+    pending job and BOTH submit. The per-chat lock makes the second one find
+    the first job instead."""
+    async def scenario():
+        app, tg = _GatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, "first message"))
+        bot.dispatch(_msg(7, "second message, sent right after"))
+        # Wait for the second message's outcome — "still running" if the
+        # lock worked, a second submission if it did not.
+        await _until(lambda: len(app.submissions) > 1
+                     or any("abhi bhi chal raha hai" in t for _, t in tg.sent))
+        assert len(app.submissions) == 1, "one chat paid twice"
+        assert any("abhi bhi chal raha hai" in t for _, t in tg.sent)
+        app.finish_all()
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert len(app.submissions) == 1
+
+
+def test_a_finished_check_is_delivered_exactly_once():
+    """The job finishes on the server while the first handler's wait has not
+    woken yet, and the user asks again in that gap. The second message's peek
+    delivers it; the first handler must then stay silent — not send it twice."""
+    async def scenario():
+        app, tg = _GatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, "a rumour"))
+        await _until(lambda: "job1" in app.done)   # waiting on job1
+        app.done["job1"].set()                     # finished server-side...
+        bot.dispatch(_msg(7, "kya hua?"))          # ...and the user asks again
+        await _until(lambda: any("This is false." in t for _, t in tg.sent))
+        app.release["job1"].set()                  # now the first wait wakes
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert sum("This is false." in t for _, t in tg.sent) == 1
+    assert len(app.submissions) == 1               # "kya hua?" bought nothing
+
+
+def test_one_failing_message_does_not_stop_the_others():
+    class Exploding(StubApp):
+        async def submit_json(self, endpoint, payload):
+            if payload["text"] == "boom":
+                raise RuntimeError("app down")
+            return await super().submit_json(endpoint, payload)
+
+    async def scenario():
+        app, tg = Exploding(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(1, "boom"))
+        bot.dispatch(_msg(2, "fine"))
+        await bot.drain()
+        return tg
+
+    tg = asyncio.run(scenario())
+    assert any(c == 1 and "gadbad" in t for c, t in tg.sent)
+    assert any(c == 2 and "This is false." in t for c, t in tg.sent)

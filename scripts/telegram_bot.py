@@ -493,9 +493,26 @@ class TelegramClient:
         return data.content, path
 
 
+async def _submit(kind: str, payload: str, app: AppClient,
+                  tg: TelegramClient) -> tuple[str | None, str]:
+    """Send one message's content to the API. -> (job_id, "") or (None, why)."""
+    if kind == "text":
+        return await app.submit_json("text", {"text": payload})
+    if kind == "link":
+        return await app.submit_json("link", {"url": payload})
+    content, path = await tg.file_bytes(payload)
+    name = os.path.basename(path) or "media.bin"
+    if kind == "image":
+        ext = os.path.splitext(name)[1].lower()
+        ctype = "image/png" if ext == ".png" else "image/jpeg"
+        return await app.submit_file("image", name, content, ctype)
+    return await app.submit_file("media", name, content, "audio/ogg")
+
+
 async def handle_message(
     msg: dict, app: AppClient, tg: TelegramClient,
     pending: dict[int, str] | None = None,
+    locks: dict[int, asyncio.Lock] | None = None,
 ) -> None:
     """One message, end to end. Every failure becomes words in the chat.
 
@@ -503,68 +520,118 @@ async def handle_message(
     poll window is RESUMED rather than resubmitted. Telling a user to
     "send it again" bought the whole check a second time — ASR, retrieval,
     adjudication — precisely for the slow, expensive jobs.
+
+    Messages now run concurrently (see Dispatcher), which opens a way to pay
+    twice: two messages from ONE chat arriving together would both see no
+    pending job and both submit. So everything that decides whether to spend
+    — reading `pending`, submitting, recording the job — runs under a
+    per-chat lock, and only the long wait happens outside it. A second
+    message then finds the first job and says it is still running.
     """
     chat_id = msg.get("chat", {}).get("id")
     if chat_id is None:
         return
     pending = pending if pending is not None else {}
+    locks = locks if locks is not None else {}
     kind, payload = classify_message(msg)
 
-    if kind == "help":
+    if kind == "help":           # instant — it never waits behind anyone's check
         await tg.send(chat_id, HELP)
         return
 
-    # A job already paid for comes first, whatever this message says.
-    stale_job = pending.get(chat_id)
-    if stale_job:
-        report = await app.wait_for_report(stale_job, attempts=2)
-        if report is not None:
-            pending.pop(chat_id, None)
-            await tg.send(chat_id, "Aapka pichla check pura hua:")
-            await tg.send(chat_id, format_reply(report))
-        else:
-            await tg.send(chat_id, "⏳ Aapka pichla check abhi bhi chal raha hai. "
-                                   "Wo pura hone ke baad naya bhejiye — "
-                                   "warna dobara paisa lagega.")
-        return
+    async with locks.setdefault(chat_id, asyncio.Lock()):
+        # A job already paid for comes first, whatever this message says.
+        stale_job = pending.get(chat_id)
+        if stale_job:
+            report = await app.wait_for_report(stale_job, attempts=2)
+            if report is None:
+                await tg.send(chat_id, "⏳ Aapka pichla check abhi bhi chal raha hai. "
+                                       "Wo pura hone ke baad naya bhejiye — "
+                                       "warna dobara paisa lagega.")
+            elif pending.get(chat_id) == stale_job:   # not delivered yet
+                pending.pop(chat_id, None)
+                await tg.send(chat_id, "Aapka pichla check pura hua:")
+                await tg.send(chat_id, format_reply(report))
+            return
 
-    if kind == "unsupported":
-        await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
-                               "text, link, voice note ya photo bhejiye.")
-        return
+        if kind == "unsupported":
+            await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
+                                   "text, link, voice note ya photo bhejiye.")
+            return
 
-    await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")
-    try:
-        if kind == "text":
-            job_id, err = await app.submit_json("text", {"text": payload})
-        elif kind == "link":
-            job_id, err = await app.submit_json("link", {"url": payload})
-        else:
-            content, path = await tg.file_bytes(payload)
-            name = os.path.basename(path) or "media.bin"
-            if kind == "image":
-                ext = os.path.splitext(name)[1].lower()
-                ctype = "image/png" if ext == ".png" else "image/jpeg"
-                job_id, err = await app.submit_file("image", name, content, ctype)
-            else:
-                job_id, err = await app.submit_file("media", name, content, "audio/ogg")
+        await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")
+        try:
+            job_id, err = await _submit(kind, payload, app, tg)
+        except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
+            print(f"[bot] submit failed: {type(exc).__name__}: {exc}")
+            await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
+            return
         if job_id is None:
             await tg.send(chat_id, f"😕 {_e(err)}")
             return
         # Remembered BEFORE the wait: if this process dies mid-poll, the job
         # is still recoverable on the next message instead of being re-bought.
         pending[chat_id] = job_id
+
+    # The long wait, outside the lock: this chat's next message must be able
+    # to say "still running" instead of queueing silently for minutes.
+    try:
         report = await app.wait_for_report(job_id)
         if report is None:
             await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai. Mujhe koi "
                                    "bhi message bhejiye aur main wahi report "
                                    "dikha dunga — dobara paisa nahi lagega.")
             return
+        if pending.get(chat_id) != job_id:
+            return        # a later message from this chat already delivered it
         pending.pop(chat_id, None)
         await tg.send(chat_id, format_reply(report))
     except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
         print(f"[bot] handling failed: {type(exc).__name__}: {exc}")
         await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
+
+
+class Dispatcher:
+    """Every incoming message on its own task, so no chat waits on another.
+
+    The bot used to handle messages one at a time: one person's 4-minute
+    reel check blocked every other chat, /help included. Serializing was also
+    how it kept spend in line — no longer needed, because the API's daily cap
+    is now persisted and atomic (2 a day, 2026-09-22), and the per-chat lock
+    in handle_message stops one chat paying twice.
+
+    `max_in_flight` bounds the tasks doing real work, so a flood of chats
+    cannot open unbounded connections; /help skips the bound entirely.
+    """
+
+    def __init__(self, app: AppClient, tg: TelegramClient, max_in_flight: int = 16):
+        self.app, self.tg = app, tg
+        self.pending: dict[int, str] = {}
+        self.locks: dict[int, asyncio.Lock] = {}
+        self._slots = asyncio.Semaphore(max_in_flight)
+        self._tasks: set[asyncio.Task] = set()
+
+    def dispatch(self, message: dict) -> None:
+        task = asyncio.create_task(self._run(message))
+        self._tasks.add(task)                    # keep a reference until done
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, message: dict) -> None:
+        try:
+            if classify_message(message)[0] == "help":
+                await handle_message(message, self.app, self.tg,
+                                     self.pending, self.locks)
+                return
+            async with self._slots:
+                await handle_message(message, self.app, self.tg,
+                                     self.pending, self.locks)
+        except Exception as exc:  # noqa: BLE001 — one message must not kill the bot
+            print(f"[bot] task failed: {type(exc).__name__}: {exc}")
+
+    async def drain(self) -> None:
+        """Wait for everything in flight (tests; a graceful shutdown)."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
 def _utf8_console() -> None:
@@ -627,7 +694,7 @@ async def main() -> None:
 
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0
-        pending: dict[int, str] = {}   # chat_id -> in-flight job_id
+        dispatcher = Dispatcher(app, tg)
         while True:
             try:
                 updates = await tg.get_updates(offset)
@@ -653,9 +720,10 @@ async def main() -> None:
             for update in updates:
                 message = update.get("message") or update.get("channel_post")
                 if message:
-                    # Sequential on purpose: one user at a time is the current
-                    # scale, and it keeps the spend serialized.
-                    await handle_message(message, app, tg, pending)
+                    # Concurrent: one chat's long check no longer blocks the
+                    # others. Spend stays bounded by the API's daily cap and
+                    # the per-chat lock (see Dispatcher / handle_message).
+                    dispatcher.dispatch(message)
 
 
 if __name__ == "__main__":
