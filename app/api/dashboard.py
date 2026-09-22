@@ -14,7 +14,14 @@ cloudflared tunnel connects from 127.0.0.1 but always adds X-Forwarded-For /
 CF-Connecting-IP (and uvicorn's default proxy handling rewrites the client to
 the visitor's IP anyway). Anything else gets a 404 — not a 403, which would
 announce that something is here.
+
+The Host header is checked too. Found by review, reproduced: DNS rebinding —
+a page the owner visits re-resolves its own name to 127.0.0.1, and its
+same-origin fetch then arrives from this machine with no proxy header. The
+connection cannot tell that apart; the Host header can, because the browser
+still sends the attacker's name.
 """
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,11 +39,17 @@ _PAGE = Path(__file__).resolve().parent / "dashboard.html"
 _LOCAL_HOSTS = {"127.0.0.1", "::1"}
 _PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip",
                   "cf-connecting-ip", "true-client-ip", "x-forwarded-host")
+# The names this machine is asked for by, with an optional port. Exact match:
+# anything a DNS name could be registered as must fail.
+_LOCAL_HOST_HEADER = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?",
+                                re.IGNORECASE)
 
 
 def _local_only(request: Request) -> None:
-    host = request.client.host if request.client else ""
-    if host not in _LOCAL_HOSTS or any(h in request.headers for h in _PROXY_HEADERS):
+    peer = request.client.host if request.client else ""
+    if (peer not in _LOCAL_HOSTS
+            or any(h in request.headers for h in _PROXY_HEADERS)
+            or not _LOCAL_HOST_HEADER.fullmatch(request.headers.get("host", ""))):
         raise HTTPException(404, "Not Found")
 
 

@@ -283,9 +283,12 @@ class SpendLedger:
         return [dict(r) for r in rows]
 
     def recent(self, limit: int) -> list[dict]:
+        """The latest rows, for the dashboard — WITHOUT job ids. A job id
+        opens /reports/{id}, the full message, to anyone holding it; the
+        dashboard never needed one (found by review)."""
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT job_id, finished_at, kind, status, tier, cached, usd, "
+                "SELECT finished_at, kind, status, tier, cached, usd, "
                 "web_searches, asr_seconds, models FROM spend_ledger "
                 "ORDER BY finished_at DESC LIMIT ?", (limit,),
             ).fetchall()

@@ -10,10 +10,12 @@ from app.models.answer import Answer, AnswerSection, JobStatus, ModelUsage, Repo
 
 @pytest.fixture()
 def local(client):
-    """The same app, but the request comes from this machine (127.0.0.1)."""
+    """The same app, requested the way the owner does: from this machine, at
+    the address the startup banner prints."""
     from app.main import app
 
-    with TestClient(app, client=("127.0.0.1", 50000)) as c:
+    with TestClient(app, base_url="http://127.0.0.1:8000",
+                    client=("127.0.0.1", 50000)) as c:
         yield c
 
 
@@ -59,6 +61,35 @@ def test_it_is_invisible_through_the_share_tunnel(local, header):
     headers = {header: "203.0.113.9"}
     assert local.get("/dashboard", headers=headers).status_code == 404
     assert local.get("/api/v1/admin/spend", headers=headers).status_code == 404
+
+
+@pytest.mark.parametrize("host", ["rebind.attacker.example:8000",
+                                  "rebind.attacker.example", "127.0.0.1.evil.example",
+                                  "localhost.evil.example:8000", "127.0.0.1:8000@evil"])
+def test_a_rebound_hostname_is_not_this_machine(local, host):
+    """Found by review, reproduced: DNS rebinding. A page the owner visits
+    re-resolves its own name to 127.0.0.1, so its fetch arrives from this
+    machine with no proxy header — and got the dashboard's data, which
+    listed job ids that open other people's messages. The browser still
+    sends the ATTACKER's name as Host; only a local name may pass."""
+    headers = {"Host": host}
+    assert local.get("/dashboard", headers=headers).status_code == 404
+    assert local.get("/api/v1/admin/spend", headers=headers).status_code == 404
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:8000", "localhost:8000", "LOCALHOST:8000",
+                                  "[::1]:8000", "127.0.0.1"])
+def test_the_owners_own_addresses_still_work(local, host):
+    assert local.get("/dashboard", headers={"Host": host}).status_code == 200
+
+
+def test_the_recent_list_carries_no_job_ids(local):
+    """A job id opens /reports/{id} — the full message — to anyone, through
+    the public tunnel too. The page never used them; they are not sent."""
+    _record(0.05)
+    body = local.get("/api/v1/admin/spend").json()
+    assert body["recent"], "the row should be listed"
+    assert all("job_id" not in row for row in body["recent"])
 
 
 def test_the_page_is_not_reachable_through_the_public_static_mount(client):
