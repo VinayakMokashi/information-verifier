@@ -369,10 +369,13 @@ def test_an_api_error_still_yields_whatever_already_streamed(no_factcheck, monke
 
 def test_a_model_that_says_nothing_is_not_an_answer(no_factcheck, monkeypatch):
     """No error, no prose — only a sentinel. Rendering that would show a
-    confidence badge over an empty box."""
+    confidence badge over an empty box. (A pass that writes nothing now
+    escalates, so the open web gets its turn before the check fails.)"""
     client = StubClient([
         (_final('<verdict confidence="90" trusted="yes"/>'),
          _deltas('<verdict confidence="90" trusted="yes"/>')),
+        (_final('<verdict confidence="20" trusted="no"/>'),
+         _deltas('<verdict confidence="20" trusted="no"/>')),
     ])
     monkeypatch.setattr(C, "async_client", client)
     with pytest.raises(C.CheckUnavailable):
@@ -574,6 +577,39 @@ def test_the_core_fallback_never_sends_an_empty_list_either(no_factcheck, monkey
             assert tool["allowed_domains"], "sent an empty whitelist"
     assert "blocked_domains" in client.requests[-1]["tools"][0]   # pass 2 ran
     assert answer.markdown.startswith("The wider web says")
+
+
+def test_a_pass_that_wrote_nothing_escalates_even_with_prior_factchecks(monkeypatch):
+    """Found by the review of the empty-whitelist guard, reproduced: a prior
+    Google fact-check makes `has_trusted` true, which suppressed escalation —
+    so when pass 1 produced NO prose (an outage, or nothing left to search),
+    the check failed with "couldn't be reached" and spent one of the day's
+    two slots, while the open-web pass could have answered it."""
+    import anthropic
+    import httpx
+
+    from app.models.answer import Source as FactCheckSource
+
+    async def prior(_q):
+        return [FactCheckSource(url="https://factly.in/prior", title="[Rated: False] x",
+                                publisher="Factly")]
+    monkeypatch.setattr(C, "search_factcheck", prior)
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    outage = anthropic.InternalServerError(
+        "Error code: 500 - overloaded",
+        response=httpx.Response(500, request=request), body=None)
+    client = _Scripted([outage], _final(
+        "The wider web says it is false. "
+        '<verdict confidence="60" trusted="no" used="example.com"/>',
+        results=[WEB_URL]))
+    answer, _ = _run(client, monkeypatch)
+
+    assert len(client.requests) == 2, "the open-web pass never ran"
+    assert answer.markdown.startswith("The wider web says")
+    # Not "fact-checked": pass 1 wrote nothing, so the prior fact-check it
+    # was handed cannot label an answer written by the open-web pass.
+    assert answer.tier == "web"
 
 
 def test_no_measured_blocked_domain_is_offered_to_search():

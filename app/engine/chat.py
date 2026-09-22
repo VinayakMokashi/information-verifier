@@ -505,14 +505,24 @@ async def answer(text: str, *, heard: str | None = None,
     # sentinel (model_says_trusted is None) is a parse failure, and a parse
     # failure must never buy a second pass.
     # Prior fact-checks were handed to pass 1, so pass 1's verdict governs them.
-    first_backing = first.model_says_trusted is not False and any(
-        s.tier == "trusted" for s in prior + first.sources)
+    # Pass 1 must have WRITTEN something for its evidence to label the answer:
+    # with a prior Google fact-check in hand, a pass 1 that produced no prose
+    # at all (an outage) still came out "fact-checked" over pass 2's words.
+    first_backing = (bool(first.markdown.strip())
+                     and first.model_says_trusted is not False
+                     and any(s.tier == "trusted" for s in prior + first.sources))
     has_trusted = any(s.tier == "trusted" for s in sources)
+    # A pass that wrote NO prose has not answered, whatever evidence exists:
+    # found by review, a prior Google fact-check made `has_trusted` true, so
+    # an outage in pass 1 ended as "couldn't be reached" — a failed check
+    # that still spent one of the day's two slots — while the open-web pass
+    # could have answered it.
     should_escalate = (
         settings.web_tier_enabled
         and not truncated
-        and (first.model_says_trusted is False or not has_trusted)
-        and first.model_says_trusted is not True
+        and (not first.markdown.strip()
+             or ((first.model_says_trusted is False or not has_trusted)
+                 and first.model_says_trusted is not True))
     )
 
     second: PassResult | None = None
