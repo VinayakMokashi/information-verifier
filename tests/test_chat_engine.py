@@ -531,3 +531,41 @@ def test_no_measured_blocked_domain_is_offered_to_search():
     # ...while staying trusted when cited.
     assert is_trusted_url("https://factcheck.afp.com/doc.afp.com.34XJ2L")
     assert is_trusted_url("https://apnews.com/article/fact-check-123")
+
+
+# -- measured on the first paid run (2026-09-22) ------------------------------
+
+def test_searching_is_announced_once_per_search_not_per_filter_step(no_factcheck, monkeypatch):
+    """One web search showed "Searching…" four times: the 20260209 tool
+    filters its results with code execution, and each step is its own
+    server_tool_use block."""
+    def tool_start(name):
+        return types.SimpleNamespace(
+            type="content_block_start",
+            content_block=types.SimpleNamespace(type="server_tool_use", name=name))
+
+    events = [tool_start("web_search"), tool_start("code_execution"),
+              tool_start("code_execution"), *_deltas("It is false.")]
+    client = StubClient([(_final('It is false. <verdict confidence="90" trusted="yes"/>',
+                                 citations=[_citation(TRUSTED_URL)]), events)])
+    _, emitted = _run(client, monkeypatch)
+    statuses = [d["text"] for k, d in emitted if k == "status"]
+    assert statuses.count("Searching trusted fact-checkers…") == 1
+    assert "Reading what the search found…" in statuses
+
+
+def test_the_language_rule_names_english_and_forbids_guessing_the_reader():
+    """An English claim came back in Hinglish: the rule's examples named
+    Hindi, Spanish and Hinglish — not English — beside an India-heavy
+    whitelist, and the model inferred its reader."""
+    from app.engine.chat_prompts import CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB
+
+    for prompt in (CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB):
+        assert "English in, English out" in prompt
+        assert "Never pick the language from who you think the reader is" in prompt
+
+
+def test_the_user_turn_ends_with_the_language_instruction():
+    """Repeated last, where it is read last."""
+    content = C._render_input("Drinking hot water kills the coronavirus", None, [])
+    assert content.rstrip().endswith("including English.")

@@ -6,8 +6,12 @@ definition differs between them and `tools` render FIRST in the cache prefix —
 they are two cache namespaces either way, so they may as well say different
 things.
 
-Lives beside prompts.py rather than in it: the old pipeline's stage prompts
-are still in use until the pivot lands, and `as_prompt_data` is shared.
+MEASURED 2026-09-22, first paid run: "Drinking hot water kills the
+coronavirus" — English — came back in Hinglish. The language rule's examples
+named Hindi, Spanish and Hinglish but not English, and with an India-heavy
+whitelist in the same prompt the model inferred its reader. English is now
+named explicitly, the rule says not to infer the reader, and the user turn
+repeats it last.
 """
 import hashlib
 
@@ -37,10 +41,13 @@ _SHARED_RULES = (
     "HOW TO ANSWER\n"
     "- Lead with the bottom line in ONE short sentence: what is true, false, "
     "misleading, or simply not checkable. Then explain why.\n"
-    "- Reply in the SAME language and script the message came in. Hindi in, "
-    "Hindi out; Spanish in, Spanish out; Hinglish in, Hinglish out. Do not "
-    "translate your reply into English, and do not answer in a language the "
-    "sender did not use.\n"
+    "- Reply in the SAME language and script as the text inside <message>. "
+    "English in, English out; Hindi in Devanagari in, Hindi in Devanagari "
+    "out; Hinglish (Hindi written in Latin letters) in, Hinglish out; "
+    "Spanish in, Spanish out. Never pick the language from who you think the "
+    "reader is: many people using this service are in India, and an English "
+    "message still gets an English reply. Quote a source in its own language "
+    "if you must, but write everything else in the sender's.\n"
     "- Write for a phone screen and a reader who may not have finished "
     "school. Short sentences, everyday words.\n"
     "- If the message carries several claims, deal with the important ones in "

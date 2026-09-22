@@ -208,8 +208,9 @@ def _render_input(text: str, heard: str | None, factchecks: list) -> str:
             "Treat them as strong evidence and say which publisher said what.)"
         )
     parts.append(
-        "Check the message above and answer the sender directly, in their "
-        "language."
+        "Check the message above and answer the sender directly. Write in the "
+        "language and script of the text inside <message> — whatever that is, "
+        "including English."
     )
     return "\n\n".join(parts)
 
@@ -256,9 +257,17 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                     if kind == "content_block_start":
                         block = getattr(event, "content_block", None)
                         if getattr(block, "type", "") == "server_tool_use":
-                            await emit("status", {
-                                "text": "Searching trusted fact-checkers…"
-                                if trusted else "Searching the wider web…"})
+                            # MEASURED: one search showed "Searching…" four
+                            # times. web_search_20260209 filters its results
+                            # with code execution, and those steps are
+                            # server_tool_use blocks too (unbilled — usage
+                            # counted web_search_requests: 1).
+                            if getattr(block, "name", "") == "web_search":
+                                text = ("Searching trusted fact-checkers…"
+                                        if trusted else "Searching the wider web…")
+                            else:
+                                text = "Reading what the search found…"
+                            await emit("status", {"text": text})
                     elif kind == "content_block_delta":
                         delta = getattr(event, "delta", None)
                         if getattr(delta, "type", "") == "text_delta":
