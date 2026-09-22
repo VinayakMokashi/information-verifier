@@ -141,7 +141,12 @@ def test_the_model_cannot_promote_its_own_answer(no_factcheck, monkeypatch):
     assert [s.tier for s in answer.sources] == ["web"]
 
 
-def test_a_trusted_page_found_during_the_web_pass_is_still_trusted(no_factcheck, monkeypatch):
+def test_the_open_web_pass_never_labels_an_answer_fact_checked(no_factcheck, monkeypatch):
+    """This asserted the opposite until a review of the first fix: pass 2 is
+    TOLD to say that no vetted fact-checker or official body covered the
+    claim (CHAT_SYSTEM_WEB), so a "Fact-checkers" label over its prose
+    contradicts the answer it labels — the 2026-09-22 failure, recurring.
+    The trusted page it found is still shown, as a trusted source."""
     client = StubClient([
         (_final("Nothing found. " + SENTINEL_NO, searches=1),
          _deltas("Nothing found. " + SENTINEL_NO)),
@@ -150,7 +155,30 @@ def test_a_trusted_page_found_during_the_web_pass_is_still_trusted(no_factcheck,
          _deltas("The wider web says X. " + SENTINEL_YES)),
     ])
     answer, _ = _run(client, monkeypatch)
-    assert answer.tier == "trusted"
+    assert answer.tier == "web"
+    assert [s.tier for s in answer.sources] == ["trusted"]
+
+
+def test_a_web_pass_cannot_relabel_what_pass_one_disowned(no_factcheck, monkeypatch):
+    """Found by review of the first fix, reproduced: pass 1 found a BOOM page
+    about a DIFFERENT hoax and said trusted="no"; pass 2 named that same URL
+    in its used=, and the answer came out "Fact-checkers" at 90% — above the
+    75 cap, cached for a week — under a heading reading "No fact-checker has
+    covered this". Naming a page as relied on is not evidence that the page
+    addressed the claim, and it cannot overturn pass 1's own verdict."""
+    p1 = 'Not covered here. <verdict confidence="40" trusted="no" used=""/>'
+    p2 = ('No vetted fact-checker covered this. A Times of India report says '
+          'the fare is unchanged; BOOM debunked a different metro hoax in 2023. '
+          '<verdict confidence="90" trusted="yes" '
+          'used="timesofindia.indiatimes.com boomlive.in"/>')
+    client = StubClient([
+        (_final(p1, results=[BOOM_RELATED], searches=1), _deltas(p1)),
+        (_final(p2, results=[TOI, BOOM_RELATED], searches=1), _deltas(p2)),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "web"
+    assert answer.confidence == 75
+    assert sorted(s.tier for s in answer.sources) == ["trusted", "web"]
 
 
 # -- when a second paid pass fires --------------------------------------------
@@ -715,13 +743,30 @@ def test_a_web_pass_that_names_nothing_cannot_raise_the_label(no_factcheck, monk
     assert answer.confidence == 75
 
 
-def test_a_web_pass_that_names_a_trusted_source_is_trusted(no_factcheck, monkeypatch):
-    """The positive case still works: the answer says it rests on WHO, and
-    the API really returned a WHO page."""
+def test_even_a_web_pass_that_names_a_trusted_source_stays_general_web(
+        no_factcheck, monkeypatch):
+    """It names who.int and the API really returned a WHO page — and the
+    label still says general web, because pass 2's own prose says no vetted
+    source covered the claim. The chip shows WHO as trusted; the number is
+    capped. Under-claiming is the safe direction (invariant 2)."""
     client = _web_pass_after_nothing_trusted(used="who.int")
     answer, _ = _run(client, monkeypatch)
-    assert answer.tier == "trusted"
-    assert answer.confidence == 90
+    assert answer.tier == "web"
+    assert answer.confidence == 75
+    assert any(s.tier == "trusted" for s in answer.sources)
+
+
+def test_a_used_public_suffix_cannot_borrow_a_trusted_tier(no_factcheck, monkeypatch):
+    """Found by review of the first fix: used="gov.in" matched an unrelated
+    pib.gov.in result (any dotted token was accepted as a domain), and that
+    lifted the label. Narrowing by a broad suffix is the model's business;
+    the LABEL never follows from it."""
+    client = _web_pass_after_nothing_trusted(
+        used="gov.in", results=("https://www.mohfw.gov.in/advisory",
+                                "https://pib.gov.in/PressRelease.aspx?PRID=1"))
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "web"
+    assert answer.confidence == 75
 
 
 def test_a_used_list_of_names_not_domains_keeps_the_receipts(no_factcheck, monkeypatch):

@@ -68,10 +68,13 @@ limiter are both in-memory.
    heading saying none had covered it. Its `used=` list narrows the sources to
    what the answer rests on and can never add one. After the fact a label only
    goes down: relabelling on serve re-tiers each source, but never promotes a
-   stored answer over prose that says no fact-checker covered it. And KEPT is
-   not RELIED ON: an open-web answer is "fact-checked" only if it rests on a
-   trusted page — a citation, or a domain its `used=` names (found by review:
-   an unrelated who.int result labelled a Times of India answer at 90%).
+   stored answer over prose that says no fact-checker covered it. **Only the
+   whitelist pass can earn the label.** Pass 2 is *told* to say that no vetted
+   source covered the claim, so nothing it finds may relabel the answer — a
+   trusted page it turns up is shown as trusted, and the answer stays "general
+   web" under its 75 cap. Measured twice: an unrelated who.int result labelled
+   a Times of India answer at 90%, and then — after that fix — a BOOM page
+   pass 1 had explicitly disowned did the same.
 2. **The engine may say it could not verify.** Tier `none` is a real answer.
    Never force a decisive-looking call out of nothing.
 3. **Prose is never a receipt.** The model can write a convincing fake URL.

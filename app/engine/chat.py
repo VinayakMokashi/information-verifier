@@ -17,8 +17,10 @@ answer. But a model that found trusted pages about a DIFFERENT claim and says
 so (trusted="no") does lower the answer's label — measured on the second paid
 run, where BOOM pages about another hoax labelled a Nagpur Metro answer
 "Fact-checkers and official sources" beneath a section headed "no
-fact-checker has covered this". Each pass's own verdict governs its own
-sources, so a trusted page found during pass 2 still counts.
+fact-checker has covered this". Only pass 1 can earn that label: pass 2 is
+instructed to say that no vetted source covered the claim, so nothing it
+finds may relabel the answer — a trusted page it turns up is shown as
+trusted, and the answer itself stays "general web".
 
 **The source list is what the answer rests on.** web_search_20260209 returns
 no citations (it filters results through code execution), so the model names
@@ -94,26 +96,6 @@ class PassResult:
     truncated: bool = False
     error: str | None = None       # for the server log only, never the reader
     used: list[str] | None = None  # domains the answer rests on; None = unsaid
-    # URLs there is EVIDENCE the answer rests on: a citation the API returned,
-    # or a result on a domain the sentinel's used= named. What a pass merely
-    # KEPT is not enough — see backs_trusted.
-    relied_on: set[str] = field(default_factory=set)
-
-    @property
-    def backs_trusted(self) -> bool:
-        """Can this OPEN-WEB pass lift the answer to a "fact-checked" label?
-
-        Only if the answer demonstrably rests on a trusted page. Keeping one
-        is not enough — found by review: pass 2's trusted="yes" means "some
-        source addressed it" (any web page), and a used= that matched nothing
-        falls back to keeping every result, so an unrelated who.int page
-        labelled a Times of India answer "Fact-checkers" at 90%. The model
-        can still lower the label, never raise it; raising needs a trusted
-        URL the API returned AND evidence the answer leans on it.
-        """
-        return (self.model_says_trusted is not False
-                and any(s.tier == "trusted" and s.url in self.relied_on
-                        for s in self.sources))
 
 
 @dataclass
@@ -169,16 +151,14 @@ def _publisher_of(url: str) -> str:
     return _host(url)
 
 
-def _collect_sources(message) -> tuple[list[Source], set[str]]:
+def _collect_sources(message) -> list[Source]:
     """Sources from the API's own structures — citations first, then results.
 
-    -> (sources, the URLs that came back as CITATIONS). Citations carry the
-    sentence the model actually leaned on, so they are evidence of what
-    informed the answer; a raw result is only something it saw. Both are
-    read because a model can search without citing.
+    Citations carry the sentence the model actually leaned on, so they are
+    better evidence of what informed the answer than the raw result list.
+    Both are read because a model can search without citing.
     """
     found: dict[str, Source] = {}
-    cited_urls: set[str] = set()
 
     def add(url: str, title: str, cited: str = "") -> None:
         if not url or not isinstance(url, str):
@@ -195,11 +175,9 @@ def _collect_sources(message) -> tuple[list[Source], set[str]]:
     for block in getattr(message, "content", None) or []:
         if getattr(block, "type", None) == "text":
             for citation in getattr(block, "citations", None) or []:
-                url = getattr(citation, "url", "")
-                add(url, getattr(citation, "title", "") or "",
+                add(getattr(citation, "url", ""),
+                    getattr(citation, "title", "") or "",
                     getattr(citation, "cited_text", "") or "")
-                if url and isinstance(url, str):
-                    cited_urls.add(url)
         elif getattr(block, "type", None) == "web_search_tool_result":
             content = getattr(block, "content", None)
             # A search ERROR is a single object, not a list — the shape that
@@ -213,7 +191,7 @@ def _collect_sources(message) -> tuple[list[Source], set[str]]:
                 # indistinguishable from "the fact-checkers had nothing".
                 print(f"[chat] web search returned an error: "
                       f"{getattr(content, 'error_code', content)}")
-    return list(found.values()), cited_urls
+    return list(found.values())
 
 
 def _searches_used(message) -> int:
@@ -404,9 +382,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         # report bills $0.00 while real money leaves.
         note_llm(settings.chat_model, getattr(final, "usage", None))
 
-        found, cited = _collect_sources(final)
-        result.sources.extend(found)
-        result.relied_on |= cited
+        result.sources.extend(_collect_sources(final))
         remaining -= _searches_used(final)
 
         stop = getattr(final, "stop_reason", None)
@@ -441,7 +417,6 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
             seen.add(source.url)
             unique.append(source)
     result.sources = _keep_used(unique, result.used)
-    result.relied_on |= {s.url for s in unique if _names(result.used, s.url)}
     return result
 
 
@@ -566,13 +541,23 @@ async def answer(text: str, *, heard: str | None = None,
     for source in unique_sources:
         await emit("source", source.model_dump())
 
-    # "General web" must mean a general-web page is actually among what the
-    # answer kept. MEASURED in the Sonnet-vs-Opus A/B: pass 1 disowned its
-    # fact-checker results, pass 2 kept nothing, and the answer was labelled
-    # "General web only" over a list made entirely of fact-checkers.
-    if first_backing or (second is not None and second.backs_trusted):
+    # Only the WHITELIST pass can earn a "fact-checked" label. Pass 2 is told
+    # to say that no vetted fact-checker or official body covered the claim
+    # (CHAT_SYSTEM_WEB), so a "Fact-checkers" label over its prose
+    # contradicts the answer it labels — measured twice: first from raw
+    # results it merely kept, then (after that fix) from a page pass 1 had
+    # explicitly disowned, at 90% and cached for a week. A trusted page found
+    # out here is still SHOWN as trusted; it just cannot relabel the answer.
+    #
+    # The label names the tier of evidence that ANSWERED, not the domains it
+    # happened to return. "General web" must still rest on something: MEASURED
+    # in the Sonnet-vs-Opus A/B, pass 1 disowned its fact-checker results,
+    # pass 2 kept nothing, and the answer was labelled "General web only" over
+    # a list made entirely of fact-checkers — resting on nothing at all.
+    if first_backing:
         tier: Tier = "trusted"
-    elif any(s.tier == "web" for s in unique_sources):
+    elif (second is not None and second.sources) or any(
+            s.tier == "web" for s in unique_sources):
         tier = "web"
     else:
         tier = "none"
