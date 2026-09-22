@@ -392,6 +392,12 @@ def relabel_sources(answer: Answer) -> Answer:
     Dropping a domain from TRUSTED_DOMAINS has to reach history too, or
     curating the list is theatre. Returns the same object when nothing
     changed, so the common path allocates nothing.
+
+    The ANSWER's label only ever goes down here. A stored "general web"
+    answer may be one whose model said no fact-checker addressed the claim,
+    and its prose says so; whitelisting a domain afterwards must not promote
+    the label over words that contradict it. Each source chip is still
+    re-tiered both ways — that is a fact about the domain, not a judgment.
     """
     if not answer.sources:
         return answer
@@ -402,8 +408,10 @@ def relabel_sources(answer: Answer) -> Answer:
     ]
     if all(new is old for new, old in zip(fixed, answer.sources)):
         return answer
-    tier = ("trusted" if any(s.tier == "trusted" for s in fixed)
-            else "web" if fixed else "none")
+    computed = ("trusted" if any(s.tier == "trusted" for s in fixed)
+                else "web" if fixed else "none")
+    rank = {"none": 0, "web": 1, "trusted": 2}
+    tier = min(answer.tier, computed, key=rank.__getitem__)
     return answer.model_copy(update={"sources": fixed, "tier": tier})
 
 

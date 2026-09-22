@@ -3,17 +3,27 @@
 Replaces the six-stage pipeline. The design points that matter:
 
 **Whitelist first, then the open web.** Pass 1 searches only SEARCH_DOMAINS —
-the Indian fact-checkers this service trusts. If they had nothing, pass 2
-searches the wider web and its prose is labelled as such. `allowed_domains`
-and `blocked_domains` are mutually exclusive on one web_search tool, so this
-is genuinely two requests; and since `tools` render first in the cache prefix,
-a continuation would share no cache with pass 1 anyway.
+the fact-checkers, health and science bodies and governments this service
+vouches for. If they had nothing, pass 2 searches the wider web and its prose
+is labelled as such. `allowed_domains` and `blocked_domains` are mutually
+exclusive on one web_search tool, so this is genuinely two requests; and since
+`tools` render first in the cache prefix, a continuation would share no cache
+with pass 1 anyway.
 
-**Tier is computed, never claimed.** The model's `trusted=` flag can only
-TRIGGER a wider search — the label on every source comes from
-`trusted_domain_of()` over the URLs the API itself returned. So a model that
-says "I found AltNews" while citing a blog cannot promote its own answer, and
-a genuinely trusted page found during pass 2 is still labelled trusted.
+**The label can be lowered by the model, never raised.** Every source's tier
+comes from `trusted_domain_of()` over the URLs the API itself returned, so a
+model that says "I found AltNews" while citing a blog cannot promote its own
+answer. But a model that found trusted pages about a DIFFERENT claim and says
+so (trusted="no") does lower the answer's label — measured on the second paid
+run, where BOOM pages about another hoax labelled a Nagpur Metro answer
+"Fact-checkers and official sources" beneath a section headed "no
+fact-checker has covered this". Each pass's own verdict governs its own
+sources, so a trusted page found during pass 2 still counts.
+
+**The source list is what the answer rests on.** web_search_20260209 returns
+no citations (it filters results through code execution), so the model names
+its domains in the sentinel's `used=` and the raw results are narrowed to
+them — see `_keep_used`. Narrowed only: it can never add a source.
 
 **A parse failure never escalates spend.** No sentinel means no confidence and
 no second pass: the failure mode of a malformed marker must be "answer with
@@ -82,6 +92,19 @@ class PassResult:
     model_says_trusted: bool | None = None
     truncated: bool = False
     error: str | None = None       # for the server log only, never the reader
+    used: list[str] | None = None  # domains the answer rests on; None = unsaid
+
+    @property
+    def backs_trusted(self) -> bool:
+        """Does this pass support a "fact-checked" label?
+
+        A trusted source must be among what it KEPT, and the model must not
+        have said that nothing trusted addressed the claim. The model can
+        lower the label this way but never raise it — raising still needs a
+        trusted URL the API itself returned.
+        """
+        return (self.model_says_trusted is not False
+                and any(s.tier == "trusted" for s in self.sources))
 
 
 @dataclass
@@ -330,6 +353,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         result.markdown += tail
         await emit("text", {"text": tail, "tier": section_tier})
     result.confidence, result.model_says_trusted = marker.parse()
+    result.used = marker.used()
     result.markdown = result.markdown.strip()
 
     # De-duplicate while preserving order.
@@ -339,8 +363,46 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         if source.url not in seen:
             seen.add(source.url)
             unique.append(source)
-    result.sources = unique
+    result.sources = _keep_used(unique, result.used)
     return result
+
+
+def _host(url: str) -> str:
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(url).hostname or "").removeprefix("www.")
+    except ValueError:
+        return ""
+
+
+def _keep_used(sources: list[Source], used: list[str] | None) -> list[Source]:
+    """Narrow a pass's search results to the domains its answer rests on.
+
+    MEASURED 2026-09-22: zero citations came back in either paid run —
+    web_search_20260209 filters results through code execution, so nothing
+    returns as a citation — and every raw result was shown, Manchester City
+    Council included, for a claim about Nagpur Metro.
+
+      None  -> no list given: keep everything (the old behaviour).
+      []    -> the model says it relied on nothing: keep nothing.
+      [...] -> keep results on those domains (or their subdomains).
+
+    It can only NARROW: a named domain that no search returned matches
+    nothing. And a list that matches nothing at all keeps everything — a typo
+    must not strip an answer of its receipts.
+    """
+    if used is None:
+        return sources
+    if not used:
+        return []
+    kept = [s for s in sources
+            if any(_host(s.url) == d or _host(s.url).endswith("." + d) for d in used)]
+    if sources and not kept:
+        print(f"[chat] the answer's used={used} matched none of "
+              f"{len(sources)} result(s); keeping them all")
+        return sources
+    return kept
 
 
 async def answer(text: str, *, heard: str | None = None,
@@ -383,6 +445,9 @@ async def answer(text: str, *, heard: str | None = None,
     # were silent, or none of the evidence it produced was trusted. A missing
     # sentinel (model_says_trusted is None) is a parse failure, and a parse
     # failure must never buy a second pass.
+    # Prior fact-checks were handed to pass 1, so pass 1's verdict governs them.
+    first_backing = first.model_says_trusted is not False and any(
+        s.tier == "trusted" for s in prior + first.sources)
     has_trusted = any(s.tier == "trusted" for s in sources)
     should_escalate = (
         settings.web_tier_enabled
@@ -417,7 +482,7 @@ async def answer(text: str, *, heard: str | None = None,
     for source in unique_sources:
         await emit("source", source.model_dump())
 
-    if any(s.tier == "trusted" for s in unique_sources):
+    if first_backing or (second is not None and second.backs_trusted):
         tier: Tier = "trusted"
     elif unique_sources:
         tier = "web"

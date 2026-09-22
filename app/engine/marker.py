@@ -2,7 +2,15 @@
 
 The model ends its answer with a machine-readable trailer:
 
-    <verdict confidence="82" trusted="yes"/>
+    <verdict confidence="82" trusted="yes" used="boomlive.in who.int"/>
+
+`used` (optional, added 2026-09-22) names the domains the answer actually
+rests on. The first paid runs returned ZERO citations — web_search_20260209
+filters results through code execution, and nothing comes back as a citation —
+so the source list was every raw search result, Manchester City Council
+included, for a claim about Nagpur Metro. `used` lets the model NARROW that
+list to what it relied on. It can never extend it: a domain it names that no
+search returned simply matches nothing.
 
 A TRAILER, not a header, because a header cannot survive streaming. Claude
 narrates before it searches ("Let me check the trusted fact-checkers.") — one
@@ -26,13 +34,19 @@ import re
 # markdown paragraph is one line, so a line-buffered filter would visibly
 # stutter.
 _OPEN = "<verdict"
-_MAX_HOLD = 80          # comfortably longer than the sentinel itself
+# Comfortably longer than the longest sentinel, `used` list included. Only a
+# run that begins `<verdict` is ever held this long, and a real one is always
+# the last thing in the answer.
+_MAX_USED_CHARS = 600
+_MAX_HOLD = 700
 
 _SENTINEL_RE = re.compile(
     r"<verdict\s+confidence=\"(?P<confidence>\d{1,3})\"\s+"
-    r"trusted=\"(?P<trusted>yes|no)\"\s*/?>",
+    r"trusted=\"(?P<trusted>yes|no)\""
+    r"(?:\s+used=\"(?P<used>[^\"<>]{0,%d})\")?\s*/?>" % _MAX_USED_CHARS,
     re.IGNORECASE,
 )
+_DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
 
 def _could_still_become_sentinel(tail: str) -> bool:
@@ -106,6 +120,31 @@ class MarkerFilter:
         # Round to 5: a model's "82%" is false precision, and displaying it
         # to the digit implies a calibration nobody has measured.
         return round(confidence / 5) * 5, last.group("trusted").lower() == "yes"
+
+    def used(self) -> list[str] | None:
+        """Domains from the LAST sentinel's `used`, or None if not given."""
+        matches = list(_SENTINEL_RE.finditer(self._full))
+        if not matches:
+            return None
+        return parse_used(matches[-1].group("used"))
+
+
+def parse_used(raw: str | None) -> list[str] | None:
+    """The `used` attribute -> normalized domains, or None when it is absent.
+
+    Forgiving about what the model writes (commas, URLs, `www.`, a path) and
+    strict about what comes out: plain hostnames only. None means "no list was
+    given" and must leave the sources alone; [] means "relied on nothing".
+    """
+    if raw is None:
+        return None
+    domains: list[str] = []
+    for token in re.split(r"[\s,;]+", raw.strip().lower()):
+        token = re.sub(r"^[a-z]+://", "", token).split("/")[0].split("?")[0]
+        token = token.removeprefix("www.").strip(".")
+        if token and _DOMAIN_RE.match(token) and token not in domains:
+            domains.append(token)
+    return domains
 
 
 def strip_sentinels(text: str) -> str:

@@ -86,3 +86,27 @@ def test_sequential_calls_still_count_separately():
 
     asyncio.run(main())
     assert meter.snapshot().models["m"].calls == 2
+
+
+def test_whitelisting_a_domain_later_never_promotes_a_stored_answer(monkeypatch):
+    """A stored "web" answer can be one whose model said no fact-checker
+    addressed the claim — and its prose says so. Promoting the label after
+    the fact would put "Fact-checkers and official sources" over words that
+    contradict it. The chip is re-tiered (a fact about the domain); the
+    answer's label is not raised."""
+    from datetime import datetime, timezone
+
+    import app.trusted_sources as TS
+    from app.api.routes import relabel_sources
+    from app.models.answer import Answer, JobStatus, Source
+
+    stored = Answer(
+        job_id="j", status=JobStatus.COMPLETE,
+        created_at=datetime.now(timezone.utc), tier="web",
+        sources=[Source(url="https://newly-vetted.example/x", tier="web")],
+    )
+    monkeypatch.setattr(TS, "TRUSTED_DOMAINS",
+                        [*TS.TRUSTED_DOMAINS, "newly-vetted.example"])
+    served = relabel_sources(stored)
+    assert served.sources[0].tier == "trusted"      # the domain fact moves
+    assert served.tier == "web"                     # the judgment does not

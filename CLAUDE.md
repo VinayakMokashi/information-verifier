@@ -52,12 +52,15 @@ limiter are both in-memory.
 
 ## Invariants — do not break these without a decision recorded in §7
 
-1. **Tier is evidence, not assertion.** The label comes from
-   `trusted_domain_of()` over the URLs the API actually returned, recomputed on
-   every serve path including cache hits. What the model *says* about its own
-   searching can only *trigger* a wider search — it can never set the label.
-   `trusted_domain_of()` fails closed on anything a browser might parse
-   differently than Python.
+1. **Tier is evidence, not assertion — the model can lower it, never raise
+   it.** A "fact-checked" label needs a trusted URL the API itself returned
+   (`trusted_domain_of()`, fail-closed on anything a browser might parse
+   differently). The model's `trusted="no"` DOES lower it — measured: BOOM pages
+   about a *different* hoax labelled a Nagpur answer "fact-checkers" under a
+   heading saying none had covered it. Its `used=` list narrows the sources to
+   what the answer rests on and can never add one. After the fact a label only
+   goes down: relabelling on serve re-tiers each source, but never promotes a
+   stored answer over prose that says no fact-checker covered it.
 2. **The engine may say it could not verify.** Tier `none` is a real answer.
    Never force a decisive-looking call out of nothing.
 3. **Prose is never a receipt.** The model can write a convincing fake URL.

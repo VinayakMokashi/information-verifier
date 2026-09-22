@@ -569,3 +569,98 @@ def test_the_user_turn_ends_with_the_language_instruction():
     """Repeated last, where it is read last."""
     content = C._render_input("Drinking hot water kills the coronavirus", None, [])
     assert content.rstrip().endswith("including English.")
+
+
+# -- the label and the source list, from the second paid run ------------------
+
+MANCHESTER = "https://www.manchester.gov.uk/over-60s"      # trusted (gov.uk)
+BOOM_RELATED = "https://www.boomlive.in/other-hoax"          # trusted
+
+
+def _with_results(text, results, used=None, trusted="no", conf=70):
+    tail = f'<verdict confidence="{conf}" trusted="{trusted}"'
+    tail += f' used="{used}"/>' if used is not None else "/>"
+    return (_final(f"{text} {tail}", results=results, searches=1),
+            _deltas(f"{text} {tail}"))
+
+
+def test_a_pass_that_says_nothing_trusted_addressed_it_cannot_label_the_answer_trusted(
+        no_factcheck, monkeypatch):
+    """MEASURED: a fresh Nagpur Metro rumour. Pass 1 found BOOM and Factly
+    pages about a DIFFERENT hoax, said trusted="no", and escalated. The footer
+    then read "Based on: Fact-checkers and official sources" directly under a
+    section headed "NO FACT-CHECKER HAS COVERED THIS". The model may LOWER the
+    label; it still can never raise it."""
+    client = StubClient([
+        _with_results("Not covered here.", [BOOM_RELATED], trusted="no"),
+        _with_results("The web says it is false.", [WEB_URL], trusted="no"),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert answer.tier == "web"
+    # The related fact-check is still shown — as what it is.
+    assert [s.tier for s in answer.sources] == ["trusted", "web"]
+
+
+def test_used_narrows_the_sources_to_what_the_answer_rests_on(no_factcheck, monkeypatch):
+    """MEASURED: zero citations came back in either paid run
+    (web_search_20260209 filters results through code execution), so every
+    raw result was shown — Manchester City Council, for a claim about
+    Nagpur."""
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL, MANCHESTER], used="altnews.in",
+        trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.url for s in answer.sources] == [TRUSTED_URL]
+    assert answer.tier == "trusted"
+
+
+def test_used_can_never_add_a_source(no_factcheck, monkeypatch):
+    """A domain the model names that no search returned matches nothing."""
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL], used="altnews.in who.int",
+        trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.url for s in answer.sources] == [TRUSTED_URL]
+
+
+def test_no_used_list_keeps_every_result(no_factcheck, monkeypatch):
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL, MANCHESTER], trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert len(answer.sources) == 2
+
+
+def test_an_empty_used_list_means_the_answer_rests_on_nothing(no_factcheck, monkeypatch):
+    client = StubClient([
+        _with_results("Nothing relevant.", [MANCHESTER], used="", trusted="no"),
+        _with_results("Nothing on the web either.", [WEB_URL], used="",
+                      trusted="no", conf=40),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert answer.sources == []
+    assert answer.tier == "none"
+
+
+def test_a_used_list_that_matches_nothing_keeps_everything(no_factcheck, monkeypatch, capsys):
+    """A typo'd list must not strip an answer of its receipts."""
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL], used="altnewz.in", trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.url for s in answer.sources] == [TRUSTED_URL]
+    assert "matched none" in capsys.readouterr().out
+
+
+def test_prior_factchecks_are_never_filtered_by_used(monkeypatch):
+    """Google matched them to the claim; they are a human verdict, not a
+    search result the model skimmed past."""
+    from app.models.answer import Source as FactCheckSource
+
+    async def prior(_q):
+        return [FactCheckSource(url="https://factly.in/prior", title="[Rated: False] x",
+                                publisher="Factly")]
+    monkeypatch.setattr(C, "search_factcheck", prior)
+    client = StubClient([_with_results(
+        "It is false.", [TRUSTED_URL, MANCHESTER], used="altnews.in",
+        trusted="yes", conf=90)])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.url for s in answer.sources] == ["https://factly.in/prior", TRUSTED_URL]

@@ -20,13 +20,17 @@ from app.trusted_sources import FACTCHECK_ONLY_DOMAINS, SEARCH_DOMAINS
 
 _SENTINEL_RULE = (
     "END your reply with exactly this line and nothing after it:\n"
-    '<verdict confidence="NN" trusted="yes|no"/>\n'
+    '<verdict confidence="NN" trusted="yes|no" used="domain domain"/>\n'
     "  - confidence: 0-100, the probability that your bottom-line sentence is "
     "correct given the evidence you actually found. Use 85 or above ONLY when "
     "a source you found directly addressed this specific claim. Use 60 or "
     "below when nothing you found addressed it directly.\n"
     '  - trusted: "yes" if a source you found directly addressed this claim, '
     '"no" if none did — even if you found related pages.\n'
+    "  - used: the website domains of the search results your answer actually "
+    "relies on, separated by spaces — for example: boomlive.in who.int. Only "
+    "domains that appeared in your search results; not every result you saw, "
+    "just the ones your reply draws on. Write used=\"\" if it relies on none.\n"
     "This line is stripped before the reader sees your reply. Never mention "
     "it, and never write it anywhere but the very end."
 )
