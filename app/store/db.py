@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     job_id              TEXT PRIMARY KEY,
     day                 TEXT NOT NULL,   -- the operator's day, as the cap counts
     finished_at         TEXT NOT NULL,   -- UTC ISO
-    kind                TEXT NOT NULL,   -- text | image | media | link | ab-test
+    kind                TEXT NOT NULL,   -- text | image | media | link |
+                                         -- unknown (a backfill could not
+                                         -- tell) | ab-test | probe
     status              TEXT NOT NULL,   -- COMPLETE | FAILED
     tier                TEXT NOT NULL,
     cached              INTEGER NOT NULL,

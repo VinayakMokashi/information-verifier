@@ -12,6 +12,7 @@ AnswerCache below for why a TTL is now mandatory rather than optional.
 import asyncio
 import hashlib
 import json
+import re
 import threading
 import time
 import unicodedata
@@ -179,6 +180,9 @@ class TranscriptCache:
             return cur.rowcount or 0
 
 
+_LOOKS_LIKE_A_BARE_URL = re.compile(r"https?://\S+$", re.IGNORECASE)
+
+
 def _provable_kind(answer) -> str:
     """What kind of check a stored answer was, as far as the row can PROVE.
 
@@ -195,9 +199,13 @@ def _provable_kind(answer) -> str:
         return "unknown"
     if not answer.input_text:
         return "media"
-    if answer.input_text.startswith("https://") and not any(
-            c.isspace() for c in answer.input_text):
-        return "link"
+    if _LOOKS_LIKE_A_BARE_URL.match(answer.input_text.strip()):
+        # A link check that failed before any text was gathered keeps its
+        # URL — and so does a text check on a pasted news URL, which is not
+        # a platform link and goes to /verify/text. The row cannot tell them
+        # apart (found by review; the old guess called both "link", and a
+        # phone's auto-capitalised "Https://" made a link look like text).
+        return "unknown"
     return "text"
 
 
@@ -210,7 +218,10 @@ class SpendLedger:
     swallow: losing a ledger row must never lose the answer it describes.
     """
 
-    def record(self, answer, kind: str) -> None:
+    def record(self, answer, kind: str, *, overwrite: bool = True) -> None:
+        """Write one check's costs. `overwrite=False` for the backfill: it
+        guesses the kind, and a live record — which KNOWS it — can land
+        between the backfill's SELECT and its write (found by review)."""
         usage = answer.usage
         if usage is None:
             return
@@ -219,9 +230,10 @@ class SpendLedger:
         finished = answer.completed_at or datetime.now(timezone.utc)
         models = usage.models or {}
         llm_usd, search_usd, asr_usd = split_of(usage)
+        verb = "INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE"
         with get_conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO spend_ledger (job_id, day, finished_at, "
+                verb + " INTO spend_ledger (job_id, day, finished_at, "
                 "kind, status, tier, cached, usd, llm_usd, search_usd, asr_usd, "
                 "input_tokens, output_tokens, cache_write_tokens, "
                 "cache_read_tokens, web_searches, asr_seconds, models) "
@@ -260,7 +272,7 @@ class SpendLedger:
                 continue
             if answer.usage is None:
                 continue
-            self.record(answer, _provable_kind(answer))
+            self.record(answer, _provable_kind(answer), overwrite=False)
             added += 1
         return added
 

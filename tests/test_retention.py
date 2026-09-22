@@ -108,7 +108,12 @@ def test_checks_that_predate_the_ledger_are_backfilled(repo):
 
 @pytest.mark.parametrize("input_text, source_text, kind", [
     ("Drinking hot water kills the coronavirus", None, "text"),
-    ("https://www.instagram.com/reel/DbsVyqLpbRa/", None, "link"),  # its fetch failed
+    # A failed link check keeps its URL — and so does a text check on a
+    # pasted news URL, which is not a platform link and goes to /verify/text.
+    # The row cannot tell them apart (found by review of the first guess).
+    ("https://www.instagram.com/reel/DbsVyqLpbRa/", None, "unknown"),
+    ("https://www.bbc.com/news/world-asia-india-123", None, "unknown"),
+    ("Https://www.instagram.com/reel/DbsVyqLpbRa/", None, "unknown"),
     ("", None, "media"),                               # its transcription failed
     # Finished with machine-read text: a link, a screenshot or a voice note —
     # the stored row cannot say which, so the ledger does not pretend to.
@@ -126,6 +131,20 @@ def test_a_backfilled_kind_is_only_what_the_row_can_prove(repo, input_text,
     repo.save(a)
     repo.ledger.backfill_from_answers()
     assert [r["kind"] for r in repo.ledger.recent(5)] == [kind]
+
+
+def test_a_backfill_never_overwrites_a_kind_the_live_path_knew(repo):
+    """Found by review, reproduced: the backfill SELECTs rows with no ledger
+    entry, but a live record — which KNOWS the kind — can land between that
+    SELECT and its write, and INSERT OR REPLACE clobbered it with a guess."""
+    a = _answer(1, text="https://www.instagram.com/reel/DbsVyqLpbRa/")
+    a.source_text = "what the reel said"
+    repo.save(a)
+    repo.ledger.record(a, "link")                     # the live path, first
+    repo.ledger.backfill_from_answers()               # the guess, after
+    rows = repo.ledger.recent(5)
+    assert [r["kind"] for r in rows] == ["link"]
+    assert len(rows) == 1
 
 
 def test_the_dashboard_names_every_kind_the_ledger_can_hold():
