@@ -1,13 +1,13 @@
 """Google Fact Check Tools API — structured ClaimReview lookups.
 
-Indian fact-checkers (AltNews, BOOM, Factly, Vishvas) publish machine-
-readable ClaimReview markup that this free API aggregates. It returns a
+Fact-checkers worldwide (Alt News, BOOM, Factly, AFP, AP, Full Fact...)
+publish machine-readable ClaimReview markup that this free API aggregates. It returns a
 prior human verdict for a claim when one exists — a strong signal that
 complements live web search. Fails soft: no key or any error -> [].
 
 Bounded trust applies here too: Google indexes ClaimReview from any
 publisher worldwide, so results are filtered to TRUSTED_DOMAINS before
-they can reach the adjudicator. Dropped reviews are logged, never silent —
+they can reach the model. Dropped reviews are logged, never silent —
 recurring drops are the signal to consider widening the whitelist.
 """
 from urllib.parse import urlparse
@@ -59,7 +59,7 @@ def _parse_and_filter(data: dict) -> tuple[list[Source], list[str]]:
             publisher = (review.get("publisher") or {}).get("name") or host
             rating = review.get("textualRating", "")
             base = review.get("title") or claim.get("text", "") or "Fact check"
-            # Lead with the prior verdict so adjudication sees it explicitly.
+            # Lead with the prior verdict so the model sees it explicitly.
             title = f"[Rated: {rating}] {base}" if rating else base
             sources.append(Source(url=url, title=title, publisher=publisher))
     return sources, dropped

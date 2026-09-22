@@ -17,15 +17,12 @@ import re
 import sys
 import textwrap
 
+from app.engine.marker import strip_any_sentinel
 from app.models.answer import Answer
 
 _W = 74
 _BAR = 28
 
-# The engine strips its own sentinel, but this renderer is also pointed at
-# rows that predate a fix, and a leaked `<verdict .../>` in the console is
-# how invariant 7 gets noticed too late.
-_SENTINEL_RE = re.compile(r"<verdict\b[^>]*/?>", re.IGNORECASE)
 
 
 def _confbar(c: int) -> str:
@@ -42,7 +39,8 @@ def _plain(markdown: str) -> list[str]:
     receipt, so URLs come only from `answer.sources` below.
     """
     out: list[str] = []
-    for block in _SENTINEL_RE.sub("", markdown).split("\n\n"):
+    # Rows that predate a fix may still carry a sentinel (invariant 7).
+    for block in strip_any_sentinel(markdown).split("\n\n"):
         lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
         if not lines:
             continue
@@ -138,6 +136,27 @@ def render_answer(answer: Answer) -> str:
         L.append("SOURCES    : none - nothing vetted addressed this.")
     L.append("")
     return "\n".join(L)
+
+
+class ConsoleStream:
+    """Enough of JobStream to watch an answer arrive in the console.
+
+    `run_check` only ever calls `publish`, so this stays a duck rather than a
+    subclass — it cannot drift from the real stream by inheriting half of it.
+    Was copy-pasted into demo_offline.py and smoke_test.py.
+    """
+
+    async def publish(self, kind: str, data: dict) -> None:
+        if kind == "status":
+            print(f"\n[{data.get('text', '')}]")
+        elif kind == "text":
+            print(data.get("text", ""), end="", flush=True)
+        elif kind == "tier":
+            print("\n\n--- no fact-checker covered this; general web below ---")
+        elif kind == "source":
+            print(f"\n  [source: {data.get('url', '')}]", end="", flush=True)
+        elif kind in ("done", "error"):
+            print()
 
 
 def force_utf8_stdout() -> None:

@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import httpx  # noqa: E402
 
 from app.config import settings  # noqa: E402
+from app.engine.marker import strip_any_sentinel  # noqa: E402
 from app.providers.links import allowed_link_host  # noqa: E402
 
 APP_BASE = os.environ.get("APP_BASE", "http://127.0.0.1:8000/api/v1")
@@ -48,10 +49,6 @@ _TIER_BADGE = {
     "none": "❓ Pushti nahi ho saki — koi bharosemand source nahi mila",
 }
 
-# Defence in depth for invariant 7. The engine strips its own sentinel; this
-# also runs over rows written before a fix, where a leaked `<verdict …/>`
-# would otherwise reach a reader.
-_SENTINEL_RE = re.compile(r"<verdict\b[^>]*/?>", re.IGNORECASE)
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:[^)\s]+)\)")
 _URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
@@ -142,7 +139,8 @@ def _md_to_tg(markdown: str) -> str:
     only tags in the output are the ones this function put there.
     """
     lines: list[str] = []
-    for raw in _SENTINEL_RE.sub("", markdown).splitlines():
+    # Defence in depth for invariant 7 — also covers rows written before a fix.
+    for raw in strip_any_sentinel(markdown).splitlines():
         line = raw.strip()
         if not line:
             continue

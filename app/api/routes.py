@@ -1,7 +1,7 @@
 """HTTP endpoints — surface-agnostic.
 
 A verify request creates the job row, returns a job_id immediately, and runs
-the pipeline as a BackgroundTask (the pipeline can take several seconds).
+the check as a BackgroundTask (a check takes tens of seconds).
 Clients poll GET /reports/{job_id}. A web PWA and a WhatsApp webhook consume
 the exact same two-call contract.
 """
@@ -197,7 +197,7 @@ async def _run_media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
     quota_day: str | None = None,
 ) -> None:
-    """Background half of /verify/media: chunk -> Sarvam -> pipeline.
+    """Background half of /verify/media: chunk -> Sarvam -> the check.
 
     A failure here becomes a FAILED report with a readable error — the page
     renders those — never a silent PROCESSING-forever. The transcript passes
@@ -258,10 +258,10 @@ async def verify_image(
             raise HTTPException(415, _MSG_NOT_AN_IMAGE)
         image_bytes = await file.read()
         # OCR is quick; do it inline so extracted text is captured even if the
-        # heavier verification pipeline is deferred to the background.
+        # check itself runs in the background.
         spend.begin()          # everything past here has been paid for
         meter = UsageMeter()   # starts at the first paid call, so the report's
-        with meter.activate():  # bill includes route-level OCR, not just the pipeline
+        with meter.activate():  # the bill includes route-level OCR, not just the check
             extracted = await ocr_image(image_bytes, file.content_type)
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
@@ -390,7 +390,7 @@ def transcript_key(info: LinkInfo) -> str | None:
 
 async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
                         quota_day: str | None = None) -> None:
-    """Background half: fetch the text, then run the normal pipeline.
+    """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
     renders those), never a silent PROCESSING-forever. run_check guards

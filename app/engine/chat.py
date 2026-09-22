@@ -158,9 +158,7 @@ def _tier_of(url: str) -> Tier:
 
 def _publisher_of(url: str) -> str:
     """A readable name for a source chip, from the host."""
-    from urllib.parse import urlparse
-
-    return (urlparse(url).hostname or "").removeprefix("www.")
+    return _host(url)
 
 
 def _collect_sources(message) -> list[Source]:

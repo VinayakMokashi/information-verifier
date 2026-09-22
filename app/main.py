@@ -143,7 +143,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Information Verifier",
-    description="Multi-modal fact-checking engine for combating misinformation in India.",
+    description="Checks whether a forward, screenshot, voice note or reel link is "
+                "true — one Claude-style answer with its sources.",
     version="0.1.0",
     lifespan=lifespan,
 )

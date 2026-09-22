@@ -6,12 +6,12 @@ a cost-conscious deployment, so measurement is now built in rather than
 living in a smoke script.
 
 Shape: a `UsageMeter` is created per job and made ambient with a contextvar,
-because a report's work fans out (claims check concurrently, translations
-too) and threading a meter argument through every stage would touch a dozen
-signatures. contextvars propagate into `asyncio.gather` children and
-`asyncio.to_thread` workers, so one `with meter.activate():` around the
-pipeline body covers every call made on the report's behalf. The Anthropic
-client is instrumented ONCE (idempotent) to report each call's usage — read
+because a job's work spreads across tasks and threads (route-level OCR,
+concurrent ASR chunks, the engine's streamed passes) and threading a meter
+argument through all of it would touch a dozen signatures. contextvars
+propagate into `asyncio.gather` children and `asyncio.to_thread` workers, so
+one `with meter.activate():` around a job's work covers every call made on
+its behalf. The Anthropic client is instrumented ONCE (idempotent) to report each call's usage — read
 from the API's own usage fields, not estimated — into whatever meter is
 active; with no meter active it is a no-op, so scripts and tests that never
 asked for metering are untouched.

@@ -29,23 +29,8 @@ from app.engine.job import run_check  # noqa: E402
 from app.models.answer import Answer, JobStatus  # noqa: E402
 from app.store.db import init_db  # noqa: E402
 from app.store.repository import AnswerRepository  # noqa: E402
-from scripts.render import force_utf8_stdout, print_answer  # noqa: E402
+from scripts.render import ConsoleStream, force_utf8_stdout, print_answer  # noqa: E402
 from scripts.usage_report import print_usage  # noqa: E402
-
-
-class ConsoleStream:
-    """Watch the money being spent as it is spent. `publish` only — same duck
-    typing as the offline demo, for the same reason."""
-
-    async def publish(self, kind: str, data: dict) -> None:
-        if kind == "status":
-            print(f"\n[{data.get('text', '')}]")
-        elif kind == "text":
-            print(data.get("text", ""), end="", flush=True)
-        elif kind == "tier":
-            print("\n\n--- no fact-checker covered this; general web below ---")
-        elif kind == "done":
-            print()
 
 
 async def main() -> None:

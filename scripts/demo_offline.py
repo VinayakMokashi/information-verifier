@@ -25,32 +25,11 @@ from app.models.answer import Answer, JobStatus  # noqa: E402
 from app.store.db import init_db  # noqa: E402
 from app.store.repository import AnswerRepository  # noqa: E402
 from scripts.fake_stages import CALLS, apply_fake_stages  # noqa: E402
-from scripts.render import force_utf8_stdout, print_answer  # noqa: E402
+from scripts.render import ConsoleStream, force_utf8_stdout, print_answer  # noqa: E402
 
 apply_fake_stages()
 
 from app.engine.job import run_check  # noqa: E402  (import after patching)
-
-
-class ConsoleStream:
-    """Enough of JobStream for the console: print the answer as it arrives.
-
-    Only `publish` is used by `run_check`, so this stays a duck rather than a
-    subclass — a demo must not be able to drift from the real stream's
-    behaviour by inheriting half of it.
-    """
-
-    async def publish(self, kind: str, data: dict) -> None:
-        if kind == "status":
-            print(f"\n[{data.get('text', '')}]")
-        elif kind == "text":
-            print(data.get("text", ""), end="", flush=True)
-        elif kind == "tier":
-            print("\n\n--- no fact-checker covered this; general web below ---")
-        elif kind == "source":
-            print(f"\n  [source: {data.get('url', '')}]", end="", flush=True)
-        elif kind == "done":
-            print()
 
 
 async def main() -> None:

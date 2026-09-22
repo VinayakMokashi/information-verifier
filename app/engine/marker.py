@@ -147,6 +147,18 @@ def parse_used(raw: str | None) -> list[str] | None:
     return domains
 
 
+# Looser than _SENTINEL_RE on purpose: renderers strip ANYTHING that opens
+# like a sentinel, malformed or not, as defence in depth for invariant 7 —
+# including rows written before a fix. It used to be copy-pasted into the
+# Telegram bot and the console renderer.
+_ANY_SENTINEL_RE = re.compile(r"<verdict\b[^>]*/?>", re.IGNORECASE)
+
+
+def strip_any_sentinel(text: str) -> str:
+    """Remove every sentinel-shaped tag, well-formed or not. For renderers."""
+    return _ANY_SENTINEL_RE.sub("", text)
+
+
 def strip_sentinels(text: str) -> str:
     """Remove any sentinel from a finished string (non-streaming paths)."""
     return _SENTINEL_RE.sub("", text).strip()
