@@ -156,3 +156,21 @@ def test_the_cap_and_the_dashboard_agree_on_what_today_is():
     from app.store.repository import operator_day
 
     assert limits.today() == operator_day()
+
+
+def test_a_bill_written_before_the_split_existed_is_split_correctly(repo):
+    """MEASURED on the first live dashboard: three checks stored before bills
+    carried llm/search/asr made the breakdown show $0.09 of searches where
+    $0.15 had been bought. The split is recoverable from what was stored."""
+    old = _answer(1)
+    old.usage = ReportUsage(      # the pre-split shape: a total and the counts
+        models={"claude-sonnet-5": ModelUsage(calls=1, input_tokens=122,
+                                              output_tokens=901,
+                                              cache_write_tokens=9705,
+                                              cache_read_tokens=24002)},
+        web_searches=1, estimated_usd=0.0483)
+    repo.save(old)
+    repo.ledger.backfill_from_answers()
+    totals = repo.ledger.totals()
+    assert totals["search_usd"] == pytest.approx(0.01)
+    assert totals["llm_usd"] + totals["search_usd"] == pytest.approx(0.0483, abs=1e-4)

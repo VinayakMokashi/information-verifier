@@ -192,8 +192,11 @@ class SpendLedger:
         usage = answer.usage
         if usage is None:
             return
+        from app.providers.usage import split_of
+
         finished = answer.completed_at or datetime.now(timezone.utc)
         models = usage.models or {}
+        llm_usd, search_usd, asr_usd = split_of(usage)
         with get_conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO spend_ledger (job_id, day, finished_at, "
@@ -203,8 +206,7 @@ class SpendLedger:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (answer.job_id, operator_day(finished), finished.isoformat(),
                  kind, answer.status.value, answer.tier, int(answer.cached),
-                 usage.estimated_usd, usage.llm_usd, usage.search_usd,
-                 usage.asr_usd,
+                 usage.estimated_usd, llm_usd, search_usd, asr_usd,
                  sum(m.input_tokens for m in models.values()),
                  sum(m.output_tokens for m in models.values()),
                  sum(m.cache_write_tokens for m in models.values()),
@@ -243,16 +245,25 @@ class SpendLedger:
 
     # -- the dashboard's queries ---------------------------------------------
 
+    # Operator experiments (A/B tests, probes) are real money — they count
+    # toward every dollar total — but they are not anyone's check, so the
+    # check counts and the per-check average leave them out.
+    EXPERIMENTS = ("ab-test", "probe")
+
     def totals(self, since_day: str | None = None) -> dict:
         where, args = ("WHERE day >= ?", (since_day,)) if since_day else ("", ())
+        exp = "kind IN ('ab-test', 'probe')"
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS checks, COALESCE(SUM(usd), 0) AS usd, "
+                f"SELECT COALESCE(SUM(NOT {exp}), 0) AS checks, "
+                f"COALESCE(SUM({exp}), 0) AS experiments, "
+                f"COALESCE(SUM(CASE WHEN {exp} THEN 0 ELSE usd END), 0) AS check_usd, "
+                "COALESCE(SUM(usd), 0) AS usd, "
                 "COALESCE(SUM(llm_usd), 0) AS llm_usd, "
                 "COALESCE(SUM(search_usd), 0) AS search_usd, "
                 "COALESCE(SUM(asr_usd), 0) AS asr_usd, "
-                "COALESCE(SUM(cached), 0) AS cached, "
-                "COALESCE(SUM(status = 'FAILED'), 0) AS failed, "
+                f"COALESCE(SUM(cached AND NOT {exp}), 0) AS cached, "
+                f"COALESCE(SUM(status = 'FAILED' AND NOT {exp}), 0) AS failed, "
                 "COALESCE(SUM(web_searches), 0) AS searches, "
                 "COALESCE(SUM(asr_seconds), 0) AS asr_seconds "
                 f"FROM spend_ledger {where}", args,
@@ -262,7 +273,8 @@ class SpendLedger:
     def by_day(self, since_day: str) -> list[dict]:
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT day, COUNT(*) AS checks, SUM(usd) AS usd, "
+                "SELECT day, SUM(kind NOT IN ('ab-test', 'probe')) AS checks, "
+                "SUM(usd) AS usd, "
                 "SUM(llm_usd) AS llm_usd, SUM(search_usd) AS search_usd, "
                 "SUM(asr_usd) AS asr_usd, SUM(cached) AS cached "
                 "FROM spend_ledger WHERE day >= ? GROUP BY day ORDER BY day",

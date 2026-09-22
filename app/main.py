@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.api.dashboard import router as dashboard_router
 from app.api.routes import router
 from app.api.stream import router as stream_router
 from app.config import settings
@@ -130,6 +131,7 @@ async def lifespan(app: FastAPI):
     done = housekeeping()
     if any(done.values()):
         print(f"[startup] housekeeping: {done}")
+    print("[startup] spending dashboard: /dashboard (this machine only)")
     task = asyncio.create_task(_housekeeping_loop())
     try:
         yield
@@ -154,6 +156,8 @@ app.add_middleware(LimitUploadSize)
 
 app.include_router(router)
 app.include_router(stream_router)
+# Local-only; see app/api/dashboard.py. Before the static mount so it wins.
+app.include_router(dashboard_router)
 
 
 @app.get("/health")

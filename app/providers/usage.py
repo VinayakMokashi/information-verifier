@@ -97,6 +97,27 @@ class UsageMeter:
         )
 
 
+def split_of(usage: ReportUsage) -> tuple[float, float, float]:
+    """(llm, search, asr) dollars for a bill, recomputed when it lacks them.
+
+    Bills written before the split existed (2026-09-22) carry only a total.
+    MEASURED on the first live dashboard: three such checks made the
+    breakdown show $0.09 of searches where $0.15 were bought. The tokens,
+    search count and audio seconds are all stored, so the split is
+    recoverable from the same price table that produced the total.
+    """
+    if usage.llm_usd or usage.search_usd or usage.asr_usd:
+        return usage.llm_usd, usage.search_usd, usage.asr_usd
+    llm = 0.0
+    for model, row in (usage.models or {}).items():
+        p = _PRICES.get(model, _FALLBACK_PRICE)
+        llm += (row.input_tokens * p["in"] + row.output_tokens * p["out"]
+                + row.cache_write_tokens * p["cache_w"]
+                + row.cache_read_tokens * p["cache_r"]) / 1e6
+    return (round(llm, 6), round(usage.web_searches * _SEARCH_USD, 6),
+            round(usage.asr_seconds * _ASR_USD_PER_S, 6))
+
+
 def note_llm(model: str, usage) -> None:
     """Report one API call into the ambient meter, if any."""
     meter = _current.get()

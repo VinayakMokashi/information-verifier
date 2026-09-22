@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>Spending — Information Verifier</title>
+<style>
+  /* Roles, not raw hex: every value below is from the dataviz reference
+     palette (validated 2026-09-22: slots 1-3 pass all checks in both modes;
+     light-mode aqua is 2.74:1, so the breakdown carries visible labels AND a
+     table — the relief the validator requires). */
+  .viz-root {
+    color-scheme: light;
+    --page: #f9f9f7;           --surface-1: #fcfcfb;
+    --text-primary: #0b0b0b;   --text-secondary: #52514e;  --text-muted: #898781;
+    --grid: #e1e0d9;           --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;       --series-2: #eb6834;        --series-3: #1baf7a;
+    --track: #cde2fb;          --accent: #2a78d6;
+    --status-warning: #fab219; --status-critical: #d03b3b;
+    --hover: rgba(11,11,11,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --page: #0d0d0d;           --surface-1: #1a1a19;
+      --text-primary: #ffffff;   --text-secondary: #c3c2b7;  --text-muted: #898781;
+      --grid: #2c2c2a;           --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;       --series-2: #d95926;        --series-3: #199e70;
+      --track: #0d366b;          --accent: #3987e5;
+      --hover: rgba(255,255,255,0.06);
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --page: #0d0d0d;           --surface-1: #1a1a19;
+    --text-primary: #ffffff;   --text-secondary: #c3c2b7;  --text-muted: #898781;
+    --grid: #2c2c2a;           --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;       --series-2: #d95926;        --series-3: #199e70;
+    --track: #0d366b;          --accent: #3987e5;
+    --hover: rgba(255,255,255,0.06);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body.viz-root {
+    background: var(--page); color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; font-weight: 650; letter-spacing: -.01em; }
+  .sub { color: var(--text-secondary); margin: 0 0 24px; font-size: .92rem; }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: .95rem; margin: 0; font-weight: 600; }
+  .card .cap { color: var(--text-secondary); font-size: .85rem; margin: 2px 0 12px; }
+  .row { display: grid; gap: 16px; margin-bottom: 16px; }
+  .row.kpi { grid-template-columns: 1.35fr 1fr 1fr 1fr; }
+  @media (max-width: 760px) { .row.kpi { grid-template-columns: 1fr 1fr; } }
+  .row.kpi .card { margin: 0; }
+
+  .label { color: var(--text-secondary); font-size: .85rem; }
+  .hero { font-size: 52px; font-weight: 650; line-height: 1.05; margin: 6px 0 6px; }
+  .value { font-size: 28px; font-weight: 600; line-height: 1.15; margin: 6px 0 4px; }
+  .note { color: var(--text-muted); font-size: .8rem; }
+
+  .meter { height: 10px; border-radius: 5px; background: var(--track);
+           overflow: hidden; margin: 10px 0 6px; }
+  .meter > span { display: block; height: 100%; border-radius: 5px;
+                  background: var(--accent); }
+  .meter.at-limit > span { background: var(--status-warning); }
+  .status-line { display: flex; align-items: center; gap: 6px;
+                 font-size: .82rem; color: var(--text-secondary); }
+  .status-line svg { flex: none; }
+
+  .filters { display: flex; gap: 6px; margin: 8px 0 14px; flex-wrap: wrap; }
+  .filters button {
+    font: inherit; font-size: .85rem; cursor: pointer; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 12px;
+  }
+  .filters button:hover { background: var(--hover); }
+  .filters button[aria-pressed="true"] {
+    color: var(--text-primary); font-weight: 650; border-color: var(--text-muted);
+  }
+
+  .loading { opacity: .5; transition: opacity .15s; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .toggle { font: inherit; font-size: .8rem; color: var(--text-secondary); cursor: pointer;
+            background: none; border: 0; text-decoration: underline; padding: 0; }
+  svg text { font-family: inherit; }
+  .plot { width: 100%; }
+  .plot .hit { fill: transparent; cursor: default; outline: none; }
+  .plot .hit:hover, .plot .hit:focus { fill: var(--hover); }
+  .empty { color: var(--text-muted); padding: 36px 0; text-align: center; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: .85rem; }
+  .legend span.k { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .legend b { font-weight: 600; }
+  .legend em { color: var(--text-muted); font-style: normal; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  th { text-align: left; color: var(--text-secondary); font-weight: 600;
+       border-bottom: 1px solid var(--grid); padding: 6px 8px 6px 0; }
+  td { border-bottom: 1px solid var(--grid); padding: 7px 8px 7px 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.failed { color: var(--text-primary); }
+
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 8px 10px; font-size: .82rem;
+    min-width: 150px;
+  }
+  #tip .v { font-weight: 650; font-size: .95rem; }
+  #tip .t { color: var(--text-secondary); }
+  #tip .r { display: flex; align-items: center; gap: 6px; }
+  #tip .r i { width: 12px; height: 2px; display: inline-block; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body class="viz-root">
+<main>
+  <h1>Spending</h1>
+  <p class="sub">What this app has spent, measured from each API call's own usage
+    and priced at list prices. Visible on this machine only.</p>
+
+  <div class="row kpi" id="kpis">
+    <div class="card">
+      <div class="label">Spent in the last 30 days</div>
+      <div class="hero" id="hero">—</div>
+      <div class="note" id="hero-note">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Today</div>
+      <div class="value" id="k-today">—</div>
+      <div class="note" id="k-today-note">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Last 7 days</div>
+      <div class="value" id="k-7">—</div>
+      <div class="note" id="k-7-note">&nbsp;</div>
+    </div>
+    <div class="card">
+      <div class="label">Daily limit</div>
+      <div class="value" id="k-cap">—</div>
+      <div class="meter" id="cap-meter"><span style="width:0"></span></div>
+      <div class="status-line" id="cap-status"></div>
+    </div>
+  </div>
+
+  <div class="filters" role="group" aria-label="Date range">
+    <button type="button" data-days="7">Last 7 days</button>
+    <button type="button" data-days="30" aria-pressed="true">Last 30 days</button>
+    <button type="button" data-days="90">Last 90 days</button>
+  </div>
+
+  <div id="scoped">
+    <section class="card">
+      <div class="head">
+        <h2 id="daily-title">Spend per day</h2>
+        <button class="toggle" type="button" id="daily-toggle">Show as table</button>
+      </div>
+      <p class="cap" id="daily-cap">&nbsp;</p>
+      <div id="daily-chart"></div>
+      <div id="daily-table" class="hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Where the money went</h2>
+      <p class="cap" id="split-cap">&nbsp;</p>
+      <div id="split-chart"></div>
+      <div class="legend" id="split-legend"></div>
+    </section>
+
+    <section class="card">
+      <h2>Recent checks</h2>
+      <p class="cap">The newest 25. Costs only — messages are deleted after
+        <span id="retention">30</span> days; this record is not.</p>
+      <div id="recent"></div>
+    </section>
+  </div>
+
+  <p class="note">The app's own measurement, not the invoice: the Anthropic
+    console is the source of truth for what you are billed. Probes and
+    experiments run outside the app appear only if they were recorded.</p>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const tip = $("tip");
+const SVGNS = "http://www.w3.org/2000/svg";
+let current = null;          // last payload, for re-render on resize
+let showTable = false;
+
+// -- formatting ----------------------------------------------------------------
+function usd(x) {
+  x = Number(x) || 0;
+  if (x === 0) return "$0";
+  if (x < 0.1) return "$" + x.toFixed(3);
+  if (x < 1000) return "$" + x.toFixed(2);
+  return "$" + Math.round(x).toLocaleString("en-US");
+}
+function dayLabel(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function svg(tag, attrs = {}) {
+  const node = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+}
+function niceMax(v) {
+  if (v <= 0) return 0.1;
+  const exp = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * exp >= v) return m * exp;
+  return 10 * exp;
+}
+
+// -- tooltip: values lead, labels follow; always textContent -------------------
+function showTip(evt, rows, title) {
+  tip.replaceChildren();
+  tip.appendChild(el("div", { class: "t" }, title));
+  for (const r of rows) {
+    const line = el("div", { class: "r" });
+    if (r.color) {
+      const key = el("i");
+      key.style.background = r.color;
+      line.appendChild(key);
+    }
+    line.appendChild(el("span", { class: "v" }, r.value));
+    line.appendChild(el("span", { class: "t" }, r.label));
+    tip.appendChild(line);
+  }
+  tip.style.display = "block";
+  place(evt);
+}
+function place(evt) {
+  let x, y;
+  if (evt.clientX !== undefined && evt.type.startsWith("pointer")) {
+    x = evt.clientX + 14; y = evt.clientY + 14;
+  } else {
+    const r = evt.target.getBoundingClientRect();
+    x = r.left + r.width / 2; y = r.top - 8;
+  }
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  x = Math.min(x, window.innerWidth - w - 8);
+  if (y + h > window.innerHeight - 8) y = y - h - 28;
+  tip.style.left = Math.max(8, x) + "px";
+  tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+// -- KPI row (fixed windows; not scoped by the range filter) --------------------
+function drawKpis(d) {
+  const t = d.totals;
+  const paid = t.d30.checks - t.d30.cached;
+  // Non-breaking: "7" must never end one line and "experiments" start the next.
+  const plural = (n, one, many) => `${n}\u00a0${n === 1 ? one : many}`;
+  $("hero").textContent = usd(t.d30.usd);
+  $("hero-note").textContent =
+    plural(t.d30.checks, "check", "checks") +
+    (paid > 0 ? ` · ${usd(t.d30.check_usd / paid)} per paid check` : "") +
+    (t.d30.cached ? ` · ${t.d30.cached} free from cache` : "") +
+    (t.d30.experiments ? ` · ${plural(t.d30.experiments, "experiment", "experiments")}` : "");
+  $("k-today").textContent = usd(t.today.usd);
+  $("k-today-note").textContent =
+    `${t.today.checks} check${t.today.checks === 1 ? "" : "s"} · all time ${usd(t.all.usd)}`;
+  $("k-7").textContent = usd(t.d7.usd);
+  $("k-7-note").textContent = `${t.d7.checks} check${t.d7.checks === 1 ? "" : "s"}`;
+
+  const cap = d.cap;
+  const used = cap.used ?? 0;
+  $("k-cap").textContent = `${used} of ${cap.limit}`;
+  const meter = $("cap-meter");
+  meter.firstElementChild.style.width = Math.min(100, (used / Math.max(1, cap.limit)) * 100) + "%";
+  const atLimit = cap.enforced && used >= cap.limit;
+  meter.classList.toggle("at-limit", atLimit);
+  const status = $("cap-status");
+  status.replaceChildren();
+  if (atLimit) {
+    // Status never rides on color alone: icon + label.
+    const icon = svg("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" });
+    icon.appendChild(svg("path", { d: "M7 1.5 13 12.5H1Z", fill: "var(--status-warning)" }));
+    const bang = svg("path", { d: "M7 5.5v3.2M7 10.3v.2", stroke: "#0b0b0b",
+                               "stroke-width": 1.6, "stroke-linecap": "round" });
+    icon.appendChild(bang);
+    status.appendChild(icon);
+    status.appendChild(el("span", {}, `Limit reached — resets at ${cap.resets}`));
+  } else if (!cap.enforced) {
+    status.appendChild(el("span", {}, "Not enforced on this server (rate limiting off)"));
+  } else {
+    const left = cap.limit - used;
+    status.appendChild(el("span", {}, `${left} left today · resets at ${cap.resets}`));
+  }
+}
+
+// -- spend per day: columns, one series (so no legend box — the title names it) -
+function drawDaily(d) {
+  const host = $("daily-chart");
+  host.replaceChildren();
+  const series = d.by_day;
+  const total = d.totals.range;
+  $("daily-title").textContent = `Spend per day, last ${d.days} days`;
+  $("daily-cap").textContent =
+    `${usd(total.usd)} across ${total.checks} check${total.checks === 1 ? "" : "s"}` +
+    (total.failed ? ` · ${total.failed} failed` : "");
+  drawDailyTable(series);
+  if (!series.some((s) => s.usd > 0)) {
+    host.appendChild(el("div", { class: "empty" }, "No spend recorded in this range."));
+    return;
+  }
+
+  const W = Math.max(320, host.clientWidth || 640);
+  const H = 220, padL = 52, padR = 8, padT = 14, padB = 28;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const max = niceMax(Math.max(...series.map((s) => s.usd)));
+  const y = (v) => padT + plotH - (v / max) * plotH;
+  const slot = plotW / series.length;
+  const barW = Math.max(2, Math.min(24, slot - 2));   // <= 24px; >= 2px surface gap
+
+  const root = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
+                            role: "img",
+                            "aria-label": `Spend per day for the last ${d.days} days. Total ${usd(total.usd)}. Use Show as table for every value.` });
+  // Recessive hairline grid, solid, one step off the surface.
+  for (let i = 0; i <= 4; i++) {
+    const v = (max / 4) * i, yy = Math.round(y(v)) + 0.5;
+    root.appendChild(svg("line", { x1: padL, x2: W - padR, y1: yy, y2: yy,
+                                   stroke: i === 0 ? "var(--baseline)" : "var(--grid)",
+                                   "stroke-width": 1 }));
+    const t = svg("text", { x: padL - 8, y: yy + 4, "text-anchor": "end",
+                            "font-size": 11, fill: "var(--text-muted)",
+                            style: "font-variant-numeric: tabular-nums" });
+    t.textContent = usd(v);
+    root.appendChild(t);
+  }
+  // Label spacing comes from the pixels available, not the day count —
+  // measured at phone width, a fixed "every 5th day" ran the last two labels
+  // together ("18 Sept22 Sep") and clipped the final one at the edge.
+  const every = Math.max(1, Math.ceil(series.length / Math.max(2, Math.floor(plotW / 58))));
+  series.forEach((s, i) => {
+    const cx = padL + slot * i + slot / 2;
+    if (s.usd > 0) {
+      const top = y(s.usd), base = padT + plotH, x0 = cx - barW / 2;
+      const r = Math.min(4, barW / 2, base - top);
+      // 4px rounded data-end, square at the baseline.
+      root.appendChild(svg("path", {
+        d: `M${x0},${base} V${top + r} Q${x0},${top} ${x0 + r},${top} ` +
+           `H${x0 + barW - r} Q${x0 + barW},${top} ${x0 + barW},${top + r} V${base} Z`,
+        fill: "var(--series-1)" }));
+    }
+    const isLast = i === series.length - 1;
+    const crowdsLast = !isLast && series.length - 1 - i < every * 0.8;
+    if ((i % every === 0 && !crowdsLast) || isLast) {
+      // The last label is right-aligned to the plot edge so it never clips.
+      const t = svg("text", { x: isLast ? padL + plotW : cx, y: H - 8,
+                              "text-anchor": isLast ? "end" : "middle",
+                              "font-size": 11, fill: "var(--text-muted)" });
+      t.textContent = dayLabel(s.day);
+      root.appendChild(t);
+    }
+    // The whole slot is the hit target — bigger than the mark, and present
+    // even on a $0 day, which is a real value, not a gap.
+    const hit = svg("rect", { class: "hit", x: padL + slot * i, y: padT,
+                              width: slot, height: plotH, tabindex: 0,
+                              "aria-label": `${dayLabel(s.day)}: ${usd(s.usd)}, ${s.checks} checks` });
+    const rows = [{ value: usd(s.usd), label: "spent", color: "var(--series-1)" },
+                  { value: String(s.checks), label: s.checks === 1 ? "check" : "checks" }];
+    if (s.cached) rows.push({ value: String(s.cached), label: "free from cache" });
+    const title = new Date(s.day + "T00:00:00").toLocaleDateString("en-GB",
+      { weekday: "short", day: "numeric", month: "short" });
+    hit.addEventListener("pointermove", (e) => showTip(e, rows, title));
+    hit.addEventListener("focus", (e) => showTip(e, rows, title));
+    hit.addEventListener("pointerleave", hideTip);
+    hit.addEventListener("blur", hideTip);
+    root.appendChild(hit);
+  });
+  host.appendChild(root);
+}
+
+function drawDailyTable(series) {
+  const host = $("daily-table");
+  host.replaceChildren();
+  const table = el("table");
+  const head = el("tr");
+  for (const [h, num] of [["Day", false], ["Checks", true], ["From cache", true], ["Spent", true]]) {
+    head.appendChild(el("th", num ? { class: "num" } : {}, h));
+  }
+  table.appendChild(el("thead")).appendChild(head);
+  const body = el("tbody");
+  for (const s of [...series].reverse()) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {}, dayLabel(s.day)));
+    tr.appendChild(el("td", { class: "num" }, String(s.checks)));
+    tr.appendChild(el("td", { class: "num" }, String(s.cached)));
+    tr.appendChild(el("td", { class: "num" }, usd(s.usd)));
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  host.appendChild(table);
+}
+
+// -- where the money went: one part-to-whole bar, 3 fixed-order slots ----------
+const PARTS = [
+  ["llm_usd", "Claude (reading and writing)", "var(--series-1)"],
+  ["search_usd", "Web searches", "var(--series-2)"],
+  ["asr_usd", "Voice transcription", "var(--series-3)"],
+];
+function drawSplit(d) {
+  const host = $("split-chart"), legend = $("split-legend");
+  host.replaceChildren(); legend.replaceChildren();
+  const t = d.totals.range;
+  const sum = PARTS.reduce((a, [k]) => a + (t[k] || 0), 0);
+  $("split-cap").textContent = `Last ${d.days} days · ${usd(t.usd)}` +
+    (t.searches ? ` · ${t.searches} web search${t.searches === 1 ? "" : "es"}` : "") +
+    (t.asr_seconds ? ` · ${Math.round(t.asr_seconds)} s of audio` : "");
+  if (sum <= 0) {
+    host.appendChild(el("div", { class: "empty" }, "Nothing spent in this range."));
+    return;
+  }
+  const W = Math.max(320, host.clientWidth || 640), H = 22;
+  const root = svg("svg", { class: "plot", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
+                            role: "img", "aria-label": "Spend by component; values listed below." });
+  const live = PARTS.filter(([k]) => (t[k] || 0) > 0);
+  const gap = 2, usable = W - gap * (live.length - 1);
+  let x = 0;
+  live.forEach(([k, name, color], i) => {
+    const w = Math.max(1, usable * (t[k] / sum));
+    const first = i === 0, last = i === live.length - 1, r = 4;
+    // Rounded outer ends only; a 2px surface gap separates the segments.
+    const d0 = `M${x + (first ? r : 0)},0 H${x + w - (last ? r : 0)} ` +
+      (last ? `Q${x + w},0 ${x + w},${r} V${H - r} Q${x + w},${H} ${x + w - r},${H} `
+            : `V${H} `) +
+      `H${x + (first ? r : 0)} ` +
+      (first ? `Q${x},${H} ${x},${H - r} V${r} Q${x},0 ${x + r},0 Z` : `V0 Z`);
+    const seg = svg("path", { d: d0, fill: color, tabindex: 0,
+                              "aria-label": `${name}: ${usd(t[k])}` });
+    const pct = Math.round((t[k] / sum) * 100);
+    const rows = [{ value: usd(t[k]), label: `${pct}% of spend`, color }];
+    seg.addEventListener("pointermove", (e) => showTip(e, rows, name));
+    seg.addEventListener("focus", (e) => showTip(e, rows, name));
+    seg.addEventListener("pointerleave", hideTip);
+    seg.addEventListener("blur", hideTip);
+    root.appendChild(seg);
+    x += w + gap;
+  });
+  host.appendChild(root);
+  // The legend carries every value in text, so the sub-3:1 light aqua never
+  // has to be read from its fill alone.
+  for (const [k, name, color] of PARTS) {
+    const item = el("span", { class: "k" });
+    const sw = el("i"); sw.style.background = color;
+    item.appendChild(sw);
+    item.appendChild(el("span", {}, name));
+    item.appendChild(el("b", {}, usd(t[k] || 0)));
+    item.appendChild(el("em", {}, `${Math.round(((t[k] || 0) / sum) * 100)}%`));
+    legend.appendChild(item);
+  }
+}
+
+// -- recent checks ------------------------------------------------------------
+const TIER = { trusted: "Fact-checkers", web: "General web", none: "Nothing found" };
+const KIND = { text: "Text", link: "Link", image: "Image", media: "Voice / video",
+               "ab-test": "A/B test", probe: "Probe" };
+const EXPERIMENT = new Set(["ab-test", "probe"]);
+function drawRecent(d) {
+  const host = $("recent");
+  host.replaceChildren();
+  $("retention").textContent = String(d.retention_days);
+  if (!d.recent.length) {
+    host.appendChild(el("div", { class: "empty" }, "No checks recorded yet."));
+    return;
+  }
+  const table = el("table");
+  const head = el("tr");
+  for (const [h, num] of [["When", false], ["Kind", false], ["Result", false],
+                          ["Searches", true], ["Cost", true]]) {
+    head.appendChild(el("th", num ? { class: "num" } : {}, h));
+  }
+  table.appendChild(el("thead")).appendChild(head);
+  const body = el("tbody");
+  for (const r of d.recent) {
+    const tr = el("tr");
+    const when = new Date(r.finished_at);
+    tr.appendChild(el("td", {}, when.toLocaleString("en-GB",
+      { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })));
+    tr.appendChild(el("td", {}, KIND[r.kind] || r.kind));
+    const result = el("td");
+    if (r.status === "FAILED") {
+      // Status = icon + label, never colour alone.
+      const icon = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true",
+                                style: "vertical-align:-1px;margin-right:5px" });
+      icon.appendChild(svg("circle", { cx: 6, cy: 6, r: 6, fill: "var(--status-critical)" }));
+      icon.appendChild(svg("path", { d: "M4 4 8 8M8 4 4 8", stroke: "#fff",
+                                     "stroke-width": 1.6, "stroke-linecap": "round" }));
+      result.appendChild(icon);
+      result.appendChild(document.createTextNode("Failed"));
+    } else if (EXPERIMENT.has(r.kind)) {
+      result.textContent = "—";           // an experiment, not anyone's check
+    } else {
+      result.textContent = (TIER[r.tier] || r.tier) + (r.cached ? " · from cache" : "");
+    }
+    tr.appendChild(result);
+    tr.appendChild(el("td", { class: "num" }, String(r.web_searches)));
+    tr.appendChild(el("td", { class: "num" }, usd(r.usd)));
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  host.appendChild(table);
+}
+
+function render(d) {
+  current = d;
+  drawKpis(d);
+  drawDaily(d);
+  drawSplit(d);
+  drawRecent(d);
+  $("daily-chart").classList.toggle("hidden", showTable);
+  $("daily-table").classList.toggle("hidden", !showTable);
+}
+
+async function load(days) {
+  const scoped = $("scoped");
+  scoped.classList.add("loading");            // hold the frame; no skeleton flash
+  try {
+    const resp = await fetch(`api/v1/admin/spend?days=${days}`, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    render(await resp.json());
+  } catch (e) {
+    $("daily-cap").textContent = `Could not load spending data (${e.message}).`;
+  } finally {
+    scoped.classList.remove("loading");
+  }
+}
+
+for (const b of document.querySelectorAll(".filters button")) {
+  b.addEventListener("click", () => {
+    for (const o of document.querySelectorAll(".filters button")) {
+      o.setAttribute("aria-pressed", o === b ? "true" : "false");
+    }
+    load(Number(b.dataset.days));
+  });
+}
+$("daily-toggle").addEventListener("click", () => {
+  showTable = !showTable;
+  $("daily-toggle").textContent = showTable ? "Show as chart" : "Show as table";
+  $("daily-chart").classList.toggle("hidden", showTable);
+  $("daily-table").classList.toggle("hidden", !showTable);
+});
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => current && render(current), 120);
+});
+load(30);
+</script>
+</body>
+</html>
