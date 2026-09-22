@@ -409,6 +409,35 @@ def test_a_failed_transcription_is_not_remembered(client, monkeypatch):
     assert len(calls) == 2
 
 
+def test_a_video_whose_audio_gave_nothing_is_retried_not_remembered(
+        client, monkeypatch, tmp_path):
+    """Found by review, reproduced: the cache's own rule is that a
+    transcription that heard nothing is retried next time — but the empty
+    check ran on caption + speech combined, so a post whose ASR came back
+    empty was remembered as its caption alone for 30 days, and the claim it
+    SPOKE could not be checked again for a month. Only what the audio or
+    subtitles added beyond the caption is worth remembering; a caption costs
+    nothing to read again."""
+    from app.providers.asr import Transcript
+
+    ogg = _tone_ogg(tmp_path)
+    asr_calls = []
+
+    class HeardNothing:
+        async def transcribe(self, audio, language_hint=None):
+            asr_calls.append(1)
+            return Transcript(text="", language=None)
+
+    _wire_real_gather(monkeypatch, download=lambda url, mb: (ogg, ".ogg"))
+    monkeypatch.setattr(R, "get_asr_provider", lambda: HeardNothing())
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(caption="Watch till the end!! #viral #news"))
+
+    for _ in range(2):
+        assert _report(client, _submit(client))["status"] == "COMPLETE"
+    assert len(asr_calls) == 2, "the empty transcription was remembered, not retried"
+
+
 def test_an_empty_transcript_is_never_stored(client):
     from app.store.repository import TranscriptCache
 

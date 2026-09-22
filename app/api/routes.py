@@ -338,6 +338,11 @@ _RESOLVE_WALL_S = 60.0
 _MAX_CAPTION_CHARS = 2000
 
 
+def _caption_text(info: LinkInfo) -> str:
+    """The post's caption as it enters the text — normalized and capped."""
+    return " ".join((info.caption or "").split())[:_MAX_CAPTION_CHARS]
+
+
 async def gather_link_text(info: LinkInfo) -> str:
     """Everything readable from the post: caption + (subtitles | audio->ASR).
 
@@ -347,7 +352,7 @@ async def gather_link_text(info: LinkInfo) -> str:
     only when neither covers the speech is audio downloaded (byte/wall-capped
     stream), ffprobe'd against the duration cap, and sent to Sarvam.
     """
-    caption = " ".join((info.caption or "").split())[:_MAX_CAPTION_CHARS]
+    caption = _caption_text(info)
 
     spoken: str | None = None
     if info.subtitle is not None:
@@ -419,7 +424,13 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
             await fail_job(job_id, _friendly_link_failure(exc), repo, meter,
                            stream, kind="link")
             return
-        if key:
+        # Remember only what the audio or subtitles ADDED. Text that is just
+        # the caption means the transcription heard nothing — maybe a music
+        # reel, maybe a hiccup — and the cache's rule is to retry that, not
+        # to remember it as the post for 30 days (found by review: the empty
+        # check ran on caption + speech combined). A caption is free to read
+        # again; re-hearing a music-only reel costs its ASR, a few paise.
+        if key and text.strip() != _caption_text(info).strip():
             await safe_cache_call(repo.transcripts.put, key, text)
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
                  quota_day=quota_day, kind="link")
