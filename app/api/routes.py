@@ -34,6 +34,19 @@ router = APIRouter(prefix="/api/v1")
 _repo = AnswerRepository()
 
 _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+# Every error below is read by a person, often on a phone, often not in their
+# first language. Measured 2026-09-22 before fixing: ffmpeg's own stderr, raw
+# MIME types and an environment-variable name were all reaching them. The
+# technical detail goes to the server log; the person gets what to do next.
+_MSG_NOT_AN_IMAGE = ("That doesn't look like a picture. Send a screenshot or "
+                     "a photo (PNG, JPG, WEBP or GIF).")
+_MSG_NOT_MEDIA = ("That doesn't look like audio or video. Send a voice note "
+                  "or a video file.")
+_MSG_BAD_AUDIO = ("The audio in that file couldn't be read. Try sending it "
+                  "again, or as a different file.")
+_MSG_NO_ASR = ("Voice notes and videos can't be checked here right now. "
+               "Send the message as text instead.")
 # ffmpeg sniffs the real container, so the type gate is deliberately loose —
 # browsers label voice notes inconsistently (audio/ogg, application/ogg, …).
 _ALLOWED_MEDIA_PREFIXES = ("audio/", "video/")
@@ -198,7 +211,8 @@ async def _run_media_job(
     try:
         text = await transcribe_wav(wav, duration)
     except MediaError as exc:
-        await fail(f"Could not process this audio ({exc}).")
+        print(f"[media] audio unreadable: {exc}")
+        await fail(_MSG_BAD_AUDIO)
         return
     except (httpx.HTTPError, RuntimeError) as exc:
         # Sarvam down, key rejected, timeout — say so plainly.
@@ -241,7 +255,7 @@ async def verify_image(
 ) -> JobAccepted:
     with _quota(request) as spend:
         if file.content_type not in _ALLOWED_IMAGE_TYPES:
-            raise HTTPException(415, f"Unsupported image type: {file.content_type}")
+            raise HTTPException(415, _MSG_NOT_AN_IMAGE)
         image_bytes = await file.read()
         # OCR is quick; do it inline so extracted text is captured even if the
         # heavier verification pipeline is deferred to the background.
@@ -269,9 +283,10 @@ async def verify_media(
     with _quota(request) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
-            raise HTTPException(415, f"Unsupported media type: {file.content_type}")
+            raise HTTPException(415, _MSG_NOT_MEDIA)
         if not settings.sarvam_api_key:
-            raise HTTPException(503, "Audio checking is not configured (SARVAM_API_KEY missing).")
+            print("[config] SARVAM_API_KEY is missing; audio cannot be transcribed")
+            raise HTTPException(503, _MSG_NO_ASR)
 
         data = await file.read()
         if len(data) > settings.max_media_bytes:
@@ -290,7 +305,8 @@ async def verify_media(
             raise HTTPException(413, f"Audio is {exc.seconds:.0f}s long; the limit is "
                                      f"{settings.max_media_seconds}s. Send a shorter clip.")
         except MediaError as exc:
-            raise HTTPException(422, f"Could not read audio from this file ({exc}).")
+            print(f"[media] upload unreadable: {exc}")
+            raise HTTPException(422, _MSG_BAD_AUDIO)
 
         # Everything free and fast has now run: the type gate, the byte cap
         # and the ffmpeg decode with its duration cap all reject with clear
@@ -436,9 +452,8 @@ async def verify_link(
             )
         needs_asr = info.subtitle is None and info.has_media
         if needs_asr and not settings.sarvam_api_key:
-            raise HTTPException(
-                503, "Audio checking is not configured (SARVAM_API_KEY missing)."
-            )
+            print("[config] SARVAM_API_KEY is missing; this link needs transcription")
+            raise HTTPException(503, _MSG_NO_ASR)
         if not info.has_media and not info.caption.strip():
             raise HTTPException(422, "That post has no video and no caption to check.")
 

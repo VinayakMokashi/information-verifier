@@ -206,7 +206,8 @@ def test_a_refusal_says_so_plainly(repo, monkeypatch):
     stored = _run(repo, answer, boom=AnswerRefused("cyber"),
                   monkeypatch=monkeypatch)
     assert stored.status is JobStatus.FAILED
-    assert "declined for safety" in stored.error
+    assert "can't be checked here" in stored.error
+    assert "cyber" not in stored.error          # the category is for the log
 
 
 def test_a_broken_cache_still_produces_an_answer(repo, monkeypatch):

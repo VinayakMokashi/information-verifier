@@ -107,9 +107,12 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         answer.status = JobStatus.FAILED
         answer.error = str(exc)
     except chat.AnswerRefused as exc:
+        # The category ("cyber", "bio", ...) is for the log, not the reader.
+        print(f"[job] declined by the model: {exc}")
         answer.status = JobStatus.FAILED
-        answer.error = ("This one can't be checked here — it was declined for "
-                        f"safety reasons ({exc}).")
+        answer.error = ("This one can't be checked here. If it is a claim you "
+                        "saw somewhere, try sending just the part you want "
+                        "checked.")
     except Exception as exc:  # noqa: BLE001 — every failure reaches the reader
         print(f"[job] check failed: {type(exc).__name__}: {exc}")
         answer.status = JobStatus.FAILED

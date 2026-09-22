@@ -498,6 +498,21 @@ function setBusy(b) {
   $("check").textContent = b ? "Checking…" : "Check";
 }
 
+// What a person sees when a submission fails. The server's own `detail` is
+// already written for them; everything else — a bare "HTTP 500", or the
+// browser's "Failed to fetch" — is replaced with what to do next.
+function friendlyError(e) {
+  if (e && e.message && e.status) return e.message;       // the server's sentence
+  if (e instanceof TypeError) {
+    return "Couldn't reach the server. Check your connection and try again.";
+  }
+  if (e && e.status >= 500) {
+    return "Something went wrong on our side. Please try again in a minute.";
+  }
+  if (e && e.status) return "That couldn't be sent. Please try again.";
+  return (e && e.message) || "Something went wrong. Please try again.";
+}
+
 // Takes a FACTORY, not a live promise: `submit(fetch(...))` would dispatch
 // the request while evaluating the argument, i.e. before the busy check —
 // so a second submission could spend money before the guard ever ran.
@@ -515,7 +530,9 @@ async function submit(makeRequest, mine) {
     const resp = await makeRequest();
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
-      throw new Error(body.detail || `HTTP ${resp.status}`);
+      const err = new Error(typeof body.detail === "string" ? body.detail : "");
+      err.status = resp.status;
+      throw err;
     }
     const { job_id } = await resp.json();
     setStatus("Queued…");
@@ -523,7 +540,7 @@ async function submit(makeRequest, mine) {
   } catch (e) {
     setStatus("");
     turn.answer.classList.remove("hidden");
-    turn.answer.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    turn.answer.innerHTML = `<div class="err">${esc(friendlyError(e))}</div>`;
   } finally {
     setBusy(false);
   }

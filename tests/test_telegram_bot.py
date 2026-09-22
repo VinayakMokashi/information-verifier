@@ -451,3 +451,18 @@ def test_help_still_works_while_a_job_is_pending():
     _handle({"chat": {"id": 7}, "text": "/help"}, app, tg, pending)
     assert "Information Verifier" in tg.sent[0][1]
     assert app.submissions == []
+
+
+def test_a_bare_http_error_never_reaches_the_chat():
+    """ "HTTP 500" was sent straight into the chat when the API gave no detail."""
+    import httpx
+
+    class Bare500:
+        async def post(self, *a, **kw):
+            return httpx.Response(500, text="Internal Server Error")
+
+    app = B.AppClient(Bare500(), base="http://x")
+    job_id, err = asyncio.run(app.submit_json("text", {"text": "x"}))
+    assert job_id is None
+    assert "HTTP" not in err and "500" not in err
+    assert "dobara" in err

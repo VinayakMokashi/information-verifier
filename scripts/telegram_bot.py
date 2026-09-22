@@ -339,6 +339,18 @@ def format_reply(answer: dict) -> str:
     return reply or "Is message mein check karne layak kuch nahi mila."
 
 
+def _server_trouble(status: int) -> str:
+    """What a chat reads when the API refused without saying why.
+
+    "HTTP 500" used to be sent straight into the chat. The code is logged;
+    the person is told what to do.
+    """
+    print(f"[bot] API answered {status} with no detail")
+    if status >= 500:
+        return "Server par kuch gadbad hai — thodi der baad dobara bhejiye."
+    return "Yeh bheja nahi ja saka — thodi der baad dobara try kariye."
+
+
 class AppClient:
     """The same two-call REST contract the web page uses."""
 
@@ -351,9 +363,9 @@ class AppClient:
         resp = await self._http.post(f"{self._base}/verify/{endpoint}", json=payload)
         if resp.status_code != 202:
             try:
-                detail = resp.json().get("detail") or f"HTTP {resp.status_code}"
+                detail = resp.json().get("detail") or _server_trouble(resp.status_code)
             except ValueError:
-                detail = f"HTTP {resp.status_code}"
+                detail = _server_trouble(resp.status_code)
             return None, str(detail)
         return resp.json()["job_id"], ""
 
@@ -365,9 +377,9 @@ class AppClient:
         )
         if resp.status_code != 202:
             try:
-                detail = resp.json().get("detail") or f"HTTP {resp.status_code}"
+                detail = resp.json().get("detail") or _server_trouble(resp.status_code)
             except ValueError:
-                detail = f"HTTP {resp.status_code}"
+                detail = _server_trouble(resp.status_code)
             return None, str(detail)
         return resp.json()["job_id"], ""
 
