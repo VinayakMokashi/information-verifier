@@ -85,3 +85,22 @@ def test_what_a_browser_strips_is_still_stripped():
     so a pasted link with a newline on the end still works."""
     assert strict_host(" https://altnews.in/x\n") == "altnews.in"
     assert strict_host("\thttps://www.youtube.com/shorts/x \r\n") == "www.youtube.com"
+
+
+@pytest.mark.parametrize("url", [
+    "https://altnews.in:443.evil.com/x",   # a port that is not a port
+    "https://altnews.in:99999/x",          # out of range
+    "https://altnews.in:abc/x",
+    "https://altnews.in:-1/x",
+    "https://altnews.in: 443/x",
+])
+def test_a_url_with_an_unusable_port_is_not_a_trusted_source(url):
+    """Found by review: the port was never looked at, so Python read the host
+    as altnews.in while Chrome refuses the URL outright — a "fact-checker"
+    chip on a link nobody can open."""
+    assert strict_host(url) is None
+    assert trusted_domain_of(url) is None
+
+
+def test_a_real_port_still_parses():
+    assert strict_host("https://altnews.in:8443/x") == "altnews.in"

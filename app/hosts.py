@@ -56,6 +56,7 @@ def strict_host(url: str, schemes: tuple[str, ...] = ("https", "http")) -> str |
             return None
         if parts.username is not None or parts.password is not None:
             return None
+        parts.port          # raises ValueError on a port no browser accepts
         host = (parts.hostname or "").lower()
     except ValueError:
         return None
