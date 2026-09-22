@@ -148,3 +148,19 @@ def test_the_page_renders_values_as_text_never_markup():
     assert "Show as table" in page                 # table view for the chart
     assert "prefers-color-scheme: dark" in page    # dark mode, selected not flipped
     assert 'data-theme="dark"' in page
+
+
+def test_two_host_headers_are_refused(local):
+    """Found by review with a raw socket: a request carrying a local Host
+    first and an attacker's second got 200, because only the first was read.
+    No browser can send that, but the gate should not turn on which one a
+    parser hands over."""
+    from app.api.dashboard import _local_only
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    scope = {"type": "http", "client": ("127.0.0.1", 50000), "headers": [
+        (b"host", b"127.0.0.1:8000"), (b"host", b"rebind.attacker.example")]}
+    with pytest.raises(HTTPException) as refused:
+        _local_only(Request(scope))
+    assert refused.value.status_code == 404

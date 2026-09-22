@@ -47,9 +47,15 @@ _LOCAL_HOST_HEADER = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})
 
 def _local_only(request: Request) -> None:
     peer = request.client.host if request.client else ""
+    hosts = request.headers.getlist("host")
+    # Exactly one Host: a request carrying two (a local one first, an
+    # attacker's second) passed, because only the first was read. No browser
+    # can send that — it needs a raw client already on this machine — but the
+    # gate should not depend on which one a parser happens to hand over.
     if (peer not in _LOCAL_HOSTS
             or any(h in request.headers for h in _PROXY_HEADERS)
-            or not _LOCAL_HOST_HEADER.fullmatch(request.headers.get("host", ""))):
+            or len(hosts) != 1
+            or not _LOCAL_HOST_HEADER.fullmatch(hosts[0])):
         raise HTTPException(404, "Not Found")
 
 
