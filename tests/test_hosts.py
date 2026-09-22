@@ -67,3 +67,21 @@ def test_the_fetcher_is_still_https_only_and_exact():
     assert allowed_link_host("http://www.youtube.com/watch?v=x") is None
     assert allowed_link_host("https://youtube.com.evil.com/watch") is None
     assert strict_host("http://www.youtube.com/x") == "www.youtube.com"
+
+
+@pytest.mark.parametrize("edge", ["\u00a0", "\u3000", "\u2028", "\x85", "\u2003"])
+def test_whitespace_a_browser_keeps_is_not_stripped(edge):
+    """Found by review: str.strip() removes Unicode whitespace that browsers
+    do not — the URL standard strips only C0 controls and space — so
+    a no-break space before https://altnews.in/fake counted as Alt News while no browser
+    could open it there. It is not a URL to a browser; it is none here."""
+    for url in (edge + "https://altnews.in/fake", "https://altnews.in/fake" + edge):
+        assert strict_host(url) is None, repr(url)
+        assert trusted_domain_of(url) is None, repr(url)
+
+
+def test_what_a_browser_strips_is_still_stripped():
+    """Leading/trailing C0 controls and spaces: the URL standard removes them,
+    so a pasted link with a newline on the end still works."""
+    assert strict_host(" https://altnews.in/x\n") == "altnews.in"
+    assert strict_host("\thttps://www.youtube.com/shorts/x \r\n") == "www.youtube.com"

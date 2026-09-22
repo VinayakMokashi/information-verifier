@@ -23,6 +23,12 @@ from urllib.parse import urlsplit
 
 _MAX_URL = 2048
 _LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+# What the URL standard strips from both ends before parsing: C0 controls and
+# space. str.strip() also removes Unicode whitespace that browsers keep, so a
+# no-break space before "https://altnews.in/…" counted as Alt News while no
+# browser could open it there (found by review) — and the fact-check parser,
+# reading the same URL with urlparse, crashed on it.
+_C0_OR_SPACE = "".join(map(chr, range(0x21)))
 
 
 def valid_hostname(host: str) -> bool:
@@ -41,8 +47,11 @@ def strict_host(url: str, schemes: tuple[str, ...] = ("https", "http")) -> str |
     """
     if not isinstance(url, str) or len(url) > _MAX_URL:
         return None
+    trimmed = url.strip(_C0_OR_SPACE)
+    if trimmed != trimmed.strip():
+        return None             # Unicode whitespace at an edge: fail closed
     try:
-        parts = urlsplit(url.strip())
+        parts = urlsplit(trimmed)
         if parts.scheme.lower() not in schemes:
             return None
         if parts.username is not None or parts.password is not None:

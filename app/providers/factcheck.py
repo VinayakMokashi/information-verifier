@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import settings
+from app.hosts import strict_host
 from app.models.answer import Source
 from app.trusted_sources import trusted_domain_of
 
@@ -42,17 +43,21 @@ def _parse_and_filter(data: dict) -> tuple[list[Source], list[str]]:
             if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
-            if trusted_domain_of(url) is None:
+            host = strict_host(url)
+            if host is None or trusted_domain_of(url) is None:
                 # Label drops by host only. Never echo the raw URL: it is
                 # attacker-supplied and could forge lines in this audit log.
                 try:
-                    host = urlparse(url).hostname or "(no host)"
+                    shown = urlparse(url).hostname or "(no host)"
                 except ValueError:
-                    host = "(no host)"
-                if host not in dropped:
-                    dropped.append(host)
+                    shown = "(no host)"
+                if shown not in dropped:
+                    dropped.append(shown)
                 continue
-            host = urlparse(url).hostname.removeprefix("www.")
+            # The host from the SAME parser the trust check used. A second
+            # parser here (urlparse) once disagreed with it on a URL wrapped in
+            # a no-break space, raised, and took every other fact-check with it.
+            host = host.removeprefix("www.")
             # Google sometimes omits publisher.name — fall back to the host,
             # www-stripped like _publisher_of() on the web-search path, so one
             # outlet never shows up under two names in the same report.

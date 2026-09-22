@@ -209,3 +209,18 @@ def test_a_4xx_is_not_retried(monkeypatch):
     FC, calls, asyncio = _patch_fetch(monkeypatch, [status_error, GOOD])
     assert asyncio.run(FC.search_factcheck("x")) == []
     assert len(calls) == 1
+
+
+def test_one_bad_review_cannot_sink_the_others():
+    """Found by review, reproduced: a ClaimReview url wrapped in a non-breaking
+    space passed the trust check (it stripped Unicode whitespace) but not the
+    host lookup after it — hostname None, AttributeError — and chat.answer
+    then dropped EVERY prior fact-check, the good BOOM verdict included.
+    Publisher urls come from anyone who publishes ClaimReview markup."""
+    data = {"claims": [{"claimReview": [
+        _review("\u00a0https://www.altnews.in/fake", "AltNews", "True"),
+        _review("https://www.boomlive.in/real-check", "BOOM", "False"),
+    ]}]}
+    sources, dropped = _parse_and_filter(data)
+    assert [s.url for s in sources] == ["https://www.boomlive.in/real-check"]
+    assert len(dropped) == 1
