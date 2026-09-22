@@ -120,6 +120,54 @@ class AnswerCache:
             return cur.rowcount or 0
 
 
+class DailyQuota:
+    """The deployment-wide checks-per-day counter, in SQLite.
+
+    `take` is ONE statement on purpose. A read-then-write pair would need a
+    lock to be safe, and the earlier in-memory limiter measured exactly that
+    window being exploited: 30 simultaneous uploads all saw an empty counter.
+    The UPSERT's `WHERE used < cap` makes the database itself refuse the slot
+    past the cap — measured on SQLite 3.45: rowcount is 0 once the cap is hit
+    and `used` never exceeds it.
+    """
+
+    def used(self, day: str) -> int:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT used FROM daily_checks WHERE day = ?", (day,)
+            ).fetchone()
+        return row["used"] if row else 0
+
+    def take(self, day: str, cap: int) -> bool:
+        if cap <= 0:
+            return False      # the INSERT branch would otherwise grant slot 1
+        with get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO daily_checks (day, used) VALUES (?, 1) "
+                "ON CONFLICT(day) DO UPDATE SET used = used + 1 "
+                "WHERE daily_checks.used < ?",
+                (day, cap),
+            )
+            return cur.rowcount == 1
+
+    def give_back(self, day: str) -> None:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE daily_checks SET used = used - 1 "
+                "WHERE day = ? AND used > 0",
+                (day,),
+            )
+
+    def history(self, days: int) -> list[tuple[str, int]]:
+        """(day, used) for the most recent `days` days that saw any use."""
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT day, used FROM daily_checks ORDER BY day DESC LIMIT ?",
+                (days,),
+            ).fetchall()
+        return [(r["day"], r["used"]) for r in rows]
+
+
 class AnswerRepository:
     """Job rows. The payload is opaque JSON, so the Answer model can evolve."""
 

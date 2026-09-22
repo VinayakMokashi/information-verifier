@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS meta (
     key          TEXT PRIMARY KEY,
     value        TEXT NOT NULL
 );
+
+-- The deployment-wide daily check counter. Persisted, not in memory: an
+-- in-memory counter reset on every restart, and under `--reload` that is every
+-- saved file — a "2 checks a day" cap that a restart quietly refills is not a
+-- cap. `day` is the operator's calendar day (see day_boundary_utc_offset_min).
+-- No personal data: one integer per day.
+CREATE TABLE IF NOT EXISTS daily_checks (
+    day          TEXT PRIMARY KEY,
+    used         INTEGER NOT NULL
+);
 """
 
 # Bumped when the stored shape changes incompatibly. The DB is local and

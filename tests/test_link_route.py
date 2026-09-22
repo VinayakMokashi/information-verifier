@@ -92,7 +92,7 @@ def test_a_rejected_link_is_refunded_nothing_was_spent(client, monkeypatch):
         LinkError("not_found", "No public post was found at that link.")))
 
     assert _submit(client).status_code == 422
-    assert len(limits._day) == 0
+    assert limits.used_today() == 0
 
 
 def test_a_known_overlong_video_is_rejected_free(client, monkeypatch):
@@ -105,7 +105,7 @@ def test_a_known_overlong_video_is_rejected_free(client, monkeypatch):
 
     assert resp.status_code == 413
     assert "999" in resp.json()["detail"]
-    assert len(limits._day) == 0              # refunded: nothing was fetched
+    assert limits.used_today() == 0           # refunded: nothing was fetched
 
 
 def test_audio_without_sarvam_key_is_a_clear_503(client, monkeypatch):
@@ -261,7 +261,7 @@ def test_an_accepted_job_keeps_its_quota_slot_even_if_the_fetch_fails(client, mo
     report = _report(client, _submit(client))
 
     assert report["status"] == "FAILED"
-    assert len(limits._day) == 1
+    assert limits.used_today() == 1
 
 
 # -- the page routes a pasted link ---------------------------------------------

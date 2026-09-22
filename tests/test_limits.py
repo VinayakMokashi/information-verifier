@@ -66,7 +66,7 @@ def test_a_rejection_that_came_after_paying_still_burns_quota(client, monkeypatc
     resp = client.post("/api/v1/verify/image",
                        files={"file": ("blank.png", b"\x89PNG", "image/png")})
     assert resp.status_code == 422
-    assert len(limits._day) == 1, "a paid-for request must consume its quota slot"
+    assert limits.used_today() == 1, "a paid-for request must consume its quota slot"
 
 
 def test_a_rejection_before_any_spending_is_refunded(client, monkeypatch):
@@ -79,7 +79,7 @@ def test_a_rejection_before_any_spending_is_refunded(client, monkeypatch):
     resp = client.post("/api/v1/verify/image",
                        files={"file": ("notes.txt", b"hi", "text/plain")})
     assert resp.status_code == 415
-    assert len(limits._day) == 0
+    assert limits.used_today() == 0
 
 
 def test_rejected_submissions_do_not_burn_quota(limited, monkeypatch):
@@ -118,3 +118,80 @@ def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited):
     # 3 allowed per hour (see the `limited` fixture); the rest must be refused.
     assert codes.count(202) == 3
     assert codes.count(429) == 17
+
+
+# -- the 2-a-day decision (Vinayak, 2026-09-22) -------------------------------
+
+def test_the_daily_cap_defaults_to_two():
+    """Pinned because it is a DECISION, not a tuning knob: "lower it for now
+    and do only 2 checks per day, just to be safe." Raising it should be a
+    deliberate edit here AND in config.py, recorded in PROJECT_PLAN §7."""
+    from app.config import Settings
+
+    assert Settings.model_fields["max_checks_per_day"].default == 2
+
+
+def test_the_daily_cap_survives_a_restart(limited, monkeypatch):
+    """The in-memory counter reset on every restart — under `--reload`, every
+    saved file. Simulate one by wiping all in-process state: the count must
+    still be there, and the cap must still hold."""
+    monkeypatch.setattr(settings, "max_checks_per_day", 2)
+    monkeypatch.setattr(settings, "max_checks_per_hour", 100)
+    assert _check(limited).status_code == 202
+    assert _check(limited).status_code == 202
+
+    limits.reset()                       # everything a restart would lose
+
+    assert limits.used_today() == 2
+    blocked = _check(limited)
+    assert blocked.status_code == 429
+    assert "daily limit of 2 checks" in blocked.json()["detail"]
+
+
+def test_the_refusal_says_when_it_resets(limited, monkeypatch):
+    monkeypatch.setattr(settings, "max_checks_per_day", 1)
+    monkeypatch.setattr(settings, "max_checks_per_hour", 100)
+    assert _check(limited).status_code == 202
+    detail = _check(limited).json()["detail"]
+    assert "daily limit of 1 check." in detail          # no "1 checks"
+    assert "midnight India time" in detail
+
+
+def test_a_day_is_the_operators_day_not_utcs(monkeypatch):
+    """7 pm UTC on the 22nd is already 12:30 am on the 23rd in India. "2 a
+    day" means his day."""
+    import datetime as real
+
+    class FrozenClock(real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real.datetime(2026, 9, 22, 19, 0, tzinfo=real.timezone.utc)
+
+    monkeypatch.setattr(limits, "datetime", FrozenClock)
+    monkeypatch.setattr(settings, "day_boundary_utc_offset_min", 330)
+    assert limits.today() == "2026-09-23"
+    monkeypatch.setattr(settings, "day_boundary_utc_offset_min", 0)
+    assert limits.today() == "2026-09-22"
+
+
+def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
+    """The guard fails CLOSED. A locked or broken database must not become an
+    unlimited budget."""
+    def broken(*a, **kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(limits._daily, "take", broken)
+    resp = _check(limited)
+    assert resp.status_code == 503
+    assert "busy" in resp.json()["detail"]
+
+
+def test_the_database_itself_refuses_a_slot_past_the_cap(client):
+    """The guarantee does not rest on the Python lock: the UPSERT's WHERE is
+    what refuses slot 3, even for two processes racing."""
+    from app.store.repository import DailyQuota
+
+    quota = DailyQuota()
+    assert [quota.take("2026-01-01", 2) for _ in range(5)] == [True, True, False, False, False]
+    assert quota.used("2026-01-01") == 2
+    assert quota.take("2026-01-02", 0) is False       # a zero cap grants nothing
