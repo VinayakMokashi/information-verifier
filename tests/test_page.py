@@ -86,6 +86,16 @@ def test_confidence_is_always_shown_with_its_basis():
     assert "nothing reliable addressed this" in foot
 
 
+def test_the_basis_counts_each_tier_on_its_own():
+    """Found by review: the count was of ALL sources, printed under the
+    answer's own label — so "2 trusted sources" appeared for an answer whose
+    second source was listed below under "General web". The basis line is a
+    claim about the evidence, so it counts what it names."""
+    foot = PAGE[PAGE.index("function drawFooter("):PAGE.index("// -- transport")]
+    assert 's.tier === "trusted"' in foot, "the basis does not separate the tiers"
+    assert "sources.length - trusted" in foot
+
+
 def test_a_source_chip_never_shows_a_raw_url_as_its_name():
     """Same rule as Source.display_name on the server. Falling through to the
     raw URL puts a 90-character tracking link where 'boomlive.in' belongs."""

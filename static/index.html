@@ -359,9 +359,16 @@ function drawFooter(report) {
   const tier = report.tier || "none";
   const label = { trusted: "Fact-checkers", web: "General web only",
                   none: "No sources found" }[tier];
-  const n = (report.sources || []).length;
-  const basis = { trusted: `${n} trusted source${n === 1 ? "" : "s"}`,
-                  web: `${n} general web source${n === 1 ? "" : "s"} — no fact-checker has covered this`,
+  // Counted per tier, not in total: the basis line is a claim about the
+  // EVIDENCE, and counting every source under the answer's own label read
+  // "2 trusted sources" for an answer whose second source was a blog.
+  const sources = report.sources || [];
+  const trusted = sources.filter((s) => s.tier === "trusted").length;
+  const web = sources.length - trusted;
+  const basis = { trusted: `${trusted} trusted source${trusted === 1 ? "" : "s"}`,
+                  web: web
+                    ? `${web} general web source${web === 1 ? "" : "s"} — no fact-checker has covered this`
+                    : "no fact-checker has covered this",
                   none: "nothing reliable addressed this" }[tier];
   const conf = report.confidence == null
     ? `<span class="pill none">Confidence not stated</span>`
