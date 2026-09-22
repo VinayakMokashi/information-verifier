@@ -14,11 +14,12 @@ If nothing vetted has covered the claim, it searches the wider web and **says
 so**, in its own clearly-labelled section. General-purpose: health, science,
 history, politics — not just Indian political rumours.
 
-> Status: text, image, audio/video and pasted links all work end to end, with a
-> streaming chat page, a Telegram bot, and an answer cache. The engine was
-> rebuilt around this answer shape in September 2026; the first paid run of the
-> new engine is the next step. See
-> [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand.
+> Status: text, image, audio/video and pasted links (Instagram, YouTube,
+> Facebook) all work end to end, with a streaming chat page and a Telegram bot.
+> **Measured on real checks (Sept 2026): about $0.05 when a fact-checker has
+> covered the claim, $0.15 when it has to search the wider web, $0 for a
+> repeat.** Capped at 2 checks a day for now, with a spending dashboard for the
+> owner. See [PROJECT_PLAN.md](PROJECT_PLAN.md) for exactly where things stand.
 
 ## Why the design looks the way it does
 
@@ -63,12 +64,15 @@ streams word by word over the real SSE endpoint, so the transport is genuine:
 .\.venv\Scripts\python.exe scripts\serve_demo.py    # http://127.0.0.1:8000
 ```
 
-Run it for real (one worker — the stream registry and rate limiter are
-in-memory):
+Run it for real (one worker — the stream registry and the per-visitor limit
+are in-memory):
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
+
+What it has spent is at **http://127.0.0.1:8000/dashboard** — shown only to
+the machine the server runs on, never through a share link.
 
 Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md).
 
@@ -113,9 +117,10 @@ No Node, no Docker, no build step, no vector database, no local model.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-397 tests, always free — every paid API is faked, including a test that proves
-"free" demo mode cannot reach a paid provider, and one that proves every script
-can still import what it claims to.
+594 tests, always free — every paid API is faked, including a test that proves
+"free" demo mode cannot reach a paid provider, one that proves every script can
+still import what it claims to, and one that proves a chat on the Telegram bot
+cannot pay for the same check twice.
 
 ## Documentation
 

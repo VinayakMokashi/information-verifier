@@ -17,54 +17,40 @@ c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier
 
 FIRST, read these in order:
 1. NEXT_SESSION.md  — where the last session stopped, and what was next.
-2. CLAUDE.md        — how we work here: money rules, the 9 invariants, conventions.
-3. PROJECT_PLAN.md  — the source of truth. §0 status, §0a the reel-link feature
-   (it was lost from the plan once — never let that happen again), §7 decisions
-   log INCLUDING "The pivot" at the end (skim before changing anything),
-   §11 "THE TODO LIST" = open items.
+2. CLAUDE.md        — how we work here: money rules, the 10 invariants, conventions.
+3. PROJECT_PLAN.md  — the source of truth. §0 status, §7 decisions log (newest
+   first — the 2026-09-22 entry is the one to read), §8 MEASURED costs,
+   §11 "THE TODO LIST".
 Your memory also has entries for this project.
 
-Verify the state first (free, ~35s):
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 397 passing
+Verify the state first (free, ~50s) — and read pytest's OWN exit code:
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 594 passing
 
-BIG CONTEXT: the app was rebuilt in Sept 2026. There is no more Truth Report,
-no rating enum, no per-claim verdicts, no semantic cache, no embeddings. One
-streaming Claude Sonnet 5 call (two at most: whitelist first, then open web if
-nothing vetted covered it) writes one prose answer. If you find code or docs
-still talking about TruthReport / claim_verdicts / sqlite-vec as CURRENT state,
-that's a bug — outside §6 and §7, which are history and should stay.
+The engine has run for real now (2026-09-22): about $0.05 when a fact-checker
+covered the claim, $0.15 for a two-pass fresh rumour, $0.08 for a real reel.
+Sonnet 5 stays (it beat Opus 5 on the same reel). The app is capped at
+2 CHECKS A DAY (my decision, "just to be safe" — persisted, India's day,
+shared by the web page and the Telegram bot). What it has spent is at
+http://127.0.0.1:8000/dashboard (this machine only).
 
-I'm cost-conscious — DON'T run paid tests without asking. The new engine has
-NEVER had a paid run; §8's numbers for it are modelled (~$0.16 single-pass,
-~$0.26 two-pass). The one measured number this project has is $0.279 for a
-whole 6-claim reel under the OLD engine. Free paths for nearly everything are
-in CLAUDE.md's table (pytest, serve_demo, demo_offline, link_probe,
-factcheck_probe, telegram_bot --check-token).
+I'm cost-conscious — DON'T run paid tests without asking. Free paths for nearly
+everything are in CLAUDE.md's table.
 
-Work the way we have been: systematic layered commits PUSHED AFTER EACH ONE
-(so a session break never loses work), adversarial review of the diff INCLUDING
-of the fixes themselves (that has caught real bugs every single round),
-measure rather than assume, and keep PROJECT_PLAN.md + NEXT_SESSION.md current.
-Two hard-won process rules: (a) when editing docs by script, assert every
-replace matched — a silent no-op left §11 stale once; (b) a green suite is not
-a working product — twice now, tests passed while the thing was broken, so
-check a new test actually FAILS against the broken version.
+Work the way we have been: systematic layered commits PUSHED AFTER EACH ONE,
+adversarial review of the diff INCLUDING of the fixes themselves, measure
+rather than assume, and keep PROJECT_PLAN.md + NEXT_SESSION.md current.
+Process rules we learned the hard way (all in CLAUDE.md): check pytest's own
+exit code; write anything with a backslash through Edit/Write, not a heredoc;
+look at a UI in headless Chrome before calling it done; concurrency tests need
+fakes that suspend.
 
-What I want to work on next: <PICK ONE, or tell me your own>
-  (a) THE FIRST PAID RUN of the new engine. Everything is built and this is the
-      thing that's been waiting. Two checks, under a dollar total: one
-      known-debunked claim (should be single-pass) and one fresh rumour (should
-      escalate to the open-web pass). Then put the MEASURED numbers into §8 and
-      delete the modelled ones.
-  (b) GO LIVE with the Telegram bot. Token is in .env and validated
-      (@Information_Verifier_bot); it has never been started. I'll be at the
-      keyboard — walk me through it and we fix what the first real messages break.
-  (c) §11 item 5: a transcript cache for links, so the same reel forwarded by
-      many people is bought once, not once per person. Best-value code item.
-  (d) A/B Sonnet 5 vs Opus 5 on one real reel (needs (a) first for a baseline).
-  (e) Burn down the rest of the §11 backlog (items 7–16).
-  (f) Prepare for real public sharing: my cap decisions + observability
-      + data pruning, then a supervised share_demo.ps1 session.
+What I want to do today:
+  (a) GO LIVE with the Telegram bot, with me watching. Token is in .env and
+      validates (@Information_Verifier_bot). Walk me through starting the app
+      and the bot, then we message it and fix whatever real messages break.
+      Remember the 2-a-day cap applies to it.
+  (b) Then maybe: raise the daily cap, or more real checks across health /
+      science / Indian politics to judge answer quality (§11 item 4).
 ```
 
 ---
@@ -72,19 +58,18 @@ What I want to work on next: <PICK ONE, or tell me your own>
 ## 2. What the project can do today
 
 Text · screenshot · voice note/video · **pasted links** (Instagram Reels,
-YouTube/Shorts, Facebook videos, fb.watch) · **Telegram bot** (built, never yet
-live — needs starting, the token works).
+YouTube/Shorts, Facebook videos and share-button reel links) · **Telegram bot**
+(concurrent; never yet live — the token works).
 
-One prose answer per submission, streamed word by word onto a chat page, in the
-language the message arrived in. Confidence % with its basis. Sources grouped
-by tier, and a clearly-labelled "general web" section when no fact-checker has
-covered the claim. General-purpose: health, science, history, politics — 58
-trusted domains including WHO, CDC, NIH, PubMed, NASA, NOAA, Cochrane, Snopes,
-Full Fact, and the Indian fact-checkers it started with.
+One prose answer per submission, streamed onto a chat page in the sender's
+language (English in, English out — now stated by code, not left to the
+model). Confidence % with its basis; sources narrowed to what the answer rests
+on; a clearly-labelled "general web" section when no fact-checker covered it.
+57 trusted domains, 43 of them searchable — all verified against the live API.
 
-Economics: **modelled** ~$0.16 single-pass / ~$0.26 two-pass; **$0** for an
-exact re-forward inside the cache TTL; **$0** for the entire demo/test surface.
-The one measured figure ($0.279 for a 6-claim reel) predates the pivot.
+Money: **measured** $0.048–0.061 single pass, $0.150 two-pass, $0.082 + ₹0.58
+for a real reel, $0 for a repeat. 2 checks a day. Spending dashboard at
+`/dashboard`. Messages deleted after 30 days; costs kept without content.
 
 ---
 
@@ -92,55 +77,44 @@ The one measured figure ($0.279 for a 6-claim reel) predates the pivot.
 
 The authoritative copy lives in **PROJECT_PLAN.md §11**. Summary:
 
-**Needs Vinayak, not code:**
-1. **The first paid run of the new engine** — the next thing that should happen.
-2. AFP Fact Check whitelist — add `factcheck.afp.com` or not?
-3. Spend caps before going public (~$26/day modelled now, down from ~$99–211,
-   because a submission can no longer fan out into eight paid claims).
-4. **First live Telegram message** (needs you present; the bot is ready).
+**Next, with Vinayak present:**
+1. **First live Telegram message** — "maybe tomorrow". Everything is ready.
 
-**Best-value code items:** a transcript cache for repeat links (§11 item 5),
-then the Sonnet-vs-Opus A/B (item 6), then pruning stored answers (item 7).
+**On hold:** WhatsApp ("Meta's approval process is slow").
+
+**Code, when wanted:** raise the cap; more real checks to judge quality;
+mixed-language (English caption over Hindi speech) behaviour; `/health`;
+ASR metering seam; thread-pool contention; garbled source titles.
 
 ---
 
 ## 4. WHERE THE LAST SESSION ENDED
 
-**Session of 2026-09-10/11 — the pivot is COMPLETE, committed and pushed.**
-`main` is clean, **397 tests pass**, working tree empty. Nothing is half-done.
+**Session of 2026-09-22 — every to-do Vinayak listed is DONE, committed and
+pushed.** `main` is clean, **594 tests pass** (pytest exit 0).
 
-Vinayak asked for the app to answer "like a simple claude chat" and, mid-build,
-to make it general-purpose rather than India-political. Both are done.
+What he asked, and what happened:
 
-| Commit | What |
+| He asked | Done |
 |---|---|
-| `d664e0c` | the app runs on the chat engine; the old pipeline is deleted |
-| `2602338` | the page becomes a streaming chat UI |
-| `436fa16` | the Telegram bot spoke a shape that no longer existed |
-| `10b3652` | four free-path scripts that would have died on line 1 |
-| `0747cf7` | docs rewritten — the plan described a program that no longer existed |
-| `c8cdb43` | adversarial pass over my own diff: 4 more ways a paid answer was thrown away |
+| The first paid run | ✅ Engine works. Measured costs in §8; it found and fixed a Hinglish-for-English bug and a self-contradicting trust label on the way. |
+| AFP: "you can decide" | ✅ Kept trusted. Its site blocks the search crawler, so it's reached via Google Fact Check. |
+| 2 checks a day, recorded | ✅ Persisted (a restart can't refill it), fails closed, India's day; in config.py with his words, pinned by a test, and in §7. |
+| Transcript cache | ✅ A reel is transcribed once, not once per forward. |
+| Sonnet vs Opus A/B | ✅ Sonnet stays: right, 4× cheaper, 2.6× faster; Opus reasoned from stale memory. |
+| Delete old messages | ✅ 30 days; costs kept in a content-free ledger. |
+| Bot one-person-at-a-time | ✅ Concurrent, with a per-chat lock so one chat can't pay twice. |
+| Technical error text | ✅ Eight found and rewritten in plain words; details go to the log. |
+| Spending dashboard | ✅ `/dashboard`, this machine only; checked visually, light/dark, phone/desktop. |
+| Facebook Reels | ✅ Share-button links work; some reels are login-only and now say so. |
+| Tidy duplicates | ✅ One host parser (it had a hole: `evil..altnews.in` counted as Alt News), one sentinel stripper, one console stream; the link probe asks the app. |
+| Telegram tomorrow; WhatsApp on hold | Recorded in §11. |
 
-**Two findings worth carrying forward** (both in §7 "The pivot"):
+**Found only by reality, not by any test** (all in §7): two whitelisted sites
+blocked the crawler, so the general-purpose search had never actually run;
+the server could not start on the real database; the search tool made
+English claims come back in Hinglish; the first "phone" screenshots were
+really desktop ones.
 
-- **A green suite is not a working product.** The Telegram bot was broken for a
-  whole commit while its tests passed — they fed it hand-built Truth Report
-  dicts. And four scripts couldn't import at all, because no test imported a
-  script. `tests/test_scripts_import.py` now closes the second gap, and it was
-  checked against the broken commit to confirm it actually fails there.
-- **A confident badge explaining nothing.** A 15,000-character single paragraph
-  fit in no Telegram budget, so the whole answer was dropped and the reply
-  became "95% confident" plus a link and no explanation. Blocks must be
-  droppable, therefore bounded.
-
-**Verified free this session:** the demo server streams live over a real socket
-(word-by-word deltas, sequence ids); a late join with `Last-Event-ID: 60`
-resumes at 61 instead of restarting; an identical resubmit returns
-`cached=True` at $0.0000; image and link routes both show their machine-read
-text back; Devanagari, Tamil and Bengali all survive a **cp1252** redirected
-stdout (the case that hides from a UTF-8 shell); and the bot token still
-validates.
-
-**The one thing that has NOT happened: a paid run of the new engine.** Vinayak
-deferred it deliberately — "we will do the paid run once everything is built."
-It is built.
+**Spent this session:** $0.87 on the dashboard (three checks $0.26, the A/B
+$0.41, language diagnostics $0.20) + a fraction of a cent for the crawl probe.

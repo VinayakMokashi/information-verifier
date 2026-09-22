@@ -9,11 +9,16 @@ This file is how to work here.
 
 ## Money rules (the user is cost-conscious — this matters most)
 
-- **Never run a paid test without asking.** MODELLED: ~$0.16 for a single pass,
-  ~$0.26 when the open-web pass also runs. The one time this project modelled a
-  cost and then measured it, the model was 40% high — so the model is a
-  starting point, not a fact. Sarvam ASR is ~₹0.50/min. Every answer carries
-  its own bill in `answer.usage`.
+- **Never run a paid test without asking.** MEASURED 2026-09-22 (Sonnet 5):
+  **$0.05–0.06** for a single pass, **$0.15** when the open-web pass also runs,
+  **$0.08** for a real 70 s reel (+ ₹0.58 ASR, now paid once per video). The
+  models said 2–3× more. Every answer carries its own bill in `answer.usage`,
+  and **`http://127.0.0.1:8000/dashboard`** (this machine only) shows the total.
+- **The deployment is capped at 2 checks a day** (Vinayak, 2026-09-22: "just
+  to be safe … we can increase it later"). Persisted in SQLite, India's day,
+  shared by the web page and the Telegram bot; a test pins the default.
+  Operator scripts (`smoke_test.py`, `ab_models.py`) do not go through it —
+  they are still paid, so still ask.
 - **Prefer the free path, and there is almost always a free path:**
 
   | Command | Cost | Proves |
@@ -24,9 +29,11 @@ This file is how to work here.
   | `.venv\Scripts\python.exe scripts\factcheck_probe.py "claim"` | $0 | which publishers we keep/drop |
   | `.venv\Scripts\python.exe scripts\link_probe.py <url>` | $0 | does a reel resolve; has it captions |
   | `.venv\Scripts\python.exe scripts\telegram_bot.py --check-token` | $0 | the bot token still works |
+  | `.venv\Scripts\python.exe scripts\crawl_probe.py` | $0–0.002 | the API accepts every search domain (run after editing the whitelist) |
   | `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg` | ~paise | one real transcription |
   | `.venv\Scripts\python.exe scripts\smoke_test.py "claim"` | ~cents | one real check, with its bill |
   | `.venv\Scripts\python.exe scripts\link_smoke.py <url>` | ~cents | a real reel, end to end, with its bill |
+  | `.venv\Scripts\python.exe scripts\ab_models.py <url or claim>` | ~$0.40 | two models on one input, each billed |
 
 - When adding a paid provider, add it to `scripts/fake_stages.py`
   (`apply_fake_stages`) **and** neutralize its credential where it is actually
@@ -38,7 +45,8 @@ This file is how to work here.
 Windows, PowerShell. Always use the venv Python explicitly:
 `.\.venv\Scripts\python.exe …` — a bare `python` will not have the deps.
 
-Installed: Python 3.12, git, gh, winget, ffmpeg, cloudflared.
+Installed: Python 3.12, git, gh, winget, ffmpeg, cloudflared, Chrome and Edge
+(headless screenshots — see "How we work").
 **Not** installed and not needed: Node.js, Docker, psql, Redis.
 No longer used (the pivot removed them): sqlite-vec, sentence-transformers,
 EmbeddingGemma. Startup no longer imports torch.
@@ -76,13 +84,18 @@ limiter are both in-memory.
    `answer.source_text` and is displayed — a mis-hear must never silently
    become a confident answer about a different claim.
 5. **Every paid call is bounded before it is made.** Size/duration/input caps
-   and the search budget come before any spend, and the rate limiter reserves
-   atomically. The budget is enforced across `pause_turn` continuations, not
-   per request.
-6. **The cache degrades to doing the work, and its entries expire.** A cache
-   failure must never discard an answer already paid for, or surface as an
-   empty result. The cache is exact-match only now, so the TTL is not optional
-   — "no fact-checker has covered this" is wrong the day BOOM publishes.
+   and the search budget come before any spend. The daily cap is taken by one
+   conditional UPSERT in SQLite (the database refuses the slot past the cap),
+   survives restarts, and FAILS CLOSED if it cannot be recorded. The search
+   budget is enforced across `pause_turn` continuations, not per request.
+   Concurrency never gets to bypass this: the bot's per-chat lock covers the
+   decide-and-submit step, so one chat cannot pay twice.
+6. **The caches degrade to doing the work, and their entries expire.** A
+   cache failure must never discard an answer already paid for, or surface as
+   an empty result. The answer cache is exact-match only, so its TTL is not
+   optional — "no fact-checker has covered this" is wrong the day BOOM
+   publishes. The transcript cache (by platform video id) never stores a
+   failed or empty transcription.
 7. **The sentinel is never user-visible and never user-plantable.** It trails
    the answer (a header cannot survive streaming — §4); `MarkerFilter` holds
    back a trailing `<` and strips it; `as_prompt_data()` turns every `<`/`>` in
@@ -92,6 +105,9 @@ limiter are both in-memory.
    job finished must behave exactly like watching it live.
 9. **Every paid seam has a fake, and the fake is pinned.** A seam without one
    is a seam that will spend money in "free" mode.
+10. **Messages are forgotten; costs are not.** Answers are deleted after
+   `answer_retention_days` (30). The spend ledger keeps what each check cost
+   and NEVER what anyone sent — pinned against the table's schema.
 
 ## How we work
 
@@ -113,14 +129,33 @@ limiter are both in-memory.
 - Comments explain constraints and hard-won facts, not what the line does.
 - Scripted doc edits must assert their markers. A `.replace()` that silently
   matched nothing left §11 stale for a whole session.
+- **Check pytest's own exit code before committing** — never a piped `| tail`
+  (it exits 0 whatever pytest did; a commit went in with a failing test).
+- **Shell heredocs collapse doubled backslashes.** Write anything containing
+  `\` (regexes, Windows paths, `\n` in source) with the Edit/Write tools. A test
+  now fails any file with an invalid escape.
+- **A UI is done when it has been looked at.** Headless Chrome renders it
+  (`chrome --headless=new --screenshot=...`); phone width needs a 390 px
+  iframe, because desktop Chrome will not size a window below ~500 px. The
+  dashboard's four real defects were found only this way.
+- **Concurrency tests need fakes that suspend** (`await asyncio.sleep(0)`), or
+  a race cannot happen and the test passes with the guard removed — measured.
+  And wait on conditions, not durations: asyncio's clock here steps 15–16 ms.
+- **Some things only reality shows.** The server could not start on the one
+  real database; two whitelisted sites blocked the crawler; the search tool
+  made English claims come back in Hinglish. Free probes (`crawl_probe.py`,
+  `link_probe.py`) and one cheap real run find what fakes cannot.
 
 ## Shape of the code
 
 `app/api/` routes (text / image / media / **link** — a pasted Reel, Shorts or
-Facebook URL) → `app/engine/job.py` (`run_check`: cache → engine → persist) →
-`app/engine/chat.py` (pass 1 whitelist, pass 2 open web if nothing vetted
-covered it) → `app/store/` persists. Providers (`app/providers/`) wrap every
-external service. `app/api/stream.py` carries the live SSE preview.
+Facebook URL) → `app/engine/job.py` (`run_check`: cache → engine → persist →
+spend ledger) → `app/engine/chat.py` (pass 1 whitelist, pass 2 open web if
+nothing vetted covered it) → `app/store/` persists. Providers
+(`app/providers/`) wrap every external service. `app/api/stream.py` carries
+the live SSE preview; `app/api/dashboard.py` the local-only spending page;
+`app/hosts.py` is the ONE place a URL's host is read (both the trust label and
+the link fetcher depend on it).
 
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` →
 poll `/reports/{job_id}`, with an optional `/stream/{job_id}` for live text.

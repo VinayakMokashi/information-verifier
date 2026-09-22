@@ -92,9 +92,10 @@ This runs the genuine engine — real reasoning, real web search of the trusted
 sources — and prints a real answer, followed by **exactly what it cost**,
 measured from the API's own usage numbers.
 
-Expect roughly **$0.16** when a fact-checker has covered the claim, and
-**$0.26** when none has and it falls back to the open web. Those are modelled,
-not measured — the first real run is what settles them.
+Measured on real checks (Sept 2026): about **$0.05** when a fact-checker has
+covered the claim, and **$0.15** when none has and it searches the wider web
+too. A reel adds its transcription (about ₹0.50 a minute), paid only once per
+video — the app remembers what a reel said.
 
 ---
 
@@ -160,7 +161,8 @@ interactive control panel; steps 4–5 below use that.)*
 |---|---|
 | `ModuleNotFoundError` | You didn't use the venv Python. Prefix with `.\.venv\Scripts\python.exe` |
 | Report status `FAILED`, error mentions *authentication* | Key missing/typo in `.env` |
-| `429` with *"You've used N checks this hour"* | That's our own spend guard, not the API. Tune it in `app/config.py`. |
+| `429` with *"daily limit of 2 checks"* | The app's own safety cap (2 a day, set 2026-09-22). It resets at midnight India time. Sending the same message again is free and doesn't count. Raise `max_checks_per_day` in `app/config.py` when you're ready. |
+| `429` with *"You've used N checks this hour"* | The per-visitor limit — our own guard, not the API. |
 | `429` / *rate limit* or *credit* error from Anthropic | Add credits at console.anthropic.com |
 | Server won't start, "address in use" | Another server is running; close it or use `--port 8001` |
 | Voice note gives `503` | `SARVAM_API_KEY` missing from `.env` |
@@ -180,9 +182,10 @@ interactive control panel; steps 4–5 below use that.)*
 
 This prints a `https://….trycloudflare.com` link that works on any phone, with no
 install on their side. In real mode **anyone with the link spends your API
-credits**, so share it privately; built-in limits cap it at 10 checks per visitor
-per hour and 100 per day (tune in `app/config.py`). Press `Ctrl+C` to stop — the
-link dies with it.
+credits**, so share it privately. The whole app is capped at **2 checks a day**
+for now (tune `max_checks_per_day` in `app/config.py`), and the spending
+dashboard is never visible through the link. Press `Ctrl+C` to stop — the link
+dies with it.
 
 ---
 
@@ -192,13 +195,15 @@ link dies with it.
 |---|---|---|
 | `scripts\demo_offline.py` | Free | The engine plumbing + cache, streaming, in the console |
 | `scripts\serve_demo.py` | Free | The real chat page + real SSE, with a simulated Claude |
-| `python -m pytest tests -q` | Free | The full suite (397 tests: web, cache, media, trust filter) |
+| `python -m pytest tests -q` | Free | The full suite (594 tests: web, cache, media, trust filter, spend cap) |
 | `scripts\factcheck_probe.py "claim"` | Free | Which fact-check publishers we keep vs drop |
 | `scripts\link_probe.py <url>` | Free | Whether a reel resolves, and whether it has captions |
 | `scripts\telegram_bot.py --check-token` | Free | That the bot's token still works |
 | `scripts\asr_probe.py clip.ogg` | ~paise | Sarvam transcription of one audio clip |
 | `scripts\smoke_test.py "claim"` | ~cents | A real, cited check — and its measured bill |
 | `scripts\link_smoke.py <url>` | ~cents | A real reel, end to end — and its measured bill |
+| `scripts\crawl_probe.py` | ~free | That every whitelisted site is searchable (after editing the list) |
+| http://127.0.0.1:8000/dashboard | free | What the app has spent — only on this machine |
 | `uvicorn app.main:app` | free to run | The live web app: open http://127.0.0.1:8000 |
 | `.\scripts\share_demo.ps1` | per check | A public share link (cloudflared quick tunnel) |
 
