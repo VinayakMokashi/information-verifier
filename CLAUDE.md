@@ -154,6 +154,12 @@ limiter are both in-memory.
   version FAIL: stubs that finish work submitted late, and a thread with a
   join timeout around anything that could spin synchronously (measured:
   `Dispatcher.drain()` spun where no asyncio timeout could fire).
+- **Review the fix, not just the bug.** On 2026-09-22 a third of the defects
+  came from the fixes for earlier defects, and two more were found only by
+  running a reviewer's randomized interleaving search against the FIXED bot
+  (`scratchpad/fixrev_money/bot_explorer_real*.py`, 2,000 seeds each). A fix
+  that addresses the mechanism a finding named, rather than the rule behind
+  it, leaves the hole open.
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,

@@ -41,11 +41,13 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
 **688 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free —
 every paid seam is faked).
 
-**Reviewed adversarially the same evening:** two independent reviews of the
-day's work found 13 defects — among them a trust-label bypass, a
+**Reviewed adversarially the same evening, twice:** two independent reviews
+of the day's work found 13 defects — among them a trust-label bypass, a
 DNS-rebinding hole in the dashboard, four ways the verdict tag could reach a
-reader, and the daily cap leaking at midnight. Every one was reproduced with
-a free script and fixed with a test that fails against the old code (§7).
+reader, and the daily cap leaking at midnight. Two more reviews of those
+FIXES found 15 further defects, five of them introduced by the fixes
+themselves. Every one was reproduced with a free script and fixed with a
+test that fails against the old code (§7). **747 tests.**
 
 Working end to end:
 - **Text, image, voice/video and pasted Reel/Shorts/Facebook links** all reach
@@ -485,9 +487,98 @@ deleting only finished rows. Answers stored before the error-text rewrite
 still carry old technical text until retention deletes them — the real
 database has none.
 
+**The fixes, reviewed the same evening — 15 more defects, 5 of them
+introduced by the fixes themselves.** Two fresh reviewers took the fix
+commits, and a randomized interleaving search was run against the fixed bot.
+Every finding reproduced:
+
+- **Pass 2 could still relabel an answer.** The morning's fix asked for
+  evidence the answer "rests on" a trusted page — but `used=` means "my
+  reply draws on this", not "this page addressed the claim". Reproduced:
+  pass 1 found a BOOM page about a DIFFERENT hoax and said trusted="no";
+  pass 2 named that same URL, and the answer came out "Fact-checkers" at 90%
+  under a heading reading "No fact-checker has covered this". A `used=` of a
+  public suffix (`gov.in`) borrowed an unrelated PIB page's tier the same
+  way. **The decisive fact was in the prompt all along:** CHAT_SYSTEM_WEB
+  *instructs* pass 2 to say that no vetted source covered the claim, so any
+  "fact-checked" label over its prose contradicts the answer it labels. Pass
+  2 now never raises the label — the trusted page is still shown as trusted,
+  and the answer stays "general web" under its 75 cap.
+- **Four more tag shapes reached the reader** (invariant 7, second round): a
+  `>` or `<` inside the quoted `used=` value, a `</verdict>` closing tag, and
+  any tag past the hold cap. The pattern is quote-aware now and the cap is
+  16000. The Telegram backstop also ran AFTER the text was split into
+  paragraphs and ≤700-char pieces, so a long leaked tag lost only its first
+  fragment — it strips the whole section first.
+- **A regression of mine:** making unreadable words mean "unsaid" also caught
+  `used="none"` — the words a model writes for an empty list — so every raw
+  result came back as a receipt, the exact thing `used=` exists to stop. A
+  short "nothing" vocabulary now means [].
+- **A malformed confidence threw away a well-formed `trusted="no"`** — the
+  model's only way to LOWER a label. `confidence="40%" trusted="no"` did not
+  escalate and came out "fact-checked"; with a clean number the same tag
+  escalated and came out "none". Each attribute is read on its own now.
+- **A prior Google fact-check suppressed escalation.** With one in hand, a
+  pass 1 that produced NO prose (an outage) ended as "couldn't be reached" —
+  a failed check that still spent one of the day's two slots — while the
+  open-web pass could have answered. Fixing it surfaced the other half: the
+  escalated answer was then labelled "fact-checked" over pass 2's words.
+- **`strict_host` never looked at the port**, so `https://altnews.in:443.evil.com/`
+  was labelled a fact-checker although Chrome refuses the URL outright (found
+  in a 2,332-URL differential against Chrome's own parser).
+- **The page's basis line counted every source under one label** — "2 trusted
+  sources" for an answer whose second source was listed under "General web".
+
+**The money and concurrency half of the same round:**
+
+- **A poke queued behind its own chat was still paid for.** The new rule was
+  enforced when the per-chat lock was ACQUIRED, not when the message arrived:
+  two quick pokes, the first holding the lock for its ~3 s peek, the check
+  delivered in that window, and the second looked like a fresh start. The
+  Dispatcher now decides "was this chat busy?" as the message arrives — and
+  a **2,000-interleaving search of the FIXED bot** then found two more: a
+  burst arrives before the first handler has submitted anything (so `pending`
+  was empty for all of them), and "is the first handler still waiting?" was
+  the wrong way to tell a poke from a new message, because that wait also
+  ends when someone ELSE delivers the report — the second message's own words
+  were dropped in silence, the very failure the first fix was for. The bot
+  now records that a wait ASKED for "any message". Both explorers (1–3 slots
+  and 16, 2,000 seeds each) end clean.
+- **The event-loop fix traded a frozen loop for a full thread pool.** With a
+  burst of claims in flight while another writer held the database, every
+  worker of asyncio's shared pool was busy — and `GET /reports`, the only way
+  an answer reaches the page or the bot, is a thread call too: reading a
+  finished answer stalled 30 s. The limiter has its own two-worker pool now
+  (measured after: 0.00 s), and the test times a real read behind a burst
+  instead of counting loop ticks, because ticks passed on the broken version.
+- **Any failure that bought nothing now hands its slot back.** Only an
+  HTTPException did, so a database error inside a route burned half the day's
+  budget with no job row and nothing in the log; and a request cancelled
+  WHILE its slot was being claimed never reached the route body at all. The
+  claim is a plain thread future now, so a cancelled caller still gets its
+  slot returned from the pool thread.
+- **The kind guess stopped guessing.** A bare news URL pasted as text was
+  recorded as "Link" (it is not a platform link, so it goes to /verify/text),
+  and a link whose scheme a phone auto-capitalised as "Text". Both are
+  "unknown" now. The backfill also used INSERT OR REPLACE, so it could
+  clobber a kind the live path had already proved.
+- **The dashboard takes exactly one Host header** (a raw client on this
+  machine could send two, local first; no browser can).
+
+**The lesson, for the third time this project:** a fix that addresses the
+mechanism a reviewer named, rather than the rule behind it, leaves the hole
+open. Both label fixes were mine, and the second one's own test asserted the
+contradiction as correct. Three of this round's defects were introduced by
+the morning's fixes, and two more were found only by running a reviewer's
+randomized search against the fixed code — a review of a fix is not a
+formality here, it is where a third of the defects came from.
+
 **Residuals, in §11:** an idempotency key on submissions; the answer cache
 key does not cover the labelling code; the screenshot route's inline vision
-call runs on the SDK's default timeout.
+call runs on the SDK's default timeout; a stray unclosed `<verdict` in
+prose swallows the rest of the answer (invariant 7 wins over a model that
+writes what it was told never to write); a malformed FINAL tag falls back to
+an earlier parseable one.
 
 ### 2026-09-22 — The first paid runs, the 2-a-day cap, and what only reality could show
 
@@ -1310,8 +1401,25 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 11. **The answer cache key does not cover the labelling code.** It covers the
    prompt, model, effort and whitelist; a change to how the tier or
    confidence is computed can serve an old label for up to a week (trusted
-   TTL). Checked on 2026-09-22 that nothing reachable was affected. An
-   `ENGINE_VERSION` in `cache_key` would make it structural.
+   TTL). The labelling changed twice on 2026-09-22; checked both times that
+   nothing reachable was mislabelled. An `ENGINE_VERSION` in `cache_key`
+   would make it structural. (The transcript cache has this covered: its key
+   carries a version, bumped to v2 when its rule changed.)
+12. **Pass 2 can never say "an official source did cover this".** Its prompt
+   tells it to say the opposite, which is why it may not label an answer.
+   If that is worth changing, the prompt and the label rule move together —
+   and a paid run decides it, not a guess.
+13. **Two sentinel corner cases, both model-behaviour-dependent.** A stray
+   unclosed `<verdict` in prose swallows the rest of the answer (invariant 7
+   beats a model writing what it was told never to write), and a malformed
+   FINAL tag falls back to an earlier parseable one. Neither is reachable
+   from user input (`as_prompt_data`).
+14. **Two slow link resolves can hold both daily slots** while they run, so
+   everyone else is told the service is out of checks for up to a minute —
+   and both slots come back, since a rejected resolve is refunded. A loop of
+   bad links therefore throttles nobody but the person sending them.
+   Pre-existing; reserve-first is what makes the cap real, so this is the
+   price of it.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

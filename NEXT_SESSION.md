@@ -24,7 +24,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~50s) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 688 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 747 passing
 
 The engine has run for real now (2026-09-22): about $0.05 when a fact-checker
 covered the claim, $0.15 for a two-pass fresh rumour, $0.08 for a real reel.
@@ -91,7 +91,7 @@ ASR metering seam; thread-pool contention; garbled source titles.
 ## 4. WHERE THE LAST SESSION ENDED
 
 **Session of 2026-09-22 — every to-do Vinayak listed is DONE, committed and
-pushed.** `main` is clean, **688 tests pass** (pytest exit 0).
+pushed.** `main` is clean, **747 tests pass** (pytest exit 0).
 
 **Then two adversarial reviews of the day's work (evening):** 13 defects,
 every one reproduced with a free script and fixed with a test that fails
@@ -99,8 +99,16 @@ against the old code — a trust label borrowed from a page the answer did not
 use, a DNS-rebinding hole in the dashboard, four ways the verdict tag could
 reach a reader, the 2-a-day cap leaking at midnight, a bot message that
 could vanish, a deleted job freezing its chat. PROJECT_PLAN §7 ("Two
-adversarial reviews") has each one. A second review of those FIXES was
-running when this was written; its outcome is recorded in the same entry.
+adversarial reviews") has each one.
+
+**Then the FIXES were reviewed the same way — 15 more defects, five of them
+introduced by the fixes themselves**, including a trust label that came back
+by another route (an open-web pass can no longer relabel an answer at all),
+four more shapes of the verdict tag, and a poke the bot still paid for. Two
+were found only by running a reviewer's 2,000-interleaving search against
+the already-fixed bot. All fixed, all with failing-first tests. A third
+review round was NOT run: the rate of new findings had dropped to corner
+cases the §11 list now records.
 
 What he asked, and what happened:
 
