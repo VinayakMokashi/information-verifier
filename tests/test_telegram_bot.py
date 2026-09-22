@@ -348,8 +348,8 @@ class StubTG:
         return b"OggS-fake", "voice/file_77.oga"
 
 
-def _handle(msg, app, tg, pending=None):
-    asyncio.run(B.handle_message(msg, app, tg, pending))
+def _handle(msg, app, tg, pending=None, prompted=None):
+    asyncio.run(B.handle_message(msg, app, tg, pending, prompted=prompted))
 
 
 def test_text_flow_submits_polls_and_replies():
@@ -426,13 +426,13 @@ class _PendingApp(StubApp):
 def test_a_slow_check_is_resumed_not_re_bought():
     """Telling a user to 'send it again' bought the whole check twice —
     exactly for the slow, expensive jobs."""
-    app, tg, pending = _PendingApp(), StubTG(), {}
+    app, tg, pending, prompted = _PendingApp(), StubTG(), {}, set()
 
-    _handle({"chat": {"id": 7}, "text": "WHO ne kaha 5G"}, app, tg, pending)
+    _handle({"chat": {"id": 7}, "text": "WHO ne kaha 5G"}, app, tg, pending, prompted)
     assert pending == {7: "job123"}              # remembered for next time
     assert "dobara paisa nahi lagega" in tg.sent[-1][1]
 
-    _handle({"chat": {"id": 7}, "text": "kya hua?"}, app, tg, pending)
+    _handle({"chat": {"id": 7}, "text": "kya hua?"}, app, tg, pending, prompted)
     assert len(app.submissions) == 1             # NOT resubmitted
     assert "pichla check pura hua" in tg.sent[-2][1]
     assert "This is false." in tg.sent[-1][1]
@@ -675,11 +675,13 @@ def test_a_message_sent_mid_check_hands_over_the_answer_and_says_so():
 def test_the_poke_a_timed_out_wait_asked_for_gets_no_extra_note():
     """When the wait gave up it asked for "any message"; that message IS the
     request, and telling the person it "was not checked" would only confuse."""
-    app, tg, pending = _PendingApp(), StubTG(), {}
-    _handle(_msg(7, "WHO ne kaha 5G"), app, tg, pending)
-    _handle(_msg(7, "kya hua?"), app, tg, pending)
+    app, tg, pending, prompted = _PendingApp(), StubTG(), {}, set()
+    _handle(_msg(7, "WHO ne kaha 5G"), app, tg, pending, prompted)
+    assert prompted == {7}, "the wait did not record that it asked for a poke"
+    _handle(_msg(7, "kya hua?"), app, tg, pending, prompted)
     assert "This is false." in tg.sent[-1][1]
     assert not any(t == B._NOT_CHECKED for _, t in tg.sent)
+    assert prompted == set(), "the poke was not consumed"
 
 
 class _GoneApp(StubApp):
@@ -767,6 +769,35 @@ def test_a_poke_queued_behind_its_own_chat_is_not_paid_for():
     app, tg = asyncio.run(scenario())
     assert [p["text"] for _, p in app.submissions] == ["Kya 5G se corona failta hai?"]
     assert sum(t == B._NOT_CHECKED for _, t in tg.sent) == 2   # both were answered
+
+
+def test_a_burst_from_one_chat_pays_for_one_check():
+    """Found by a 2,000-interleaving search of the FIXED bot (seed 120): a
+    burst of three arrives before the first handler has submitted anything,
+    so `pending` was empty when each was dispatched — and the third, landing
+    while the first answer was being delivered, looked like a fresh start
+    and was paid for. "Busy" has to include "an earlier message of this chat
+    is still being handled"."""
+    async def scenario():
+        app, tg = _GatedApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        for i in range(3):
+            bot.dispatch(_msg(7, f"rumour {i}"))
+        await _until(lambda: "job1" in app.done)
+        app.done["job1"].set()
+        app.release["job1"].set()
+        await _until(lambda: len(bot._tasks) <= 1)
+        app.finish_all()
+        await bot.drain()
+        return app, tg
+
+    app, tg = asyncio.run(scenario())
+    assert [p["text"] for _, p in app.submissions] == ["rumour 0"]
+    assert sum("This is false." in t for _, t in tg.sent) == 1
+    for chat, text in tg.sent:                 # and every message was answered
+        assert text
+    assert len([1 for _, t in tg.sent if t == B._NOT_CHECKED
+                or "abhi bhi chal raha hai" in t]) == 2
 
 
 def test_the_timeout_message_says_the_next_message_is_not_checked():
