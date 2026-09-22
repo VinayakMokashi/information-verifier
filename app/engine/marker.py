@@ -125,15 +125,22 @@ def _is_cut_sentinel(held: str) -> bool:
     return body.startswith(_OPEN_BODY) or _OPEN_BODY.startswith(body)
 
 
-def _read_tag(attrs: str) -> tuple[int | None, bool, str | None] | None:
-    """(confidence, trusted, used) from one tag's attributes; None if the
-    tag lacks a well-formed confidence or trusted — then it says nothing."""
+def _read_tag(attrs: str) -> tuple[int | None, bool | None, str | None] | None:
+    """(confidence, trusted, used) from one tag's attributes, each read on
+    its own — None for any the tag does not state well-formed. None for the
+    whole tag when it states nothing at all.
+
+    Independently, because requiring both threw away a well-formed
+    trusted="no" whenever the confidence was junk (found by review) — and
+    trusted="no", with used="", is the model's only way to LOWER a label.
+    """
     confidence = _CONFIDENCE_RE.search(attrs)
     trusted = _TRUSTED_RE.search(attrs)
-    if confidence is None or trusted is None:
-        return None
     used = _USED_RE.search(attrs)
-    return (int(confidence.group(1)), trusted.group(1).lower() == "yes",
+    if confidence is None and trusted is None and used is None:
+        return None
+    return (int(confidence.group(1)) if confidence else None,
+            trusted.group(1).lower() == "yes" if trusted else None,
             used.group(1) if used else None)
 
 
@@ -188,8 +195,8 @@ class MarkerFilter:
         if last is None:
             return None, None
         confidence, trusted, _ = last
-        if not 0 <= confidence <= 100:      # a nonsense number is no number
-            return None, trusted
+        if confidence is None or not 0 <= confidence <= 100:
+            return None, trusted            # a nonsense number is no number
         # Round to 5: a model's "82%" is false precision, and displaying it
         # to the digit implies a calibration nobody has measured.
         return round(confidence / 5) * 5, trusted

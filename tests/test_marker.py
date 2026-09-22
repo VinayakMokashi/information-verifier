@@ -97,20 +97,34 @@ def test_no_sentinel_means_no_confidence_and_no_claim():
     assert f.parse() == (None, None)
 
 
-@pytest.mark.parametrize("bad", [
-    '<verdict confidence="abc" trusted="yes"/>',
-    '<verdict trusted="yes"/>',
-    '<verdict confidence="82"/>',
-    '<verdict confidence="82" trusted="maybe"/>',
-    "<verdict/>",
+@pytest.mark.parametrize("bad, parsed", [
+    # Each attribute is read on its own. Found by review: requiring BOTH
+    # threw away a well-formed trusted="no" whenever the confidence was
+    # malformed — and trusted="no" (with used="") is the model's only way to
+    # LOWER a label. A tag that says nothing at all still parses to nothing.
+    ('<verdict confidence="abc" trusted="yes"/>', (None, True)),
+    ('<verdict confidence="40%" trusted="no"/>', (None, False)),
+    ('<verdict confidence="forty" trusted="no" used=""/>', (None, False)),
+    ('<verdict trusted="yes"/>', (None, True)),
+    ('<verdict confidence="82"/>', (80, None)),
+    ('<verdict confidence="82" trusted="maybe"/>', (80, None)),
+    ("<verdict/>", (None, None)),
 ])
-def test_malformed_sentinels_are_removed_and_parse_to_nothing(bad):
-    """This used to assert the opposite — "visible, not silently eaten" —
-    which pinned a leak: invariant 7 says the sentinel is NEVER shown, and a
-    malformed one is still the sentinel. It just carries no confidence."""
+def test_malformed_sentinels_are_removed_and_read_as_far_as_they_go(bad, parsed):
+    """The visibility half used to assert the opposite — "visible, not
+    silently eaten" — which pinned a leak: invariant 7 says the sentinel is
+    NEVER shown, and a malformed one is still the sentinel."""
     text, f = _stream(["Answer. " + bad])
     assert text == "Answer. "
-    assert f.parse() == (None, None)
+    assert f.parse() == parsed
+
+
+def test_a_malformed_confidence_still_lowers_the_label(no_factcheck_free=None):
+    """The engine reads trusted="no" from a tag whose confidence is junk, so
+    the answer is not labelled "fact-checked" on the strength of a typo."""
+    _, f = _stream(['It is false. <verdict confidence="40%" trusted="no" used=""/>'])
+    assert f.parse() == (None, False)
+    assert f.used() == []
 
 
 def test_an_out_of_range_confidence_is_discarded():
