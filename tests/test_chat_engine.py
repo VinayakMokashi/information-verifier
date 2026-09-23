@@ -957,3 +957,59 @@ def test_the_chosen_language_reaches_the_model(no_factcheck, monkeypatch):
     asyncio.run(C.answer("Drinking hot water kills the coronavirus", language="Tamil"))
     sent = client.requests[0]["messages"][0]["content"]
     assert "<reply_language>\nTamil\n</reply_language>" in sent
+
+
+# -- the summary the reader skims (2026-09-23) --------------------------------
+
+def _with_summary(text, summary, **kw):
+    conf = kw.pop("conf", 90)
+    trusted = kw.pop("trusted", "yes")
+    body = (f"{text} <summary>{summary}</summary>"
+            f'<verdict confidence="{conf}" trusted="{trusted}" used=""/>')
+    return (_final(body, searches=1, **kw), _deltas(body))
+
+
+def test_the_summary_is_a_field_not_a_paragraph(no_factcheck, monkeypatch):
+    """It is shown in its own box, so it must leave the prose — otherwise the
+    reader sees the same two lines twice."""
+    client = StubClient([_with_summary(
+        "It is false, and here is the long version.",
+        "5G does not spread covid. Alt News and the WHO checked it.",
+        citations=[_citation(TRUSTED_URL)])])
+    answer, events = _run(client, monkeypatch)
+
+    assert answer.summary == "5G does not spread covid. Alt News and the WHO checked it."
+    assert "summary" not in answer.markdown.lower()
+    assert answer.markdown == "It is false, and here is the long version."
+    assert ("summary", {"text": answer.summary}) in events
+
+
+def test_the_open_web_pass_has_the_last_word_on_the_summary(no_factcheck, monkeypatch):
+    """When pass 2 answered, pass 1's "nothing found" is not the bottom line."""
+    client = StubClient([
+        _with_summary("Not covered by fact-checkers.", "No fact-checker covered this.",
+                      trusted="no", conf=40),
+        _with_summary("The wider web says it is false.",
+                      "Probably false — only general web sources say so.",
+                      trusted="no", conf=60, results=[WEB_URL]),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert answer.summary == "Probably false — only general web sources say so."
+
+
+def test_an_answer_without_a_summary_is_still_an_answer(no_factcheck, monkeypatch):
+    client = StubClient([(
+        _final("It is false. " + SENTINEL_YES, citations=[_citation(TRUSTED_URL)],
+               searches=1), _deltas("It is false. " + SENTINEL_YES))])
+    answer, events = _run(client, monkeypatch)
+    assert answer.summary is None
+    assert not any(kind == "summary" for kind, _ in events)
+
+
+def test_both_prompts_ask_for_a_summary_that_stands_alone():
+    from app.engine.chat_prompts import CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB
+
+    for prompt in (CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB):
+        assert "<summary>" in prompt
+        assert "stand alone" in prompt
+        assert "Same language and script as the rest of your reply." in prompt

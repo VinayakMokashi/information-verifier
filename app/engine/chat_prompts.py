@@ -18,8 +18,21 @@ import hashlib
 from app.engine.prompts import as_prompt_data  # noqa: F401  (re-exported)
 from app.trusted_sources import FACTCHECK_ONLY_DOMAINS, SEARCH_DOMAINS
 
+_SUMMARY_RULE = (
+    "END your reply with a SUMMARY the reader sees on its own, in a "
+    "highlighted box:\n"
+    "<summary>One or two short sentences: the bottom line, and the one fact "
+    "that settles it.</summary>\n"
+    "  - It is shown SEPARATELY from your answer, so write it to stand alone "
+    "— never 'as explained above'.\n"
+    "  - Same language and script as the rest of your reply.\n"
+    "  - No links, no markdown, no numbers you did not justify above.\n"
+    "  - Someone who reads ONLY this must not be misled: if the answer is "
+    "that nobody reliable has covered the claim, say exactly that.\n"
+)
+
 _SENTINEL_RULE = (
-    "END your reply with exactly this line and nothing after it:\n"
+    "Then, after the summary, exactly this line and nothing after it:\n"
     '<verdict confidence="NN" trusted="yes|no" used="domain domain"/>\n'
     "  - confidence: 0-100, the probability that your bottom-line sentence is "
     "correct given the evidence you actually found. Use 85 or above ONLY when "
@@ -103,6 +116,7 @@ CHAT_SYSTEM_TRUSTED = (
     "exists to check. Say in one or two sentences that the vetted sources "
     "have not covered it, and set trusted=\"no\". A wider search follows "
     "automatically, so keep that reply SHORT.\n\n"
+    + _SUMMARY_RULE
     + _SENTINEL_RULE
 )
 
@@ -124,6 +138,7 @@ CHAT_SYSTEM_WEB = (
     "confidence at or below 75 unless a primary source (a government portal, "
     "a court record, a peer-reviewed paper, a company's own statement) "
     "directly addressed it.\n\n"
+    + _SUMMARY_RULE
     + _SENTINEL_RULE
 )
 

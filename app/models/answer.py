@@ -117,6 +117,11 @@ class Answer(BaseModel):
     source_text: str | None = None
 
     sections: list[AnswerSection] = Field(default_factory=list)
+    # Two short lines for a reader who will not read the whole answer, shown
+    # in their own highlighted box (Vinayak, 2026-09-23). Written by the
+    # model in the reply's language and taken out of the prose, so it is
+    # never shown twice. None when the model did not write one.
+    summary: str | None = None
     sources: list[Source] = Field(default_factory=list)
     confidence: int | None = None        # None = the model did not state one
     tier: Tier = "none"

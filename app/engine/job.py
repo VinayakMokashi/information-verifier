@@ -73,6 +73,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 print(f"[job] discarding a bad cached answer: {exc}")
             else:
                 answer.sections = previous.sections
+                answer.summary = previous.summary
                 answer.sources = previous.sources
                 answer.confidence = previous.confidence
                 answer.tier = previous.tier
@@ -87,6 +88,8 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                                         "tier": section.tier})
                 for source in answer.sources:
                     await emit("source", source.model_dump())
+                if answer.summary:
+                    await emit("summary", {"text": answer.summary})
                 await emit("done", {"cached": True})
                 return
 
@@ -95,6 +98,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                                        language=language)
 
         answer.sections = result.sections
+        answer.summary = result.summary
         answer.sources = result.sources
         answer.confidence = result.confidence
         answer.tier = result.tier

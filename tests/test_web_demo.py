@@ -68,8 +68,12 @@ def test_full_text_flow_and_cache(client):
 def test_an_answer_is_prose_not_a_form(client):
     """The point of the pivot: no rating enum, no per-claim verdict list."""
     report = _submit_and_fetch(client, {"text": "WHO ne kaha 5G se corona hota hai"})
-    for gone in ("overall_rating", "claim_verdicts", "localized", "summary"):
+    for gone in ("overall_rating", "claim_verdicts", "localized"):
         assert gone not in report, f"{gone} is a Truth Report leftover"
+    # `summary` is back since 2026-09-23 with a different meaning: two lines
+    # of PROSE for the reader's box. The old one was a structure (rating,
+    # per-claim verdicts), and that is what must never return.
+    assert isinstance(report.get("summary"), (str, type(None)))
     body = report["sections"][0]["markdown"]
     assert len(body.split()) > 30          # a paragraph, not a label
     assert body.count("\n\n") >= 1         # more than one paragraph

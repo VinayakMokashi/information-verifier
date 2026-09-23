@@ -311,3 +311,63 @@ def test_the_renderers_strip_the_quoted_shapes_too(stored):
                     page_re.sub("", "It is false. " + stored)):
         assert "verdict" not in cleaned.lower(), cleaned
         assert cleaned.startswith("It is false.")
+
+
+# -- the summary the reader sees in a box (2026-09-23) ------------------------
+
+SUMMARY_TEXT = "5G does not spread covid. Alt News and the WHO both checked it."
+SUMMARY = f"<summary>{SUMMARY_TEXT}</summary>"
+
+
+def test_the_summary_leaves_the_prose_and_comes_back_on_its_own():
+    """It is shown ONCE, in its own highlighted box — so it must not also be
+    sitting at the end of the prose."""
+    text, f = _stream([PROSE + SUMMARY + "\n" + SENTINEL])
+    assert text.strip() == PROSE.strip()
+    assert f.summary() == SUMMARY_TEXT
+    assert f.parse() == (80, True)
+
+
+@pytest.mark.parametrize("size", [1, 3, 40, 10_000])
+def test_a_summary_split_anywhere_never_leaks(size):
+    payload = PROSE + SUMMARY + SENTINEL
+    text, f = _stream([payload[i:i + size] for i in range(0, len(payload), size)])
+    assert text.strip() == PROSE.strip(), f"leaked: {text[len(PROSE):]!r}"
+    assert f.summary() == SUMMARY_TEXT
+
+
+def test_no_summary_is_not_an_error():
+    _, f = _stream([PROSE + SENTINEL])
+    assert f.summary() is None
+
+
+def test_a_summary_cut_off_by_max_tokens_keeps_what_it_had():
+    text, f = _stream(["Answer. <summary>The claim is fal"])
+    assert text == "Answer. "
+    assert f.summary() == "The claim is fal"
+
+
+def test_the_last_summary_wins():
+    """A paused turn resumes and the model may restate it."""
+    _, f = _stream([f"A. <summary>first</summary> B. <summary>second</summary>"])
+    assert f.summary() == "second"
+
+
+def test_a_runaway_summary_is_capped():
+    long = "word " * 500
+    _, f = _stream([f"<summary>{long}</summary>"])
+    assert len(f.summary()) <= 800
+
+
+def test_the_renderers_strip_summary_tags_too():
+    """A row stored before the engine understood them, or a model slip: the
+    TAGS go, the words stay — they are prose meant for the reader."""
+    import re
+    from pathlib import Path
+
+    stored = "It is false. <summary>In short: false.</summary>"
+    assert strip_any_sentinel(stored).strip() == "It is false. In short: false."
+    page = (Path(__file__).resolve().parent.parent / "static" / "index.html"
+            ).read_text(encoding="utf-8")
+    page_re = re.compile(re.search(r"const SENTINEL_RE = /(.+)/gi;", page).group(1), re.I)
+    assert page_re.sub("", stored).strip() == "It is false. In short: false."

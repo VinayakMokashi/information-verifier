@@ -33,7 +33,11 @@ import re
 # is withheld, so streaming stays word-by-word rather than line-by-line. A
 # markdown paragraph is one line, so a line-buffered filter would visibly
 # stutter.
-_OPEN_BODY = "verdict"          # after the `<` (or `</`)
+# The two machine-readable tags the model ends with. `verdict` is never
+# shown (invariant 7); `summary` IS — its words are taken out of the prose
+# and handed to the surfaces, which give them a box of their own.
+_OPEN_BODIES = ("verdict", "summary")
+_MAX_SUMMARY_CHARS = 800
 # Only a run that opens `<verdict` is ever held this long, and a real one is
 # always the last thing in the answer. It used to be 700 with `used` capped at
 # 600 INSIDE the regex, then 4000 — both let a long tag through to the reader
@@ -50,7 +54,11 @@ _MAX_HOLD = 16000
 # could not span those, so the whole tag was shown. The alternation is
 # prefix-disjoint (a quote or not), so matching stays linear.
 _ATTRS = r'(?:[^<>"]|"[^"]*")*'
-_TAG_RE = re.compile(r"</?verdict\b(" + _ATTRS + r")>", re.IGNORECASE)
+_TAG_RE = re.compile(r"</?(?:verdict|summary)\b(" + _ATTRS + r")>", re.IGNORECASE)
+_VERDICT_RE = re.compile(r"</?verdict\b(" + _ATTRS + r")>", re.IGNORECASE)
+_SUMMARY_RE = re.compile(r"<summary\b" + _ATTRS + r">(?P<body>.*?)</summary\s*>",
+                         re.IGNORECASE | re.DOTALL)
+_SUMMARY_END_RE = re.compile(r"</summary\s*>", re.IGNORECASE)
 _CONFIDENCE_RE = re.compile(r'\bconfidence\s*=\s*"(\d{1,3})"', re.IGNORECASE)
 _TRUSTED_RE = re.compile(r'\btrusted\s*=\s*"(yes|no)"', re.IGNORECASE)
 _USED_RE = re.compile(r'\bused\s*=\s*"([^"]*)"', re.IGNORECASE)
@@ -84,15 +92,25 @@ def _could_still_become_sentinel(buf: str, i: int = 0) -> bool:
     if len(buf) - i > _MAX_HOLD:
         return False
     j = i + 2 if buf.startswith("</", i) else i + 1     # past `<` or `</`
-    body = buf[j:j + len(_OPEN_BODY)].lower()
-    if body == _OPEN_BODY:
-        after = buf[j + len(_OPEN_BODY):j + len(_OPEN_BODY) + 1]
-        if after and _WORD_CHAR.match(after):
-            return False            # "<verdicts": a word, not the tag
-        # An opened tag, not yet closed. A `>` inside a quoted value does not
-        # close it — that is how a used= containing `>` used to escape.
-        return not _closes_outside_quotes(buf, j + len(_OPEN_BODY))
-    return _OPEN_BODY.startswith(body)   # a partial opener: `<`, `</Ver`, ...
+    for name in _OPEN_BODIES:
+        head = buf[j:j + len(name)].lower()
+        if head == name:
+            after = buf[j + len(name):j + len(name) + 1]
+            if after and _WORD_CHAR.match(after):
+                continue            # "<verdicts": a word, not the tag
+            if name == "summary":
+                # A summary is unfinished until its CLOSING tag: its `>`
+                # arrives immediately and the words the reader must not see
+                # twice come after it.
+                return _SUMMARY_END_RE.search(buf, j) is None
+            # An opened tag, not yet closed. A `>` inside a quoted value does
+            # not close it — that is how a used= containing `>` used to escape.
+            return not _closes_outside_quotes(buf, j + len(name))
+        # A partial opener (`<`, `</Ver`, `<sum`) counts only while the buffer
+        # ENDS inside the name — "<summer day" is prose.
+        if name.startswith(head) and len(buf) - j < len(name):
+            return True
+    return False
 
 
 def _hold_from(buf: str) -> int:
@@ -122,7 +140,8 @@ def _is_cut_sentinel(held: str) -> bool:
         return False
     low = held.lower()
     body = low[2:] if low.startswith("</") else low[1:]
-    return body.startswith(_OPEN_BODY) or _OPEN_BODY.startswith(body)
+    return any(body.startswith(name) or name.startswith(body)
+               for name in _OPEN_BODIES)
 
 
 def _read_tag(attrs: str) -> tuple[int | None, bool | None, str | None] | None:
@@ -155,12 +174,14 @@ class MarkerFilter:
     def __init__(self) -> None:
         self._held = ""      # trailing run that might still become a sentinel
         self._full = ""      # everything, sentinel included, for parse()
+        self._summary = ""   # the last <summary>, for the reader's own box
 
     def feed(self, delta: str) -> str:
         if not delta:
             return ""
         self._full += delta
-        buf = _TAG_RE.sub("", self._held + delta)   # every complete tag goes
+        buf = _SUMMARY_RE.sub(self._take_summary, self._held + delta)
+        buf = _VERDICT_RE.sub("", buf)              # every complete tag goes
         self._held = ""
 
         cut = _hold_from(buf)       # a run that may still become a sentinel
@@ -169,16 +190,36 @@ class MarkerFilter:
             buf = buf[:cut]
         return buf
 
+    def _take_summary(self, match) -> str:
+        """Capture a complete <summary> and take it out of the prose."""
+        self._summary = match.group("body").strip()[:_MAX_SUMMARY_CHARS]
+        return ""
+
     def flush(self) -> str:
         """End of stream: a held run that never became a sentinel is text —
         unless the stream stopped inside one (see _is_cut_sentinel)."""
         held, self._held = self._held, ""
+        low = held.lower()
+        body = low[2:] if low.startswith("</") else low[1:]
+        if body.startswith("summary"):
+            # max_tokens can cut inside the summary. Keep the words it had
+            # rather than showing the reader half a tag.
+            opened = held.find(">")
+            if opened != -1:
+                partial = held[opened + 1:].strip()[:_MAX_SUMMARY_CHARS]
+                self._summary = partial or self._summary
+            return ""
         return "" if _is_cut_sentinel(held) else held
+
+    def summary(self) -> str | None:
+        """The LAST summary the model wrote, or None. It is shown to the
+        reader in its own box, so it never stays in the prose as well."""
+        return self._summary or None
 
     def _last(self) -> tuple[int | None, bool, str | None] | None:
         """The LAST tag that says something. Last, not first: a paused turn
         resumes and the model may restate its verdict."""
-        for match in reversed(list(_TAG_RE.finditer(self._full))):
+        for match in reversed(list(_VERDICT_RE.finditer(self._full))):
             read = _read_tag(match.group(1))
             if read is not None:
                 return read
@@ -241,9 +282,10 @@ def parse_used(raw: str | None) -> list[str] | None:
 # or an opener cut off at the very END is stripped too. static/index.html
 # carries the same pattern as SENTINEL_RE — a test keeps them in step.
 _ANY_SENTINEL_RE = re.compile(
-    r"</?verdict\b" + _ATTRS + r">"          # a tag, quoted brackets and all
-    r"|</?verdict\b[^<]*$"                   # one cut off at the very end
-    r"|</?v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?$",  # an opener cut off at the end
+    r"</?(?:verdict|summary)\b" + _ATTRS + r">"    # a tag, quoted brackets and all
+    r"|</?(?:verdict|summary)\b[^<]*$"             # one cut off at the very end
+    r"|</?(?:v(?:e(?:r(?:d(?:i(?:c)?)?)?)?)?"       # an opener cut off at the end
+    r"|s(?:u(?:m(?:m(?:a(?:r)?)?)?)?)?)$",
     re.IGNORECASE)
 
 

@@ -96,6 +96,7 @@ class PassResult:
     truncated: bool = False
     error: str | None = None       # for the server log only, never the reader
     used: list[str] | None = None  # domains the answer rests on; None = unsaid
+    summary: str | None = None     # the reader's own two lines, for its box
 
 
 @dataclass
@@ -107,6 +108,9 @@ class ChatAnswer:
     confidence: int | None = None
     tier: Tier = "none"
     truncated: bool = False
+    # Two short lines the model writes for the reader, shown in a box of
+    # their own so a long answer can be skimmed (Vinayak, 2026-09-23).
+    summary: str | None = None
 
     @property
     def markdown(self) -> str:
@@ -438,6 +442,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         await emit("text", {"text": tail, "tier": section_tier})
     result.confidence, result.model_says_trusted = marker.parse()
     result.used = marker.used()
+    result.summary = marker.summary()
     result.markdown = result.markdown.strip()
 
     # De-duplicate while preserving order.
@@ -612,6 +617,12 @@ async def answer(text: str, *, heard: str | None = None,
     if tier != "trusted" and cap is not None and confidence is not None:
         confidence = min(confidence, cap)
 
+    # The LAST pass that wrote one: when the open web answered, its summary
+    # is the bottom line the reader needs, not pass 1's "nothing found".
+    summary = (second.summary if second is not None else None) or first.summary
+    if summary:
+        await emit("summary", {"text": summary})
+
     sections = [s for s in sections if s.markdown.strip()]
     if not sections:
         # Sources alone (Google's prior fact-checks, a result list) are not an
@@ -631,4 +642,5 @@ async def answer(text: str, *, heard: str | None = None,
         confidence=confidence,
         tier=tier,
         truncated=truncated,
+        summary=summary,
     )

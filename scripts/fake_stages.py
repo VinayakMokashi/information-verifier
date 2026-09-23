@@ -76,6 +76,10 @@ async def fake_answer(text, *, heard=None, emit=None, language=None):
     if picked:
         body += (f"\n\n*(Simulated: a real check would answer in {picked} — "
                  "the demo engine does not translate.)*")
+    summary = ("5G does not spread the coronavirus. Alt News and the WHO both "
+               "checked it — the claim is false.")
+    if picked:
+        summary += f" (A real check would write this in {picked}.)"
 
     if emit:
         await emit("status", {"text": "Checking trusted fact-checkers…"})
@@ -83,12 +87,14 @@ async def fake_answer(text, *, heard=None, emit=None, language=None):
             await emit("text", {"text": piece, "tier": "trusted"})
         for source in _FAKE_SOURCES:
             await emit("source", source.model_dump())
+        await emit("summary", {"text": summary})
 
     return ChatAnswer(
         sections=[AnswerSection(tier="trusted", markdown=body)],
         sources=list(_FAKE_SOURCES),
         confidence=95,
         tier="trusted",
+        summary=summary,
     )
 
 
