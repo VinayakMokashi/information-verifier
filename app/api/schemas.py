@@ -8,11 +8,17 @@ from pydantic import BaseModel, Field
 from app.models.answer import JobStatus
 
 
+# The reader picks the reply language (2026-09-23). A NAME, not a code —
+# the model reads it directly, and the page's box lets anyone type one that
+# is not on a button. Empty or "auto" means "the language it came in".
+_LANGUAGE = Field(default=None, max_length=40,
+                  description='Reply language, e.g. "Hindi". Omit for the '
+                              "sender's own language.")
+
+
 class VerifyTextRequest(BaseModel):
     text: str = Field(min_length=1, description="Raw text/claim to fact-check.")
-    language_hint: str | None = Field(
-        default=None, description="Optional source-language code to aid normalization."
-    )
+    language: str | None = _LANGUAGE
 
 
 class VerifyLinkRequest(BaseModel):
@@ -20,6 +26,7 @@ class VerifyLinkRequest(BaseModel):
         min_length=12, max_length=2048,
         description="A public Instagram Reel or YouTube (Shorts) URL to fact-check.",
     )
+    language: str | None = _LANGUAGE
 
 
 class JobAccepted(BaseModel):

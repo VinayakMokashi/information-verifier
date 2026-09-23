@@ -79,7 +79,7 @@ def test_missing_transcription_config_is_not_a_strangers_problem(client, monkeyp
 def test_a_refusal_reads_as_a_sentence(client, monkeypatch):
     from app.engine import chat as C
 
-    async def refused(text, *, heard=None, emit=None):
+    async def refused(text, *, heard=None, emit=None, language=None):
         raise C.AnswerRefused("cyber")
 
     monkeypatch.setattr(C, "answer", refused)

@@ -59,16 +59,23 @@ _FAKE_SOURCES = [
 ]
 
 
-async def fake_answer(text, *, heard=None, emit=None):
+async def fake_answer(text, *, heard=None, emit=None, language=None):
     """Offline stand-in for the whole chat engine. No network, no spend.
 
     Streams the canned answer in word-sized pieces on purpose: the demo then
     exercises the page's incremental rendering, the status line and the
     arriving sources, rather than one atomic blob that would hide every
     streaming bug we have.
+
+    It cannot translate, so a chosen language is ECHOED instead: that proves
+    the reader's pick reached the engine, which is the part the demo is for.
     """
     CALLS["answer"] += 1
     body = _ANSWER_HI if _DEVANAGARI.search(f"{text} {heard or ''}") else _ANSWER_EN
+    picked = (language or "").strip()
+    if picked:
+        body += (f"\n\n*(Simulated: a real check would answer in {picked} — "
+                 "the demo engine does not translate.)*")
 
     if emit:
         await emit("status", {"text": "Checking trusted fact-checkers…"})

@@ -20,13 +20,14 @@ from app.store.repository import _normalize_input, safe_cache_call
 from app.trusted_sources import SEARCH_DOMAINS
 
 
-def cache_key(text: str) -> str:
+def cache_key(text: str, language: str | None = None) -> str:
     """Key an answer by everything that decides it, not just the text.
 
     Model, effort and the prompt all change the answer, and the whitelist
     changes what could be found — so editing any of them must miss rather
     than keep serving prose written under the old rules. Same discipline the
-    translation cache's fingerprint earned.
+    translation cache's fingerprint earned. The reply LANGUAGE counts too:
+    the same claim in Tamil and in English are different answers.
     """
     blob = json.dumps([
         PROMPT_FINGERPRINT,
@@ -34,6 +35,7 @@ def cache_key(text: str) -> str:
         settings.chat_effort,
         sorted(SEARCH_DOMAINS),
         settings.web_tier_enabled,
+        (chat._chosen_language(language) or "").casefold(),   # "Tamil" == "tamil"
         _normalize_input(text),
     ], ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -42,7 +44,8 @@ def cache_key(text: str) -> str:
 async def run_check(job_id: str, text: str, repo, stream=None, *,
                     derived_text: str | None = None,
                     meter: UsageMeter | None = None,
-                    kind: str = "text") -> None:
+                    kind: str = "text",
+                    language: str | None = None) -> None:
     """Check `text`, stream it, store it. Never raises."""
     answer = await asyncio.to_thread(repo.get, job_id)
     if answer is None:                      # defensive: the row is made first
@@ -61,7 +64,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         await asyncio.to_thread(repo.save, answer)
         await emit("status", {"text": "Reading what you sent…"})
 
-        key = cache_key(text)
+        key = cache_key(text, language)
         cached = await safe_cache_call(repo.cache.get, key)
         if cached:
             try:
@@ -88,7 +91,8 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 return
 
         with meter.activate():
-            result = await chat.answer(text, heard=derived_text, emit=emit)
+            result = await chat.answer(text, heard=derived_text, emit=emit,
+                                       language=language)
 
         answer.sections = result.sections
         answer.sources = result.sources

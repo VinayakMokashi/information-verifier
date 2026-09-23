@@ -11,7 +11,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
+from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
+                     Request, UploadFile)
 
 from app.api.limits import claim, give_back, give_back_day
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
@@ -129,10 +130,11 @@ async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
 
 async def _check(job_id: str, text: str, repo, stream=None, *,
                  derived_text: str | None = None, meter=None,
-                 quota_day: str | None = None, kind: str = "text") -> None:
+                 quota_day: str | None = None, kind: str = "text",
+                 language: str | None = None) -> None:
     """run_check, then settle the day's slot. Every route's engine call."""
     await run_check(job_id, text, repo, stream, derived_text=derived_text,
-                    meter=meter, kind=kind)
+                    meter=meter, kind=kind, language=language)
     await _settle_quota(job_id, repo, quota_day)
 
 
@@ -207,7 +209,7 @@ async def transcribe_wav(wav: bytes, duration: float) -> str:
 
 async def _run_media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
-    quota_day: str | None = None,
+    quota_day: str | None = None, language: str | None = None,
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> the check.
 
@@ -241,7 +243,7 @@ async def _run_media_job(
         await fail("No speech could be transcribed from this audio.")
         return
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day, kind="media")
+                 quota_day=quota_day, kind="media", language=language)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -257,13 +259,14 @@ async def verify_text(
             )
         answer, stream = await _new_job(req.text)
         background.add_task(_check, answer.job_id, req.text, _repo, stream,
-                            quota_day=spend.day)
+                            quota_day=spend.day, language=req.language)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
 @router.post("/verify/image", response_model=JobAccepted, status_code=202)
 async def verify_image(
-    background: BackgroundTasks, request: Request, file: UploadFile = File(...)
+    background: BackgroundTasks, request: Request, file: UploadFile = File(...),
+    language: str | None = Form(None, max_length=40),
 ) -> JobAccepted:
     async with _quota(request) as spend:
         if file.content_type not in _ALLOWED_IMAGE_TYPES:
@@ -281,13 +284,14 @@ async def verify_image(
         answer, stream = await _new_job(extracted)
         background.add_task(_check, answer.job_id, extracted, _repo, stream,
                             derived_text=extracted, meter=meter,
-                            quota_day=spend.day, kind="image")
+                            quota_day=spend.day, kind="image", language=language)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
 @router.post("/verify/media", response_model=JobAccepted, status_code=202)
 async def verify_media(
-    background: BackgroundTasks, request: Request, file: UploadFile = File(...)
+    background: BackgroundTasks, request: Request, file: UploadFile = File(...),
+    language: str | None = Form(None, max_length=40),
 ) -> JobAccepted:
     # `spend.begin()` is never called: since the Sarvam loop moved behind the
     # 202, this route spends nothing before returning, so every rejection here
@@ -329,7 +333,7 @@ async def verify_media(
         # cost: the quota slot stays consumed even if transcription fails.
         answer, stream = await _new_job()
         background.add_task(_run_media_job, answer.job_id, wav, duration, _repo,
-                            meter, stream, quota_day=spend.day)
+                            meter, stream, quota_day=spend.day, language=language)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
@@ -417,7 +421,8 @@ def transcript_key(info: LinkInfo) -> str | None:
 
 
 async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
-                        quota_day: str | None = None) -> None:
+                        quota_day: str | None = None,
+                        language: str | None = None) -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
@@ -449,7 +454,7 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
         if key and text.strip() != _caption_text(info).strip():
             await safe_cache_call(repo.transcripts.put, key, text)
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day, kind="link")
+                 quota_day=quota_day, kind="link", language=language)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)
@@ -500,7 +505,7 @@ async def verify_link(
 
         answer, stream = await _new_job(url)
         background.add_task(_run_link_job, answer.job_id, info, _repo, stream,
-                            quota_day=spend.day)
+                            quota_day=spend.day, language=req.language)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 

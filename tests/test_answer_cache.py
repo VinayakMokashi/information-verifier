@@ -143,7 +143,7 @@ def test_prune_drops_only_what_is_past_every_ttl(repo):
 # -- the job runner ------------------------------------------------------------
 
 def _run(repo, answer, chat_answer=None, boom=None, monkeypatch=None, **kw):
-    async def fake_answer(text, *, heard=None, emit=None):
+    async def fake_answer(text, *, heard=None, emit=None, language=None):
         if boom:
             raise boom
         if emit:
@@ -172,7 +172,7 @@ def test_a_repeat_forward_is_served_free(repo, monkeypatch):
 
     calls = {"n": 0}
 
-    async def must_not_run(text, *, heard=None, emit=None):
+    async def must_not_run(text, *, heard=None, emit=None, language=None):
         calls["n"] += 1
         raise AssertionError("a cached answer must not reach the engine")
 
@@ -265,3 +265,17 @@ def test_orphaned_jobs_are_failed_at_startup(repo):
     assert repo.get(stuck.job_id).status is JobStatus.FAILED
     assert "restarted" in repo.get(stuck.job_id).error
     assert repo.get(done.job_id).status is JobStatus.COMPLETE
+
+
+def test_the_cache_key_covers_the_reply_language():
+    """The same claim in Tamil and in English are different answers; one must
+    never be served for the other."""
+    base = J.cache_key("Drinking hot water kills the coronavirus")
+    tamil = J.cache_key("Drinking hot water kills the coronavirus", language="Tamil")
+    english = J.cache_key("Drinking hot water kills the coronavirus", language="English")
+    assert len({base, tamil, english}) == 3
+    # Case and spacing are not a different language.
+    assert tamil == J.cache_key("Drinking hot water kills the coronavirus",
+                                language="  tamil ")
+    assert base == J.cache_key("Drinking hot water kills the coronavirus",
+                               language="auto")

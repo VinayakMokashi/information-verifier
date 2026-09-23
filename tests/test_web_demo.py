@@ -144,3 +144,32 @@ def test_image_flow_rejects_unsupported_type(client):
         files={"file": ("notes.txt", b"hello", "text/plain")},
     )
     assert resp.status_code == 415
+
+
+# -- the reader picks the reply language (2026-09-23) -------------------------
+
+def test_the_reader_can_choose_the_reply_language(client):
+    """The demo engine cannot translate, so it ECHOES the pick — which is
+    exactly what this proves: the choice reaches the engine from both
+    surfaces, JSON and multipart."""
+    report = _submit_and_fetch(client, {"text": "Drinking hot water kills the coronavirus",
+                                        "language": "Tamil"})
+    assert "Tamil" in report["sections"][0]["markdown"]
+
+    accepted = client.post("/api/v1/verify/image",
+                           files={"file": ("shot.png", b"\x89PNG", "image/png")},
+                           data={"language": "Marathi"})
+    assert accepted.status_code == 202
+    shot = client.get(f"/api/v1/reports/{accepted.json()['job_id']}").json()
+    assert "Marathi" in shot["sections"][0]["markdown"]
+
+
+def test_no_choice_means_the_language_it_came_in(client):
+    report = _submit_and_fetch(client, {"text": "Drinking hot water kills the coronavirus"})
+    assert "Simulated" not in report["sections"][0]["markdown"]
+
+
+def test_an_absurd_language_string_is_refused_before_any_spending(client):
+    resp = client.post("/api/v1/verify/text",
+                       json={"text": "a claim", "language": "x" * 500})
+    assert resp.status_code == 422

@@ -435,7 +435,7 @@ def test_a_failed_check_keeps_its_slot(limited, monkeypatch):
     cases spend past the cap."""
     from app.engine import chat as C
 
-    async def broken(text, *, heard=None, emit=None):
+    async def broken(text, *, heard=None, emit=None, language=None):
         raise C.CheckUnavailable("The checking service couldn't be reached.")
 
     monkeypatch.setattr(C, "answer", broken)
