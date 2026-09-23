@@ -39,6 +39,7 @@ _REPLY_BUDGET = 3900      # headroom under it for our own framing
 _MAX_HEARD_CHARS = 1200   # of source_text inline; any cut is disclosed
 
 _SOURCE_BUDGET = 900      # receipts get a reserved slice; the prose can't eat it
+_SUMMARY_BUDGET = 500     # so does the summary: it is what a skimmer reads
 _MAX_PARA = 700           # a block must be small enough to be droppable
 
 # The badge describes the EVIDENCE, not the truth — the verdict itself is in
@@ -296,7 +297,17 @@ def format_reply(answer: dict) -> str:
     if answer.get("truncated"):
         verdict += "\n<i>Jawab lamba tha, beech mein kat gaya — poora web page par.</i>"
 
-    remaining = _REPLY_BUDGET - len(verdict) - 2
+    # The two lines a skimmer reads. Reserved BEFORE the prose, like the
+    # receipts: it is the one part a reader who reads nothing else will read,
+    # so the length budget must never be able to drop it. A blockquote is the
+    # closest Telegram has to the page's highlighted box.
+    summary = ""
+    raw_summary = " ".join(str(answer.get("summary") or "").split())
+    if raw_summary:
+        shown, _ = _clip_escaped(raw_summary, _SUMMARY_BUDGET)
+        summary = f"<blockquote>📌 <b>In short</b>\n{shown}</blockquote>"
+
+    remaining = _REPLY_BUDGET - len(verdict) - len(summary) - 4
 
     # Receipts first: bounded, and the only thing that lets a reader check us.
     # A long answer must not be able to push every source out of the message.
@@ -334,7 +345,8 @@ def format_reply(answer: dict) -> str:
                 heard_block += (f" […{dropped_chars} aur characters — "
                                 "poora text web page par]")
 
-    reply = "\n\n".join(p for p in (heard_block, body, verdict, sources) if p)
+    reply = "\n\n".join(p for p in (heard_block, body, verdict, summary, sources)
+                        if p)
     if len(reply) > _TG_HARD_LIMIT:
         # Unreachable via the budget above; if it ever happens, send something
         # valid rather than something Telegram will refuse outright.

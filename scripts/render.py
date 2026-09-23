@@ -107,6 +107,15 @@ def render_answer(answer: Answer) -> str:
             L.append("-" * _W)
         L.extend(_plain(section.markdown))
 
+    if answer.summary:
+        # The same two lines the page puts in a highlighted box: a developer
+        # reading a paid check should see exactly what the reader will.
+        L.append("")
+        L.append("+" + "-" * (_W - 2) + "+")
+        L.append("| IN SHORT")
+        L.extend("| " + w for w in textwrap.wrap(answer.summary, _W - 4))
+        L.append("+" + "-" * (_W - 2) + "+")
+
     L.append("")
     L.append("=" * _W)
     if answer.confidence is not None:

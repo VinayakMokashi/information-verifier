@@ -873,3 +873,29 @@ def test_one_failing_message_does_not_stop_the_others():
     tg = asyncio.run(scenario())
     assert any(c == 1 and "gadbad" in t for c, t in tg.sent)
     assert any(c == 2 and "This is false." in t for c, t in tg.sent)
+
+
+def test_the_summary_is_reserved_so_a_long_answer_cannot_drop_it():
+    """It is the part a reader who reads nothing else reads (Vinayak,
+    2026-09-23), so the length budget takes it out FIRST — like the
+    receipts — instead of letting the prose eat it."""
+    paras = "\n\n".join(f"Paragraph {i} " + "x" * 400 for i in range(20))
+    reply = B.format_reply(_answer(
+        sections=[{"tier": "trusted", "markdown": paras}],
+        summary="5G does not spread covid. Alt News and the WHO checked it."))
+    assert "In short" in reply
+    assert "5G does not spread covid." in reply
+    assert len(reply) <= B._TG_HARD_LIMIT
+    assert "aur" in reply and "paragraph" in reply      # the prose was cut, not it
+
+
+def test_an_answer_with_no_summary_reads_as_before():
+    reply = B.format_reply(_answer())
+    assert "In short" not in reply
+    assert "blockquote" not in reply
+
+
+def test_a_summary_is_escaped_like_everything_else_a_model_wrote():
+    reply = B.format_reply(_answer(summary='<script>alert(1)</script> & "quoted"'))
+    assert "<script>" not in reply
+    assert "&lt;script&gt;" in reply
