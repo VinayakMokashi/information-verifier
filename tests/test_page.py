@@ -228,3 +228,41 @@ def test_the_page_declares_both_themes():
                                   "localized", "RATING_BADGE", "UNVERIFIED"])
 def test_no_truth_report_leftovers(gone):
     assert gone not in PAGE
+
+
+# -- the reader picks a language, and skims a summary (2026-09-23) ------------
+
+def test_the_language_chooser_offers_buttons_and_a_free_text_box():
+    """Vinayak: "give like some options with buttons and also a text box to
+    enter their desired language if it is not in the button"."""
+    row = PAGE[PAGE.index('<div class="langs"'):PAGE.index("<textarea")]
+    assert 'data-lang=""' in row                      # the default: same as sent
+    for offered in ("English", "Hindi", "Hinglish", "Marathi", "Bengali"):
+        assert f'data-lang="{offered}"' in row
+    assert 'id="langOther"' in row and "maxlength=\"40\"" in row
+    assert 'aria-label="Answer in another language"' in row
+
+
+def test_every_submission_carries_the_chosen_language():
+    """Text, link and both uploads — a language that reaches only some of
+    them is worse than none: the answer's language would depend on how it
+    was sent."""
+    assert PAGE.count("language: replyLanguage") == 2      # text + link, JSON
+    assert 'fd.append("language", replyLanguage)' in PAGE  # image + voice, form
+    assert 'localStorage.getItem("iv.lang")' in PAGE       # remembered per browser
+
+
+def test_a_browser_without_storage_still_works():
+    """Private mode throws on localStorage; the page must not die on it."""
+    for line in PAGE.splitlines():
+        if "localStorage" in line and "catch" not in line:
+            assert "rememberLanguage" in line or "try {" in line, line
+
+
+def test_the_summary_is_drawn_from_the_field_and_escaped():
+    """It is a structured field, like the confidence: never scraped out of
+    the prose, and never rendered as markup."""
+    body = PAGE[PAGE.index("function drawSummary("):PAGE.index("function drawSources(")]
+    assert "esc(text)" in body
+    assert "report.summary" in PAGE                        # canonical re-render
+    assert 'es.addEventListener("summary"' in PAGE         # and live

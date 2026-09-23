@@ -134,6 +134,41 @@
   .src .name.trusted { color: var(--trusted); }
   .src .title { font-size: .89rem; color: var(--ink); }
 
+  /* The two lines a reader skims instead of the whole answer. Accent, not
+     the tier's colour: it is about finding the point quickly, and a green or
+     amber box would read as a verdict of its own. */
+  .summary { border-left: 3px solid var(--accent); background: var(--accent-soft);
+             border-radius: 0 10px 10px 0; padding: 12px 14px; margin: 12px 0 0; }
+  .summary b { display: block; font-weight: 650; font-size: .74rem;
+               text-transform: uppercase; letter-spacing: .06em;
+               color: var(--accent); margin-bottom: 4px; }
+  .summary span { display: block; overflow-wrap: anywhere; }
+
+  .langs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+           padding: 0 0 9px; margin-bottom: 7px;
+           border-bottom: 1px solid var(--line); }
+  .langs-label { font-size: .72rem; text-transform: uppercase;
+                 letter-spacing: .05em; color: var(--ink-3); }
+  .lang { font: inherit; font-size: .8rem; cursor: pointer; color: var(--ink-2);
+          background: transparent; border: 1px solid var(--line);
+          border-radius: 999px; padding: 4px 11px; }
+  .lang:hover { border-color: var(--accent); color: var(--accent); }
+  .lang.on { background: var(--accent-soft); border-color: var(--accent);
+             color: var(--accent); font-weight: 650; }
+  .lang-other { font: inherit; font-size: .8rem; width: 9rem; color: inherit;
+                background: transparent; border: 1px dashed var(--line);
+                border-radius: 999px; padding: 4px 11px; outline: 0; }
+  .lang-other:focus { border-color: var(--accent); border-style: solid; }
+  .lang-other::placeholder { color: var(--ink-3); }
+  /* On a phone the row wrapped to three lines and ate the screen — the
+     composer is sticky, so that came straight out of the conversation.
+     One swipeable row instead; every option stays reachable. */
+  @media (max-width: 560px) {
+    .langs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .langs::-webkit-scrollbar { display: none; }
+    .langs-label, .lang, .lang-other { flex: none; }
+  }
+
   .err { color: var(--danger); background: var(--surface);
          border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
          border-radius: var(--radius); padding: 14px 16px; }
@@ -193,6 +228,18 @@
 
 <div class="composer">
   <div class="composer-inner">
+    <div class="langs" id="langs">
+      <span class="langs-label">Answer in</span>
+      <button class="lang on" type="button" data-lang="">Same as my message</button>
+      <button class="lang" type="button" data-lang="English">English</button>
+      <button class="lang" type="button" data-lang="Hindi">हिन्दी</button>
+      <button class="lang" type="button" data-lang="Hinglish">Hinglish</button>
+      <button class="lang" type="button" data-lang="Marathi">मराठी</button>
+      <button class="lang" type="button" data-lang="Bengali">বাংলা</button>
+      <input id="langOther" class="lang-other" type="text" maxlength="40"
+             placeholder="or type one…"
+             aria-label="Answer in another language">
+    </div>
     <textarea id="text" rows="1" dir="auto"
               placeholder="Paste a message, a claim, or a reel link…"></textarea>
     <div class="tools">
@@ -288,6 +335,7 @@ function newTurn(mine) {
     <div class="heard hidden"></div>
     <div class="status"><span class="dot"></span><span class="stxt">Sending…</span></div>
     <div class="answer hidden"></div>
+    <div class="summary hidden"></div>
     <div class="sources"></div>`;
   $("thread").appendChild(el);
   turn = {
@@ -296,6 +344,7 @@ function newTurn(mine) {
     status: el.querySelector(".status"),
     stxt: el.querySelector(".stxt"),
     answer: el.querySelector(".answer"),
+    summary: el.querySelector(".summary"),
     sources: el.querySelector(".sources"),
     text: { trusted: "", web: "" },
     seenWeb: false,
@@ -329,6 +378,14 @@ function drawAnswer(streaming) {
   if (streaming) html += `<span class="caret"></span>`;
   turn.answer.innerHTML = html;
   turn.answer.setAttribute("dir", "auto");
+}
+
+// Shown in its own box, and only from the structured field — the engine
+// takes it out of the prose so the same two lines are never printed twice.
+function drawSummary(text) {
+  if (!turn || !text) return;
+  turn.summary.classList.remove("hidden");
+  turn.summary.innerHTML = `<b>In short</b><span dir="auto">${esc(text)}</span>`;
 }
 
 function drawSources(list) {
@@ -458,6 +515,7 @@ function follow(jobId) {
       turn.sources_.push(JSON.parse(e.data));
       drawSources(turn.sources_);
     });
+    es.addEventListener("summary", (e) => drawSummary(JSON.parse(e.data).text));
     es.addEventListener("done", () => finish(true));
     es.addEventListener("error", () => finish(false));
     es.onerror = () => finish(false);
@@ -498,6 +556,7 @@ function render(report) {
   }
   drawAnswer(false);
   drawFooter(report);
+  drawSummary(report.summary);
   drawSources(report.sources || []);
 }
 
@@ -582,6 +641,42 @@ async function submit(makeRequest, mine) {
     .finally(() => setBusy(false));
 })();
 
+// The reply language the reader picked. "" means "the language my message
+// is in", which is what the engine works out for itself. Remembered per
+// browser, so nobody has to pick it again on every forward.
+let replyLanguage = "";
+try { replyLanguage = localStorage.getItem("iv.lang") || ""; } catch (e) { /* private mode */ }
+
+function rememberLanguage() {
+  try { localStorage.setItem("iv.lang", replyLanguage); } catch (e) { /* private mode */ }
+}
+
+function paintLanguage() {
+  let onAButton = false;
+  for (const b of document.querySelectorAll(".lang")) {
+    const on = b.dataset.lang === replyLanguage;
+    b.classList.toggle("on", on);
+    onAButton = onAButton || on;
+  }
+  // A language no button offers lives in the box instead.
+  $("langOther").value = onAButton ? "" : replyLanguage;
+  rememberLanguage();
+}
+
+for (const b of document.querySelectorAll(".lang")) {
+  b.addEventListener("click", () => { replyLanguage = b.dataset.lang; paintLanguage(); });
+}
+$("langOther").addEventListener("input", () => {
+  // Repaint the buttons but NOT the box — rewriting what someone is still
+  // typing is the fastest way to make a text field feel broken.
+  replyLanguage = $("langOther").value.trim();
+  for (const b of document.querySelectorAll(".lang")) {
+    b.classList.toggle("on", b.dataset.lang === replyLanguage);
+  }
+  rememberLanguage();
+});
+paintLanguage();
+
 const box = $("text");
 box.addEventListener("input", () => {
   box.style.height = "auto";
@@ -607,14 +702,14 @@ $("check").addEventListener("click", () => {
     submit(() => fetch("api/v1/verify/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: text }),
+      body: JSON.stringify({ url: text, language: replyLanguage }),
     }), text);
     return;
   }
   submit(() => fetch("api/v1/verify/text", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, language: replyLanguage }),
   }), text);
 });
 
@@ -625,6 +720,7 @@ function wireFilePicker(buttonId, inputId, endpoint, label) {
     if (!f) return;
     const fd = new FormData();
     fd.append("file", f);
+    fd.append("language", replyLanguage);
     $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
     submit(() => fetch(endpoint, { method: "POST", body: fd }), `${label}: ${f.name}`);
   });
