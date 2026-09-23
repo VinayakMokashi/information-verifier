@@ -410,6 +410,62 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-09-23 — Two things the reader controls: a summary to skim, and the language
+
+Vinayak, in his words: *"For all the answers or response, at the last give a
+summary that is highlighted in some colour so that the user can quickly go
+through it rather than reading everything. Keep the entire thing too as if
+someone wants to read everything they should be able to as well."* And:
+*"The user should be able to choose in which language they want the answer
+to be in — give like some options with buttons and also a text box to enter
+their desired language if it is not in the button."*
+
+**The summary is a FIELD, not a paragraph.** The model ends its answer with
+`<summary>two short sentences</summary>` before the verdict line;
+`MarkerFilter` takes it out of the prose and hands it over separately, so
+the surfaces can box it and the reader never sees the same two lines twice.
+It is written in the reply's language, must stand alone ("never 'as
+explained above'"), and must not mislead someone who reads only it — if
+nobody reliable covered the claim, the summary says exactly that. The page
+gives it an accent-coloured box, Telegram a blockquote, the console a frame.
+**Accent, not the tier's green or amber:** a coloured box that looks like a
+verdict gets read as one, and the tier badge already carries that job.
+
+**Teaching the filter a second tag took two goes**, both caught by tests
+before any commit: stripping the `<summary>` OPENER mid-stream released the
+words it opens (the tag regex ran before the hold-back could see it), and
+"unfinished" means something different for the two tags — a verdict tag is
+unfinished until its `>`, a summary until its `</summary>`, because its own
+`>` arrives immediately with the words after it. A summary cut off by
+max_tokens keeps the words it had.
+
+**The language is the reader's, not the sender's.** Any surface can send a
+language NAME ("Hindi", "Marathi", "Kannada") — a name, not a code, because
+the model reads it directly and the page's box lets anyone type one that is
+not on a button. When it is set it REPLACES the detected language: saying
+both would contradict, so `language_hint()` is skipped and the pick is
+stated last, for the same measured reason the hint is (2026-09-22: with the
+search tool attached, only the last line of the user turn held the reply's
+language). The name is delimited, neutralised by `as_prompt_data`, and the
+prompt says plainly that it is a language name, not an instruction.
+
+**The cache key covers it.** The same claim in Tamil and in English are
+different answers, and one must never be served for the other; case and
+spacing are not a different language.
+
+**The demo fake echoes the pick** instead of translating, which makes the
+whole path testable at $0 — on the page as well as in the tests.
+
+**Phone width, found by looking (again).** The chooser wrapped to three
+lines on a 390 px screen, and since the composer is sticky that came
+straight out of the conversation. Under 560 px it is one swipeable row.
+
+**NOT YET MEASURED:** no paid run has happened since. Whether the model
+actually writes the `<summary>` tag every time, and how well it answers in a
+language the message was not written in, are open questions the first paid
+check after this settles. The cost is a few more output tokens — call it
+$0.001 a check until measured.
+
 ### 2026-09-22 (evening) — Two adversarial reviews: 13 defects, every one reproduced, every one fixed
 
 Two independent reviewers went through the day's 20 commits — one for money
@@ -1351,7 +1407,18 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 
 ## 11. Open items
 
-### THE TODO LIST (updated 2026-09-22 — the authoritative one)
+### THE TODO LIST (updated 2026-09-23 — the authoritative one)
+
+**THE NEXT STEPS, agreed 2026-09-23 (in order):**
+
+0. **Switch the Telegram bot on, with Vinayak there** — he messages the bot
+   from his phone while the logs are watched, and whatever real messages
+   break gets fixed. Two real checks a day, so they are used deliberately.
+   Then: **decide the cap** (raising it is one number), then **a few more
+   real checks** across health, science and Indian politics to judge answer
+   quality on fresh rumours, and the first paid look at the summary and the
+   language chooser (neither has ever run against the real model).
+   **WhatsApp stays on hold** — Meta's approval is slow.
 
 **Next, with Vinayak present:**
 
@@ -1392,6 +1459,15 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 9. **Garbled source titles** — a WHO PDF surfaced as "Rum½ÝÀÛ ISSUE#2 FA@kS"
    (its own metadata). Cosmetic; a title that fails a sanity check could fall
    back to the publisher.
+9a. **The Telegram bot cannot pick a language yet.** The API takes one on
+   every route (2026-09-23) and the web page offers buttons plus a box; the
+   bot needs a `/language` command or an inline keyboard, remembered per
+   chat. Worth doing at go-live, when real messages show whether people even
+   want it.
+9b. **The summary has never run against the real model.** The prompt asks
+   for `<summary>…</summary>`; the filter handles it being absent, malformed
+   or cut off, but how OFTEN a real answer carries one is unmeasured. Check
+   it on the first paid run and record the rate here.
 10. **An idempotency key on submissions.** A caller that stops waiting for
    the 202 leaves a job the server finished and billed but nobody delivers.
    The bot now waits (300 s) far longer than the server's bounded inline

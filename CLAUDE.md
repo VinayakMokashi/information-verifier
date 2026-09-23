@@ -3,9 +3,11 @@
 A general-purpose claim verifier: paste a message, a screenshot, a voice note
 or a reel link, and get back one prose answer — the way Claude would answer if
 you pasted the thing into a chat — with a confidence % and clickable sources.
-Read **[PROJECT_PLAN.md](PROJECT_PLAN.md)** first — §0 is the current status,
-§7 is the decisions log (the "why", including the pivot), §11 is what's open.
-This file is how to work here.
+Read **[HANDOFF.md](HANDOFF.md)** first — the whole project in one file,
+with the startup prompt and where the last session stopped. Then
+**[PROJECT_PLAN.md](PROJECT_PLAN.md)** for depth: §0 status, §7 the
+decisions log (the "why", including the pivot), §11 what's open. This file
+is how to work here.
 
 ## Money rules (the user is cost-conscious — this matters most)
 
@@ -78,9 +80,12 @@ limiter are both in-memory.
 2. **The engine may say it could not verify.** Tier `none` is a real answer.
    Never force a decisive-looking call out of nothing.
 3. **Prose is never a receipt.** The model can write a convincing fake URL.
-   Links and confidence come only from structured fields; its markdown renders
-   as text on every surface — no links, no images, no HTML. (A markdown image
-   would leak the reader's forwarded message to a third party on render.)
+   Links, confidence and the skimmable summary come only from structured
+   fields: the summary is pulled OUT of the prose by the filter, never
+   scraped back out of it, so it is shown once and in a box of its own. The
+   model's markdown renders as text on every surface — no links, no images,
+   no HTML. (A markdown image would leak the reader's forwarded message to a
+   third party on render.)
    Telegram is the special case: it auto-links bare URLs in message text, so
    URLs are stripped from the prose there specifically. The console renderer
    (`scripts/render.py`) deliberately prints the prose verbatim — it is a

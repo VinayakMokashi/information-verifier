@@ -117,7 +117,7 @@ No Node, no Docker, no build step, no vector database, no local model.
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-747 tests, always free — every paid API is faked, including a test that proves
+778 tests, always free — every paid API is faked, including a test that proves
 "free" demo mode cannot reach a paid provider, one that proves every script can
 still import what it claims to, and one that proves a chat on the Telegram bot
 cannot pay for the same check twice.
