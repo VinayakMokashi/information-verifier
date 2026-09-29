@@ -801,6 +801,19 @@ async def check_token(http: httpx.AsyncClient, token: str) -> tuple[bool, str]:
     return True, f"@{me.get('username', '?')} ({me.get('first_name', '')})"
 
 
+async def app_is_up(http: httpx.AsyncClient, base: str = APP_BASE) -> bool:
+    """Is OUR app serving? /health lives at the site root, not under the API
+    prefix. MEASURED 2026-09-29: `{base}/../health` resolved to /api/health,
+    a 404, and passed anyway because any response counted as "up" — so did
+    whatever else might have been listening on the port."""
+    root = base.rstrip("/").removesuffix("/api/v1")
+    try:
+        resp = await http.get(f"{root}/health")
+        return resp.status_code == 200 and resp.json().get("status") == "ok"
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return False
+
+
 async def main() -> None:
     _utf8_console()
     if not settings.telegram_bot_token:
@@ -823,9 +836,7 @@ async def main() -> None:
             print(">> --check-token: nothing started, nothing spent.")
             return
 
-        try:
-            await http.get(f"{APP_BASE}/../health")
-        except httpx.HTTPError:
+        if not await app_is_up(http):
             print(f"The app is not reachable at {APP_BASE} - start it first:\n"
                   "  .venv\\Scripts\\python.exe -m uvicorn app.main:app")
             return

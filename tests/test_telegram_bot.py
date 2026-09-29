@@ -895,6 +895,54 @@ def test_an_answer_with_no_summary_reads_as_before():
     assert "blockquote" not in reply
 
 
+def _probe(base: str, status: int, body: dict | None = None):
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(status, json=body or {})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await B.app_is_up(http, base)
+
+    return asyncio.run(run()), seen
+
+
+def test_the_startup_probe_asks_the_apps_real_health_route():
+    """MEASURED 2026-09-29, going live: the probe asked APP_BASE/../health,
+    which resolves to /api/health — a 404 — and passed anyway, because any
+    HTTP response counted as "up". Something else on port 8000 would have
+    passed too."""
+    up, seen = _probe("http://127.0.0.1:8000/api/v1", 200, {"status": "ok"})
+    assert seen == ["/health"]
+    assert up is True
+    # APP_BASE can point at an app mounted under a prefix (a proxy path).
+    up, seen = _probe("http://host/verifier/api/v1/", 200, {"status": "ok"})
+    assert seen == ["/verifier/health"]
+    assert up is True
+
+
+def test_a_404_from_the_probe_is_not_an_app_that_is_up():
+    up, _ = _probe("http://127.0.0.1:8000/api/v1", 404, {"detail": "Not Found"})
+    assert up is False
+
+
+def test_some_other_server_answering_200_is_not_our_app():
+    import httpx
+
+    def handler(request):
+        return httpx.Response(200, text="<html>someone else's page</html>")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await B.app_is_up(http, "http://127.0.0.1:8000/api/v1")
+
+    assert asyncio.run(run()) is False
+
+
 def test_a_summary_is_escaped_like_everything_else_a_model_wrote():
     reply = B.format_reply(_answer(summary='<script>alert(1)</script> & "quoted"'))
     assert "<script>" not in reply
