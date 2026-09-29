@@ -69,8 +69,12 @@ Working end to end:
 .\.venv\Scripts\python.exe scripts\serve_demo.py     # then open http://127.0.0.1:8000
 ```
 
-**Next** (§11): the first live Telegram message — Vinayak wants to be there
-for it ("maybe tomorrow"). WhatsApp stays on hold (Meta's approval is slow).
+**2026-09-29: the Telegram bot is LIVE** — first real messages from
+Vinayak's phone; the summary and the language chooser both ran against the
+real model and worked (§7). **781 tests.**
+
+**Next** (§11): decide the daily cap, then a few real checks across health,
+science and Indian politics. WhatsApp stays on hold (Meta's approval is slow).
 
 ---
 
@@ -409,6 +413,56 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-09-29 — The Telegram bot goes live; the summary and the chooser meet the real model
+
+Vinayak, from his phone, with the logs watched. Both of the day's checks
+were used deliberately, on the same well-covered rumour — "₹2000 के नए नोट
+में नैनो GPS चिप लगी है" — so the second isolates the language chooser:
+
+| Surface | Reply language | Cost | Time | Searches | Summary? |
+|---|---|---|---|---|---|
+| Telegram | Hindi (detected) | **$0.0587** | 25 s | 2 | yes |
+| Web page | English (chosen) | **$0.0516** | 24 s | 3 | yes |
+
+- **The bot works end to end on a real phone.** `/start` → help, a Devanagari
+  forward → a Hindi answer, "trusted" badge, 90%, the summary blockquote,
+  six sources. Rebuilt offline with `format_reply` from the stored answer:
+  2,049 chars, valid Telegram HTML.
+- **The real model writes the `<summary>` tag** — 2 of 2 (§11 9b answered,
+  on a small sample). Both stood alone and matched the prose.
+- **The chooser works against the real model**: Hindi input, English picked,
+  English prose AND English summary. Not served from the cache, correctly —
+  a different language is a different answer (cache key), so it was a fresh
+  check.
+- **Anthropic's prompt cache carried across checks**: two minutes after the
+  first, the second wrote 1.9k cache tokens instead of 9.5k and read 33k —
+  its Claude share was $0.022 against $0.039. Back-to-back checks are
+  cheaper than the one-off numbers in §8.
+- **Found by reading the server log: the bot's startup probe was a no-op.**
+  It asked `APP_BASE/../health` → `/api/health`, a 404, and passed, because
+  any response counted as "up". Fixed (aed10d3): strip the `/api/v1` prefix,
+  require a 200 with the app's own `{"status":"ok"}`. The tests failed first
+  with exactly the logged symptom; the restarted bot's probe then logged
+  `GET /health 200`.
+- **Domain-level `used=` is too coarse.** The model named `rbi.org.in`, so
+  every RBI search result was kept — including the **₹20** note's
+  security-features page and the RBI museum page, shown as receipts for a
+  ₹2000 claim. Same seven sources both times. Breaks no invariant (it only
+  narrows, and they are real RBI pages), but a reader who taps one learns
+  nothing. §11 item 15.
+- **Found while reconciling the ledger: an unrecorded $0.2559 link check**
+  (2026-09-23 04:17 IST, on be8e51c — before the summary existed). The
+  ledger said $1.1261 before today; the docs said $0.8702; the difference is
+  exactly this row. A 128 s Hindi reel of political claims about Sonam
+  Wangchuk. **5 searches billed, zero sources kept**, and both passes told
+  the reader the search tool had failed ("सर्च टूल की सीमा खत्म", "टेक्निकल
+  दिक्कत"), so the answer is general knowledge — honestly labelled `none`,
+  35%. The reader got **two full answers**, pass 1's and pass 2's, largely
+  repeating each other (§11 item 4, worse than measured before). 8.7k output
+  tokens; $0.19 of it Claude. **Why the searches returned nothing cannot be
+  known**: search error codes are only printed to the server console, which
+  was not kept — the answer and the ledger record none of it. §11 item 16.
 
 ### 2026-09-23 — Two things the reader controls: a summary to skim, and the language
 
@@ -1304,6 +1358,8 @@ it costing money or lying.
 | A real 70 s reel (PEEK TV), one pass | **$0.082** + $0.007 ASR | — | 2 | 34 s |
 | Same reel on **Opus 5** (for comparison) | $0.326 | ~$0.44 | 5 | 89 s |
 | Exact re-forward inside the cache TTL | **$0** | $0 | 0 | instant |
+| 2026-09-29: covered claim via **Telegram**, Hindi | **$0.0587** | — | 2 | 25 s |
+| 2026-09-29: same claim on the **page**, English chosen, 2 min later | **$0.0516** (Claude $0.022 — prompt cache warm) | — | 3 | 24 s |
 
 Where it goes, over today's runs: roughly **four-fifths Claude, a sixth
 search, the rest transcription**. Most of the Claude share is prompt-cache
@@ -1407,30 +1463,28 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 
 ## 11. Open items
 
-### THE TODO LIST (updated 2026-09-23 — the authoritative one)
+### THE TODO LIST (updated 2026-09-29 — the authoritative one)
 
-**THE NEXT STEPS, agreed 2026-09-23 (in order):**
+**THE NEXT STEPS (in order):**
 
-0. **Switch the Telegram bot on, with Vinayak there** — he messages the bot
-   from his phone while the logs are watched, and whatever real messages
-   break gets fixed. Two real checks a day, so they are used deliberately.
-   Then: **decide the cap** (raising it is one number), then **a few more
-   real checks** across health, science and Indian politics to judge answer
-   quality on fresh rumours, and the first paid look at the summary and the
-   language chooser (neither has ever run against the real model).
-   **WhatsApp stays on hold** — Meta's approval is slow.
+0. ~~**Switch the Telegram bot on, with Vinayak there.**~~ **DONE 2026-09-29**
+   (§7): the bot, the summary and the language chooser all ran against the
+   real model. Next: **decide the cap** (raising it is one number), then **a
+   few more real checks** across health, science and Indian politics to
+   judge answer quality on fresh rumours. **WhatsApp stays on hold** —
+   Meta's approval is slow.
 
 **Next, with Vinayak present:**
 
-1. **The first live Telegram message** — "maybe tomorrow". The token validates
-   (`scripts\telegram_bot.py --check-token`, free). The bot is now concurrent
-   and safe against one chat paying twice. Note the 2-a-day cap is shared with
-   the web page, so the first two real checks of the day are all there is —
-   a repeat of the same message is free and does not count.
-   `uvicorn app.main:app` in one terminal, `scripts\telegram_bot.py` in the
-   other, then message `@Information_Verifier_bot`. Watch the dashboard.
-   A message sent while that chat's check is still running is NOT checked
-   automatically (the cap) — the bot says so and asks for it again.
+1. **Running the bot:** `uvicorn app.main:app` in one terminal,
+   `scripts\telegram_bot.py` in the other (it refuses to start unless the
+   app's `/health` answers). The PC must stay awake — the bot lives here.
+   The 2-a-day cap is shared with the web page; a repeat of the same message
+   is free and does not count. A message sent while that chat's check is
+   still running is NOT checked automatically (the cap) — the bot says so
+   and asks for it again. Before a restart after downtime, check
+   `getWebhookInfo`'s `pending_update_count`: the bot processes a queued
+   backlog on start (the cap bounds what that can cost).
 
 **On hold, deliberately:**
 
@@ -1446,7 +1500,10 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    (Nagpur Metro) — excellent, but one. A handful more across health, science
    and Indian politics would say whether `chat_effort="medium"` is the right
    default, and whether pass 1 should be told harder to keep its "not covered"
-   reply short (it wrote five paragraphs before escalating).
+   reply short (it wrote five paragraphs before escalating). MEASURED again
+   2026-09-23 (the Wangchuk reel, §7 2026-09-29): pass 1 wrote a complete
+   answer and pass 2 another, so the reader got the same ground twice and
+   paid for 8.7k output tokens.
 5. **Mixed-language messages** (an English caption over a Hindi transcript)
    get "reply in the Indic script" today — sensible for reels, but untested
    with a real sender who writes English about Hindi content.
@@ -1464,10 +1521,8 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    bot needs a `/language` command or an inline keyboard, remembered per
    chat. Worth doing at go-live, when real messages show whether people even
    want it.
-9b. **The summary has never run against the real model.** The prompt asks
-   for `<summary>…</summary>`; the filter handles it being absent, malformed
-   or cut off, but how OFTEN a real answer carries one is unmeasured. Check
-   it on the first paid run and record the rate here.
+9b. **The summary against the real model: 2 of 2 carried one** (2026-09-29,
+   Hindi and English). Small sample; keep counting on later paid runs.
 10. **An idempotency key on submissions.** A caller that stops waiting for
    the 202 leaves a job the server finished and billed but nobody delivers.
    The bot now waits (300 s) far longer than the server's bounded inline
@@ -1496,6 +1551,19 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    bad links therefore throttles nobody but the person sending them.
    Pre-existing; reserve-first is what makes the cap real, so this is the
    price of it.
+15. **`used=` narrows by domain, which is too coarse for big sites.**
+   MEASURED 2026-09-29: `used` named rbi.org.in, so a ₹2000 answer showed
+   the ₹20 note's page and the RBI museum as receipts. Options: let `used=`
+   carry URL paths for the few results it rests on (the tag's size cap was
+   raised once for exactly this, §7), or cap results per domain. Either
+   must stay narrow-only, and a paid run decides whether the model fills it
+   in reliably.
+16. **Search errors leave no trace after the console closes.** MEASURED
+   2026-09-29 (reading the 2026-09-23 Wangchuk reel): 5 searches billed, 0
+   results, and no way to tell a quota from a rate limit from a too-long
+   query. Record each error code in `answer.usage` (and so the ledger and
+   the dashboard) — free to build, and it should come BEFORE more paid
+   Indian-politics checks, which are the ones most likely to hit it.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

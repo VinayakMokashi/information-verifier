@@ -6,7 +6,7 @@
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log) and
 > [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-09-23**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-09-29**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -29,7 +29,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 778 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 781 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.05-0.06 when a fact-checker
 covered the claim, ~$0.15 when it searches the wider web, ~$0.08 + ₹0.58 for a
@@ -48,14 +48,11 @@ tests need fakes that suspend; a test that HANGS on the bug is not a test that
 fails.
 
 What I want to do today:
-  (a) GO LIVE with the Telegram bot, with me watching. The token is in .env and
-      validates (@Information_Verifier_bot). Walk me through starting the app
-      and the bot, then I'll message it from my phone and we fix whatever real
-      messages break. The 2-a-day cap applies to it, so we use those two
-      deliberately — and this is the first paid look at the new summary box and
-      the language chooser, neither of which has ever run against the real model.
-  (b) Then: decide whether to raise the cap, and a few more real checks across
-      health / science / Indian politics to judge answer quality (§11).
+  (a) The Telegram bot is LIVE (2026-09-29). Start the app and the bot for me
+      (HANDOFF §7) and keep watching the logs while I use it.
+  (b) Record search error codes in each answer (§11 item 16) — free — BEFORE
+      any more paid Indian-politics checks; then decide the cap, and a few real
+      checks across health / science / Indian politics to judge quality (§11).
 ```
 
 ---
@@ -75,8 +72,8 @@ searchable) and only then the **open web**, which it labels clearly as such.
 It is allowed to say "nobody reliable has covered this" — that is a real
 answer here, not a failure.
 
-**Surfaces:** a chat web page (the main one), a Telegram bot (built, never yet
-switched on), a local-only spending dashboard, and a set of console scripts.
+**Surfaces:** a chat web page (the main one), a Telegram bot (live since
+2026-09-29), a local-only spending dashboard, and a set of console scripts.
 A WhatsApp bot is on hold.
 
 ---
@@ -91,19 +88,24 @@ A WhatsApp bot is on hold.
 | Sep 22 (day) | **First paid runs of the new engine.** Costs measured (2–3× cheaper than modelled). Found and fixed: English answered in Hinglish, a self-contradicting trust label, a server that could not start on the real database, two whitelisted domains that block the crawler. Built: the 2-a-day cap, retention, the transcript cache, the spending dashboard, a concurrent Telegram bot, plain-language errors. Sonnet 5 beat Opus 5 on the same reel at a quarter of the cost. |
 | Sep 22 (eve) | **Two adversarial reviews** of that day's work: 13 defects, all reproduced, all fixed. Then **two reviews of those fixes**: 15 more, five of them introduced by the fixes themselves. |
 | **Sep 23** | The reader's two controls: a **skimmable summary** and a **reply-language chooser**. |
+| **Sep 29** | **The Telegram bot goes live** from Vinayak's phone. The summary and the language chooser both work against the real model. Fixed: the bot's startup health check checked nothing. Found: a ₹2000 answer showed an RBI ₹20-note page as a receipt, and an unrecorded Sep 23 politics reel paid for 5 searches that returned nothing. |
 
 ---
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **778 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **781 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
-- The engine has run for real; the web page, the link path and the caches are
-  proven. **The Telegram bot has never been switched on.**
-- **Spent to date: $0.8702** (3 app checks $0.26, a Sonnet-vs-Opus A/B $0.41,
-  language diagnostics $0.20). Watch it at `http://127.0.0.1:8000/dashboard`.
-- **Never measured yet:** the summary tag against the real model, answering in
-  a language the message was not written in, and the bot in real use.
+- The engine has run for real; the web page, the link path, the caches, **the
+  Telegram bot, the summary and the language chooser** are all proven.
+- **Spent to date: $1.2364** — the spend ledger's own total, 13 rows: five
+  checks on the page or bot ($0.37), a $0.26 politics reel on 2026-09-23 that
+  the docs had missed, and $0.61 of operator scripts (the Sonnet-vs-Opus A/B
+  and the language diagnostics). Watch it at `http://127.0.0.1:8000/dashboard`.
+- **Open problems found on real runs:** source narrowing is per *domain*,
+  so big sites bring unrelated pages; a fresh rumour gets two full answers
+  (pass 1 does not stop short); and search errors are not recorded anywhere
+  that survives the console (PROJECT_PLAN §11 items 4, 15, 16).
 
 **Measured costs** (Sonnet 5, 2026-09-22):
 
@@ -113,6 +115,7 @@ A WhatsApp bot is on hold.
 | A fresh rumour (whitelist, then open web) | **$0.150** | 57 s |
 | A real reel | **$0.082** + ₹0.58 ASR, once per video | 34 s |
 | The same thing sent again (cache) | **$0** | instant |
+| A long political reel, both passes, searches all failed (Sep 23) | **$0.256** | — |
 
 **Safety settings in force:** 2 checks a day deployment-wide (persisted in
 SQLite, India's day, shared by page and bot, fails closed); messages deleted
@@ -144,12 +147,12 @@ The ten invariants are in [CLAUDE.md](CLAUDE.md); these are the ones that bite:
 
 ---
 
-## 6. The next steps (agreed 2026-09-23)
+## 6. The next steps (updated 2026-09-29)
 
-1. **Switch the Telegram bot on, with Vinayak present.** He messages it from
-   his phone; the logs get watched; whatever real messages break gets fixed.
-   Two real checks that day, used deliberately — and the first paid look at
-   the summary and the language chooser.
+1. ~~**Switch the Telegram bot on.**~~ **Done 2026-09-29.**
+1a. **Record search error codes in the answer** (§11 item 16), free, before
+   more paid politics checks: the one politics reel so far paid for 5
+   searches that returned nothing, and nobody can say why.
 2. **Decide the cap.** Raising it from 2 is one number in `app/config.py`
    plus the test that pins it.
 3. **A few more real checks** across health, science and Indian politics, to
@@ -169,7 +172,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 778 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 781 tests, ~2 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
