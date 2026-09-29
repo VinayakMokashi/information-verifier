@@ -73,7 +73,8 @@ Working end to end:
 **2026-09-29: the Telegram bot is LIVE** — first real messages from
 Vinayak's phone; the summary and the language chooser both ran against the
 real model and worked (§7). Failed searches are now recorded per check,
-and the cap is 5 a day. **788 tests.**
+and the cap is 5 a day. Found and fixed: the free test suite had been
+refilling the real daily cap one slot per run (§7). **791 tests.**
 
 **Next** (§11): decide the daily cap, then a few real checks across health,
 science and Indian politics. WhatsApp stays on hold (Meta's approval is slow).
@@ -415,6 +416,40 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-09-29 (later still) — The free test suite was refilling the real daily cap
+
+**Found by looking at a number that could not be right.** After the restart
+for the new cap, the dashboard said 0 used today — two checks had been paid
+for that morning. The persisted counter really read 0 (and 2026-09-23's read
+0 despite that day's paid reel). Only two statements write it: take a slot,
+give one back. So something had given back two.
+
+**Reproduced with a canary, never with the real database:** the suite run
+with `DB_PATH` pointed at a file whose counters were all 2 → today's became
+1. One slot per run; four runs since the morning's checks, floored at 0.
+Bisected per test (`scratchpad/bisect_leak.py`): `test_a_burst_of_claims_
+cannot_stall_the_answers` cancels 25 claims while a write lock is held; each
+finishes later on the limiter's OWN pool and refunds its slot — after the
+test's patches were undone, so the refund read the real `db_path` and a
+limiter switched back on (its real default).
+
+**Fixed for the rule, not the test** (6e21f09): anything running after a
+test's patches are undone falls back to what `settings.db_path` held before
+them — so a session fixture makes that a throwaway file before any test
+runs, never restored. `tests/test_isolation.py` pins it and failed first.
+Re-measured: canary 2 → 2 over a full run. The real counter was then set
+back to 2 (raise-only).
+
+**How long:** since the burst test arrived (2026-09-22 evening). Every
+day's cap was refillable by running the free suite — invariant 5 was
+never as strong as its tests said. The ledger is unaffected (it is only
+written by real checks), so spend figures stand.
+
+**A second finding from the same fix:** the new test's first, deliberately
+failing, run printed a `Settings` object in pytest's assertion display —
+with the start of the Anthropic API key. The tests now compare plain
+strings; the wider exposure is §11 item 17.
 
 ### 2026-09-29 (later) — Failed searches get recorded; the cap goes to 5
 
@@ -1585,6 +1620,13 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    2026-09-29** (c5e06c2): recorded per check in `usage.search_errors`, the
    ledger and the dashboard. The next politics check that hits one will
    say which error it was.
+17. **`Settings` prints its secrets.** Its repr includes
+   `anthropic_api_key` and the other keys in full; MEASURED 2026-09-29 when
+   a failing assert displayed one. Anything that prints the object — a test
+   failure, a traceback with locals, a debug line — leaks them. Fix:
+   `SecretStr` (or `Field(repr=False)`) on every key field, with a test
+   that the repr carries none of them. Free; worth doing before any CI or
+   shared logs exist.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

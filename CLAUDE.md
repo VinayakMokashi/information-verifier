@@ -156,6 +156,12 @@ limiter are both in-memory.
 - **Concurrency tests need fakes that suspend** (`await asyncio.sleep(0)`), or
   a race cannot happen and the test passes with the guard removed — measured.
   And wait on conditions, not durations: asyncio's clock here steps 15–16 ms.
+- **Work that outlives a test runs with the test's patches undone.** A
+  cancelled claim settling late on the limiter's pool refunded a slot on the
+  REAL database, once per suite run, from 2026-09-22 to 2026-09-29. The
+  session fixture in `conftest.py` makes the unpatched default a throwaway
+  file; `tests/test_isolation.py` pins it. To check the suite touches nothing
+  real, run it with `DB_PATH` pointed at a canary file and diff the file.
 - **A test that hangs on the bug is not a test that fails.** Make the broken
   version FAIL: stubs that finish work submitted late, and a thread with a
   join timeout around anything that could spin synchronously (measured:

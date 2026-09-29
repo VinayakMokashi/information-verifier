@@ -29,7 +29,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 788 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 791 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.05-0.06 when a fact-checker
 covered the claim, ~$0.15 when it searches the wider web, ~$0.08 + ₹0.58 for a
@@ -88,13 +88,13 @@ A WhatsApp bot is on hold.
 | Sep 22 (day) | **First paid runs of the new engine.** Costs measured (2–3× cheaper than modelled). Found and fixed: English answered in Hinglish, a self-contradicting trust label, a server that could not start on the real database, two whitelisted domains that block the crawler. Built: the 2-a-day cap, retention, the transcript cache, the spending dashboard, a concurrent Telegram bot, plain-language errors. Sonnet 5 beat Opus 5 on the same reel at a quarter of the cost. |
 | Sep 22 (eve) | **Two adversarial reviews** of that day's work: 13 defects, all reproduced, all fixed. Then **two reviews of those fixes**: 15 more, five of them introduced by the fixes themselves. |
 | **Sep 23** | The reader's two controls: a **skimmable summary** and a **reply-language chooser**. |
-| **Sep 29** | **The Telegram bot goes live** from Vinayak's phone. The summary and the language chooser both work against the real model. Fixed: the bot's startup health check checked nothing. Found: a ₹2000 answer showed an RBI ₹20-note page as a receipt, and an unrecorded Sep 23 politics reel paid for 5 searches that returned nothing. |
+| **Sep 29** | **The Telegram bot goes live** from Vinayak's phone. The summary and the language chooser both work against the real model. Fixed: the bot's startup health check checked nothing. Found: a ₹2000 answer showed an RBI ₹20-note page as a receipt, and an unrecorded Sep 23 politics reel paid for 5 searches that returned nothing. Then: failed searches are recorded per check, the cap goes to **5 a day**, and the free test suite is caught **refilling the real daily cap** one slot per run (fixed, re-measured with a canary). |
 
 ---
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **788 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **791 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - The engine has run for real; the web page, the link path, the caches, **the
   Telegram bot, the summary and the language chooser** are all proven.
@@ -171,7 +171,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 788 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 791 tests, ~2 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
