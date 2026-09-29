@@ -8,6 +8,23 @@ from app.config import settings
 from app.engine import chat as C
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _never_the_real_database(tmp_path_factory):
+    """Point the default database at a throwaway file for the whole session.
+
+    MEASURED 2026-09-29: each run of this suite handed one of the day's
+    paid-for slots back on the REAL database (tests/test_isolation.py has
+    the mechanism). Work that finishes after a test — a cancelled claim
+    settling on the limiter's pool — reads `settings.db_path` once the
+    test's patches are undone, and undoing restores whatever was there
+    before. Set here, before any test patches anything, that is a
+    throwaway file. Deliberately never restored: late work can outlive the
+    session's teardown too.
+    """
+    settings.db_path = str(tmp_path_factory.mktemp("session") / "default.db")
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _no_rate_limit(monkeypatch):
     """Tests submit far faster than a human; the limiter is tested explicitly."""
