@@ -50,7 +50,7 @@ from app.engine.marker import MarkerFilter
 from app.models.answer import AnswerSection, Source, Tier
 from app.providers.factcheck import search_factcheck
 from app.providers.llm import async_client
-from app.providers.usage import note_llm
+from app.providers.usage import error_code_label, note_llm, note_search_error
 from app.trusted_sources import (
     CORE_SEARCH_DOMAINS, SEARCH_DOMAINS, domains_named_in, trusted_domain_of,
 )
@@ -186,15 +186,21 @@ def _collect_sources(message) -> list[Source]:
             content = getattr(block, "content", None)
             # A search ERROR is a single object, not a list — the shape that
             # bit the old retrieval path.
+            result_id = getattr(block, "tool_use_id", None)
             if isinstance(content, list):
                 for result in content:
                     add(getattr(result, "url", ""),
                         getattr(result, "title", "") or "")
+                if not content:
+                    note_search_error("no_results", result_id)
             elif content is not None:
-                # Logged, because otherwise a search outage or quota is
-                # indistinguishable from "the fact-checkers had nothing".
+                # Recorded in the bill, not only printed: otherwise a search
+                # outage or quota is indistinguishable from "the fact-checkers
+                # had nothing" once the console is gone (measured 2026-09-29).
+                code = getattr(content, "error_code", None)
+                note_search_error(code, result_id)
                 print(f"[chat] web search returned an error: "
-                      f"{getattr(content, 'error_code', content)}")
+                      f"{error_code_label(code)} ({type(content).__name__})")
     return list(found.values())
 
 

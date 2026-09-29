@@ -77,6 +77,9 @@ def test_the_cost_survives_the_message(repo, monkeypatch):
 def test_the_ledger_holds_no_message_content(repo):
     """Checked against the schema itself, not just what we happen to write."""
     a = _answer(1, text="SECRET forwarded words")
+    # Even a bill whose error map was built by hand, bypassing the meter's
+    # sanitising: the ledger keeps code-shaped names only.
+    a.usage.search_errors = {"SECRET forwarded words": 1, "unavailable": 1}
     repo.ledger.record(a, "text")
     conn = sqlite3.connect(settings.db_path)
     columns = [r[1] for r in conn.execute("PRAGMA table_info(spend_ledger)")]
@@ -86,6 +89,49 @@ def test_the_ledger_holds_no_message_content(repo):
     for forbidden in ("input_text", "source_text", "payload", "markdown", "sections"):
         assert forbidden not in columns
     assert "SECRET" not in everything and "machine heard" not in everything
+
+
+def test_failed_searches_reach_the_ledger_and_the_dashboard_rows(repo):
+    """So a check that paid for searches and kept nothing says why, after
+    the console is gone and after the answer itself is deleted."""
+    a = _answer(1)
+    a.usage.search_errors = {"too_many_requests": 2, "max_uses_exceeded": 3}
+    repo.ledger.record(a, "link")
+    (row,) = repo.ledger.recent(5)
+    assert row["search_errors"] == "max_uses_exceeded:3,too_many_requests:2"
+
+
+def test_a_clean_check_records_no_search_errors(repo):
+    repo.ledger.record(_answer(1), "text")
+    (row,) = repo.ledger.recent(5)
+    assert row["search_errors"] == ""
+
+
+def test_an_existing_ledger_gains_the_column_and_keeps_its_rows(tmp_path, monkeypatch):
+    """The real database already has a spend ledger. MEASURED 2026-09-22: a
+    server that could not start on the one real database is the failure a
+    schema change must not repeat — and the rows are the spending history."""
+    from app.store.db import init_db
+    from app.store.repository import AnswerRepository
+
+    path = tmp_path / "old.db"
+    monkeypatch.setattr(settings, "db_path", str(path))
+    init_db()
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE spend_ledger DROP COLUMN search_errors")
+    conn.execute(
+        "INSERT INTO spend_ledger VALUES ('old', '2026-09-23', "
+        "'2026-09-22T22:49:59+00:00', 'link', 'COMPLETE', 'none', 0, 0.2559, "
+        "0.19, 0.05, 0.012, 1, 1, 1, 1, 5, 127.9, 'claude-sonnet-5')")
+    conn.commit()
+    conn.close()
+
+    init_db()
+    init_db()                                     # and idempotently
+    ledger = AnswerRepository().ledger
+    assert ledger.totals()["usd"] == pytest.approx(0.2559)
+    (row,) = ledger.recent(5)
+    assert row["search_errors"] == ""
 
 
 def test_recording_is_idempotent(repo):

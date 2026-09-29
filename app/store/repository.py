@@ -225,19 +225,27 @@ class SpendLedger:
         usage = answer.usage
         if usage is None:
             return
-        from app.providers.usage import split_of
+        from app.providers.usage import error_code_label, split_of
 
         finished = answer.completed_at or datetime.now(timezone.utc)
         models = usage.models or {}
         llm_usd, search_usd, asr_usd = split_of(usage)
+        # Labelled again here, not trusted from the bill: a bill can be built
+        # without the meter, and this column must never carry text.
+        errors: dict[str, int] = {}
+        for code, n in (usage.search_errors or {}).items():
+            label = error_code_label(code)
+            errors[label] = errors.get(label, 0) + int(n)
+        search_errors = ",".join(f"{c}:{n}" for c, n in sorted(errors.items()))
         verb = "INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE"
         with get_conn() as conn:
             conn.execute(
                 verb + " INTO spend_ledger (job_id, day, finished_at, "
                 "kind, status, tier, cached, usd, llm_usd, search_usd, asr_usd, "
                 "input_tokens, output_tokens, cache_write_tokens, "
-                "cache_read_tokens, web_searches, asr_seconds, models) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "cache_read_tokens, web_searches, asr_seconds, models, "
+                "search_errors) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (answer.job_id, operator_day(finished), finished.isoformat(),
                  kind, answer.status.value, answer.tier, int(answer.cached),
                  usage.estimated_usd, llm_usd, search_usd, asr_usd,
@@ -245,7 +253,8 @@ class SpendLedger:
                  sum(m.output_tokens for m in models.values()),
                  sum(m.cache_write_tokens for m in models.values()),
                  sum(m.cache_read_tokens for m in models.values()),
-                 usage.web_searches, usage.asr_seconds, ",".join(sorted(models))),
+                 usage.web_searches, usage.asr_seconds, ",".join(sorted(models)),
+                 search_errors),
             )
 
     def backfill_from_answers(self) -> int:
@@ -322,7 +331,7 @@ class SpendLedger:
         with get_conn() as conn:
             rows = conn.execute(
                 "SELECT finished_at, kind, status, tier, cached, usd, "
-                "web_searches, asr_seconds, models FROM spend_ledger "
+                "web_searches, search_errors, asr_seconds, models FROM spend_ledger "
                 "ORDER BY finished_at DESC LIMIT ?", (limit,),
             ).fetchall()
         return [dict(r) for r in rows]

@@ -64,6 +64,12 @@ class ReportUsage(BaseModel):
     llm_usd: float = 0.0
     search_usd: float = 0.0
     asr_usd: float = 0.0
+    # Failed searches by the API's error code ("no_results" for a search that
+    # worked and found nothing; "unrecognized" for an error that carried no
+    # code-shaped name). MEASURED 2026-09-29: a reel paid for 5 searches and
+    # kept no sources, and why was unknowable — the codes had only reached a
+    # console. Codes only, never text: this reaches the ledger (invariant 10).
+    search_errors: dict[str, int] = Field(default_factory=dict)
 
 
 Tier = Literal["trusted", "web", "none"]

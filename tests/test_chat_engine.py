@@ -309,6 +309,72 @@ def test_every_streamed_request_reports_its_own_usage(no_factcheck, monkeypatch)
     assert snap.estimated_usd > 0
 
 
+def _search_result(content, tool_use_id):
+    return types.SimpleNamespace(type="web_search_tool_result",
+                                 tool_use_id=tool_use_id, content=content)
+
+
+def _metered(client, monkeypatch):
+    monkeypatch.setattr(C, "async_client", client)
+    meter = UsageMeter()
+
+    async def main():
+        with meter.activate():
+            await C.answer("some claim")
+
+    asyncio.run(main())
+    return meter.snapshot()
+
+
+def test_a_failed_search_is_recorded_in_the_bill_not_just_printed(
+        no_factcheck, monkeypatch):
+    """MEASURED 2026-09-29: a Sep 23 reel paid for 5 searches and kept no
+    sources, and why could not be known — the error codes had only ever
+    been printed to a console nobody kept."""
+    err = types.SimpleNamespace(error_code="max_uses_exceeded")
+    final = _final("Nothing. " + SENTINEL_YES, searches=2)
+    final.content += [_search_result(err, "srvtoolu_1"),
+                      _search_result([], "srvtoolu_2")]
+    snap = _metered(StubClient([(final, _deltas("Nothing. " + SENTINEL_YES))]),
+                    monkeypatch)
+    assert snap.search_errors == {"max_uses_exceeded": 1, "no_results": 1}
+
+
+def test_one_failed_search_is_counted_once_however_often_it_is_seen(
+        no_factcheck, monkeypatch):
+    """A resumed (pause_turn) request carries the earlier blocks back; if a
+    response ever repeats one, it is still one failed search."""
+    err = types.SimpleNamespace(error_code="too_many_requests")
+    final = _final("x " + SENTINEL_YES, searches=1)
+    final.content += [_search_result(err, "srvtoolu_9"),
+                      _search_result(err, "srvtoolu_9")]
+    snap = _metered(StubClient([(final, _deltas("x " + SENTINEL_YES))]),
+                    monkeypatch)
+    assert snap.search_errors == {"too_many_requests": 1}
+
+
+def test_an_unrecognised_error_shape_records_a_label_never_its_text(
+        no_factcheck, monkeypatch):
+    """The ledger keeps this, and the ledger may hold NOTHING anyone sent
+    (invariant 10) — an error object echoing the query must not smuggle it
+    in. Only a code-shaped identifier is kept verbatim."""
+    odd = types.SimpleNamespace(detail="query: SECRET forwarded words")
+    bad_code = types.SimpleNamespace(error_code="SECRET forwarded words")
+    final = _final("x " + SENTINEL_YES, searches=2)
+    final.content += [_search_result(odd, "a"), _search_result(bad_code, "b")]
+    snap = _metered(StubClient([(final, _deltas("x " + SENTINEL_YES))]),
+                    monkeypatch)
+    assert snap.search_errors == {"unrecognized": 2}
+    assert "SECRET" not in snap.model_dump_json()
+
+
+def test_successful_searches_record_no_errors(no_factcheck, monkeypatch):
+    final = _final("ok " + SENTINEL_YES, results=[TRUSTED_URL], searches=1)
+    snap = _metered(StubClient([(final, _deltas("ok " + SENTINEL_YES))]),
+                    monkeypatch)
+    assert snap.search_errors == {}
+
+
 # -- failure modes ------------------------------------------------------------
 
 def test_a_refusal_raises_rather_than_returning_half_an_answer(no_factcheck, monkeypatch):

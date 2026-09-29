@@ -20,6 +20,7 @@ ASR seconds are noted where the audio's true duration is learned (ffprobe in
 normalize_to_wav), which slightly over-counts if transcription then fails
 mid-way — the conservative direction for a spend figure.
 """
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -38,6 +39,18 @@ _FALLBACK_PRICE = _PRICES["claude-opus-4-8"]   # unknown model: price as the dea
 _SEARCH_USD = 0.01                              # per web_search request
 _ASR_USD_PER_S = (30.0 / 3600.0) / 88.0         # Sarvam ₹30/hr at ~₹88/$
 
+# An API error code is a short snake_case name. Anything else — an error
+# object with no code, or a code that is really free text — is recorded as
+# "unrecognized", because this map reaches the ledger, and the ledger may
+# hold nothing anyone sent (invariant 10).
+_ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")
+
+
+def error_code_label(code) -> str:
+    return code if isinstance(code, str) and _ERROR_CODE_RE.fullmatch(code) \
+        else "unrecognized"
+
+
 _current: ContextVar["UsageMeter | None"] = ContextVar("usage_meter", default=None)
 # Guards against counting one API call twice if an SDK's parse() ever routes
 # through its own create(). The installed SDK's parse() calls _post() directly
@@ -52,6 +65,8 @@ class UsageMeter:
         self._models: dict[str, ModelUsage] = {}
         self._searches = 0
         self._asr_seconds = 0.0
+        self._search_errors: dict[str, int] = {}
+        self._search_results_seen: set[str] = set()
 
     @contextmanager
     def activate(self):
@@ -77,6 +92,16 @@ class UsageMeter:
     def note_asr(self, seconds: float) -> None:
         self._asr_seconds += max(0.0, float(seconds))
 
+    def note_search_error(self, code, result_id: str | None = None) -> None:
+        # One failed search is one entry, however many times its block is
+        # seen: a resumed turn sends earlier blocks back.
+        if result_id:
+            if result_id in self._search_results_seen:
+                return
+            self._search_results_seen.add(result_id)
+        label = error_code_label(code)
+        self._search_errors[label] = self._search_errors.get(label, 0) + 1
+
     def snapshot(self) -> ReportUsage:
         search = self._searches * _SEARCH_USD
         asr = self._asr_seconds * _ASR_USD_PER_S
@@ -94,6 +119,7 @@ class UsageMeter:
             llm_usd=round(llm, 6),
             search_usd=round(search, 6),
             asr_usd=round(asr, 6),
+            search_errors=dict(self._search_errors),
         )
 
 
@@ -123,6 +149,13 @@ def note_llm(model: str, usage) -> None:
     meter = _current.get()
     if meter is not None:
         meter.note_llm(model, usage)
+
+
+def note_search_error(code, result_id: str | None = None) -> None:
+    """Report one failed search into the ambient meter, if any."""
+    meter = _current.get()
+    if meter is not None:
+        meter.note_search_error(code, result_id)
 
 
 def note_asr(seconds: float) -> None:

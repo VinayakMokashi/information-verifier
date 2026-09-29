@@ -113,6 +113,7 @@
   td { border-bottom: 1px solid var(--grid); padding: 7px 8px 7px 0; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.failed { color: var(--text-primary); }
+  .failed-searches { display: block; color: var(--text-secondary); font-size: .76rem; }
 
   #tip {
     position: fixed; pointer-events: none; z-index: 10; display: none;
@@ -518,7 +519,19 @@ function drawRecent(d) {
       result.textContent = (TIER[r.tier] || r.tier) + (r.cached ? " · from cache" : "");
     }
     tr.appendChild(result);
-    tr.appendChild(el("td", { class: "num" }, String(r.web_searches)));
+    // Searches that returned nothing (an API error, or no results) are money
+    // spent on nothing — counted under the total, with the API's codes on
+    // hover, so a check that kept no sources says why (2026-09-29: five paid
+    // searches, zero results, cause unknowable).
+    const searches = el("td", { class: "num" }, String(r.web_searches));
+    const empty = (r.search_errors || "").split(",").filter(Boolean)
+      .reduce((n, part) => n + (parseInt(part.split(":")[1], 10) || 0), 0);
+    if (empty) {
+      searches.appendChild(el("span", { class: "failed-searches",
+        title: r.search_errors.replaceAll(",", ", ").replaceAll(":", " × ") },
+        `${empty} got nothing`));
+    }
+    tr.appendChild(searches);
     tr.appendChild(el("td", { class: "num" }, usd(r.usd)));
     body.appendChild(tr);
   }

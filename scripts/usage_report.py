@@ -21,6 +21,10 @@ def format_usage(usage: dict | None) -> str:
                  f"cache_w={row['cache_write_tokens']:,} "
                  f"cache_r={row['cache_read_tokens']:,}")
     L.append(f"web searches: {usage.get('web_searches', 0)}")
+    errors = usage.get("search_errors") or {}
+    if errors:
+        L.append("  failed    : " + ", ".join(
+            f"{code} x{n}" for code, n in sorted(errors.items())))
     L.append(f"ASR audio   : {usage.get('asr_seconds', 0.0):.1f}s")
     L.append("-" * 66)
     L.append(f"estimated total: ${usage.get('estimated_usd', 0.0):.4f}")

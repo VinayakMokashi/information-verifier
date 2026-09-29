@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     cache_read_tokens   INTEGER NOT NULL,
     web_searches        INTEGER NOT NULL,
     asr_seconds         REAL NOT NULL,
-    models              TEXT NOT NULL    -- comma-joined model ids
+    models              TEXT NOT NULL,   -- comma-joined model ids
+    search_errors       TEXT NOT NULL DEFAULT ''  -- "code:n,..." codes only
 );
 CREATE INDEX IF NOT EXISTS spend_ledger_day ON spend_ledger (day);
 
@@ -137,10 +138,24 @@ def _drop_legacy(conn: sqlite3.Connection) -> None:
                   f"(its extension is uninstalled; it is inert): {exc}")
 
 
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Columns added to a table that already exists on a real database.
+
+    CREATE TABLE IF NOT EXISTS leaves an existing table as it was, and
+    bumping _SCHEMA_VERSION is no answer for the ledger: its rows are the
+    spending history, which outlives every answer on purpose.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(spend_ledger)")}
+    if "search_errors" not in have:
+        conn.execute("ALTER TABLE spend_ledger "
+                     "ADD COLUMN search_errors TEXT NOT NULL DEFAULT ''")
+
+
 def init_db() -> None:
     os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
     with get_conn() as conn:
         conn.executescript(_SCHEMA)
+        _add_missing_columns(conn)
         row = conn.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
         ).fetchone()
