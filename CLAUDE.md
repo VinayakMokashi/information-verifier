@@ -16,8 +16,9 @@ is how to work here.
   **$0.08** for a real 70 s reel (+ ₹0.58 ASR, now paid once per video). The
   models said 2–3× more. Every answer carries its own bill in `answer.usage`,
   and **`http://127.0.0.1:8000/dashboard`** (this machine only) shows the total.
-- **The deployment is capped at 2 checks a day** (Vinayak, 2026-09-22: "just
-  to be safe … we can increase it later"). Persisted in SQLite, India's day,
+- **The deployment is capped at 5 checks a day** (Vinayak, 2026-09-22: 2 a
+  day "just to be safe … we can increase it later"; raised to 5 on
+  2026-09-29 for quality testing). Persisted in SQLite, India's day,
   shared by the web page and the Telegram bot; a test pins the default.
   Operator scripts (`smoke_test.py`, `ab_models.py`) do not go through it —
   they are still paid, so still ask.

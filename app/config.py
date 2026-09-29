@@ -64,7 +64,11 @@ class Settings(BaseSettings):
     # later." Across the whole deployment — web page and Telegram bot share
     # it. Persisted in SQLite so a restart cannot quietly hand out two more.
     # Raise it here (or MAX_CHECKS_PER_DAY in .env); PROJECT_PLAN §7 has why.
-    max_checks_per_day: int = 2
+    # RAISED to 5 on 2026-09-29 for the answer-quality checks ("use 5 or even
+    # more if you want"). Measured checks run $0.05–0.26, so a full day is at
+    # most ~$1.30. Five, not more: quality testing needs a handful a day, and
+    # the cap's job is still to bound a bad day.
+    max_checks_per_day: int = 5
     # When "a day" rolls over. IST (UTC+5:30), because the person watching the
     # bill is in India and "2 a day" means his day. A fixed offset rather than
     # a zone name: India has no DST, and zoneinfo needs the tzdata package on

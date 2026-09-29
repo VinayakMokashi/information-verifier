@@ -29,7 +29,8 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
 (§7, 2026-09-22).
 
 **Safety settings in force** (Vinayak, 2026-09-22):
-- **2 checks a day**, deployment-wide — web page and Telegram bot share it.
+- **5 checks a day** (2 until 2026-09-29), deployment-wide — web page and
+  Telegram bot share it.
   Persisted in SQLite, so a restart cannot refill it; resets at midnight
   India time; a check served free from cache gives its slot back.
 - Messages are deleted after **30 days**; what they cost is kept, with no
@@ -71,7 +72,8 @@ Working end to end:
 
 **2026-09-29: the Telegram bot is LIVE** — first real messages from
 Vinayak's phone; the summary and the language chooser both ran against the
-real model and worked (§7). **781 tests.**
+real model and worked (§7). Failed searches are now recorded per check,
+and the cap is 5 a day. **788 tests.**
 
 **Next** (§11): decide the daily cap, then a few real checks across health,
 science and Indian politics. WhatsApp stays on hold (Meta's approval is slow).
@@ -413,6 +415,26 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-09-29 (later) — Failed searches get recorded; the cap goes to 5
+
+**Search errors reach the bill** (c5e06c2, §11 16 closed). Each failed
+search lands in `answer.usage.search_errors` by the API's error code
+(`no_results` for an empty list), once per `tool_use_id`, and from there in
+the spend ledger (a column added IN PLACE — the ledger is the spending
+history, so no schema-version bump), the dashboard ("5 got nothing", codes
+on hover) and the console bill. Codes only: anything that is not a short
+snake_case name is stored as `unrecognized`, by the meter and again by the
+ledger writer — the ledger may hold nothing anyone sent. The API returns a
+failed search as HTTP 200 with a `web_search_tool_result` whose content is
+one error object, not a list — the engine already branched on that, and
+only printed it.
+
+**The cap is 5 a day** (Vinayak: "use 5 or even more if you want"). Five,
+not more: the point is a handful of quality checks a day, and measured
+checks run $0.05–0.26, so a full day is at most ~$1.30. The pinning test
+moved with it. Lower it back when the quality checks are done — or keep it,
+if the bot gets real users.
 
 ### 2026-09-29 — The Telegram bot goes live; the summary and the chooser meet the real model
 
@@ -1472,7 +1494,8 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    real model. Next: **decide the cap** (raising it is one number), then **a
    few more real checks** across health, science and Indian politics to
    judge answer quality on fresh rumours. **WhatsApp stays on hold** —
-   Meta's approval is slow.
+   Meta's approval is slow. **Cap raised to 5 and search errors recorded,
+   both 2026-09-29 (later)** — the quality checks are next.
 
 **Next, with Vinayak present:**
 
@@ -1494,8 +1517,8 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
 
 **Worth doing next, in code (value order):**
 
-3. **Raise the cap when ready.** 2/day was "just to be safe … we can increase
-   it later". One number in `config.py` plus the pinning test.
+3. ~~**Raise the cap when ready.**~~ **5 a day since 2026-09-29.** Decide
+   again after the quality checks: back to 2, or keep 5 for real users.
 4. **Answer quality on genuinely fresh rumours.** One two-pass run so far
    (Nagpur Metro) — excellent, but one. A handful more across health, science
    and Indian politics would say whether `chat_effort="medium"` is the right
@@ -1558,12 +1581,10 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    raised once for exactly this, §7), or cap results per domain. Either
    must stay narrow-only, and a paid run decides whether the model fills it
    in reliably.
-16. **Search errors leave no trace after the console closes.** MEASURED
-   2026-09-29 (reading the 2026-09-23 Wangchuk reel): 5 searches billed, 0
-   results, and no way to tell a quota from a rate limit from a too-long
-   query. Record each error code in `answer.usage` (and so the ledger and
-   the dashboard) — free to build, and it should come BEFORE more paid
-   Indian-politics checks, which are the ones most likely to hit it.
+16. ~~**Search errors leave no trace after the console closes.**~~ **DONE
+   2026-09-29** (c5e06c2): recorded per check in `usage.search_errors`, the
+   ledger and the dashboard. The next politics check that hits one will
+   say which error it was.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

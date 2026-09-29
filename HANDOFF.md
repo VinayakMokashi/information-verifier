@@ -29,13 +29,13 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 781 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 788 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.05-0.06 when a fact-checker
 covered the claim, ~$0.15 when it searches the wider web, ~$0.08 + ₹0.58 for a
-reel, $0 for a repeat. The whole app is capped at 2 CHECKS A DAY (my decision,
-"just to be safe"). DON'T run paid tests without asking me — CLAUDE.md has a
-table of free paths that cover nearly everything.
+reel, $0 for a repeat. The whole app is capped at 5 CHECKS A DAY (raised from
+2 on 2026-09-29 for quality testing). DON'T run paid tests without asking me —
+CLAUDE.md has a table of free paths that cover nearly everything.
 
 Work the way we have been: systematic layered commits PUSHED AFTER EACH ONE,
 adversarial review of the diff INCLUDING of the fixes themselves (on 2026-09-22
@@ -50,9 +50,9 @@ fails.
 What I want to do today:
   (a) The Telegram bot is LIVE (2026-09-29). Start the app and the bot for me
       (HANDOFF §7) and keep watching the logs while I use it.
-  (b) Record search error codes in each answer (§11 item 16) — free — BEFORE
-      any more paid Indian-politics checks; then decide the cap, and a few real
-      checks across health / science / Indian politics to judge quality (§11).
+  (b) A few real checks across health / science / Indian politics to judge
+      answer quality (§11 item 4). Failed searches are now recorded, so read
+      each check's search_errors (dashboard, or the stored answer's usage).
 ```
 
 ---
@@ -94,7 +94,7 @@ A WhatsApp bot is on hold.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **781 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **788 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - The engine has run for real; the web page, the link path, the caches, **the
   Telegram bot, the summary and the language chooser** are all proven.
@@ -117,7 +117,7 @@ A WhatsApp bot is on hold.
 | The same thing sent again (cache) | **$0** | instant |
 | A long political reel, both passes, searches all failed (Sep 23) | **$0.256** | — |
 
-**Safety settings in force:** 2 checks a day deployment-wide (persisted in
+**Safety settings in force:** 5 checks a day deployment-wide (persisted in
 SQLite, India's day, shared by page and bot, fails closed); messages deleted
 after 30 days with costs kept content-free; the dashboard is refused to
 anything that is not this machine.
@@ -150,11 +150,10 @@ The ten invariants are in [CLAUDE.md](CLAUDE.md); these are the ones that bite:
 ## 6. The next steps (updated 2026-09-29)
 
 1. ~~**Switch the Telegram bot on.**~~ **Done 2026-09-29.**
-1a. **Record search error codes in the answer** (§11 item 16), free, before
-   more paid politics checks: the one politics reel so far paid for 5
-   searches that returned nothing, and nobody can say why.
-2. **Decide the cap.** Raising it from 2 is one number in `app/config.py`
-   plus the test that pins it.
+1a. ~~**Record search error codes in the answer.**~~ **Done 2026-09-29**
+   (c5e06c2): `usage.search_errors`, the ledger, and the dashboard.
+2. ~~**Decide the cap.**~~ **5 a day since 2026-09-29.** Decide again after
+   the quality checks (one number in `app/config.py` + its pinning test).
 3. **A few more real checks** across health, science and Indian politics, to
    judge answer quality on fresh rumours (only one two-pass run so far).
 4. **WhatsApp stays on hold** — Meta's approval is slow. When it happens it
@@ -172,14 +171,14 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 781 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 788 tests, ~2 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
 .\.venv\Scripts\python.exe scripts\telegram_bot.py --check-token
 ```
 
-**Real (spends money — ask first; 2 checks a day):**
+**Real (spends money — ask first; 5 checks a day):**
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app       # one worker only

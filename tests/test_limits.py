@@ -132,11 +132,13 @@ def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited):
 
 def test_the_daily_cap_defaults_to_two():
     """Pinned because it is a DECISION, not a tuning knob: "lower it for now
-    and do only 2 checks per day, just to be safe." Raising it should be a
-    deliberate edit here AND in config.py, recorded in PROJECT_PLAN §7."""
+    and do only 2 checks per day, just to be safe" (2026-09-22), raised to 5
+    for quality testing on 2026-09-29 ("use 5 or even more if you want").
+    Changing it should be a deliberate edit here AND in config.py, recorded
+    in PROJECT_PLAN §7."""
     from app.config import Settings
 
-    assert Settings.model_fields["max_checks_per_day"].default == 2
+    assert Settings.model_fields["max_checks_per_day"].default == 5
 
 
 def test_the_daily_cap_survives_a_restart(limited, monkeypatch):
