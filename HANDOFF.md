@@ -29,7 +29,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 791 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 797 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.05-0.06 when a fact-checker
 covered the claim, ~$0.15 when it searches the wider web, ~$0.08 + ₹0.58 for a
@@ -94,7 +94,7 @@ A WhatsApp bot is on hold.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **791 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **797 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - The engine has run for real; the web page, the link path, the caches, **the
   Telegram bot, the summary and the language chooser** are all proven.
@@ -171,7 +171,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 791 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 797 tests, ~2 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
@@ -179,6 +179,13 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 ```
 
 **Real (spends money — ask first; 5 checks a day):**
+
+**One click: double-click `start.cmd`** in the project folder (or run
+`.\start.ps1` in a terminal). It opens the app in one window, waits until it
+answers, then opens the bot in a second; it starts nothing that is already
+running, and refuses if the free demo server holds the port (a bot wired to
+it would send fake answers). Stop: Ctrl+C in each window, or close them.
+By hand, the same two steps:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app       # one worker only

@@ -74,7 +74,8 @@ Working end to end:
 Vinayak's phone; the summary and the language chooser both ran against the
 real model and worked (§7). Failed searches are now recorded per check,
 and the cap is 5 a day. Found and fixed: the free test suite had been
-refilling the real daily cap one slot per run (§7). **791 tests.**
+refilling the real daily cap one slot per run (§7). **2026-10-10:** a
+one-click launcher, `start.cmd`. **797 tests.**
 
 **Next** (§11): decide the daily cap, then a few real checks across health,
 science and Indian politics. WhatsApp stays on hold (Meta's approval is slow).
@@ -416,6 +417,32 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-10 — A one-click launcher, and what running it showed
+
+Vinayak asked how to run the app; then for one click. **`start.cmd`**
+(double-click — Explorer opens a `.ps1` in Notepad) runs **`start.ps1`**:
+the app in one window, a wait until `/health` answers, then the bot in a
+second. It starts nothing already running (Telegram allows one poller), and
+refuses outright when `serve_demo.py` is running — the demo serves the same
+app with fakes on the same port and its `/health` also says "ok", so a bot
+wired to it would send people simulated verdicts. The process is checked,
+not the port, for that reason.
+
+Findings on the way:
+- **The app and bot I started on 2026-09-29 were still running a week
+  later**, invisible, logging into a temp folder; they outlived the session
+  that started them. They rode out network drops (`ConnectError` retries)
+  on their own; nobody had sent a check. Stopped on 2026-10-06 so Vinayak's
+  own copies could start; he then ran them from two VS Code terminals.
+- **Windows PowerShell 5.1 reads a BOM-less `.ps1` as ANSI**, so the
+  launcher is pure ASCII (tests pin it, and that the check catches a
+  non-ASCII file); `Start-Process` in 5.1 joins arguments unquoted, so the
+  windows get `-EncodedCommand` (the project path has spaces).
+- **Verified without touching his running copies**: `start.cmd` with both
+  up (started nothing: 4 processes before and after), the demo guard (a
+  stand-in process → refused, exit 1), and the fresh start through a copy
+  moved to port 8010 with a stand-in bot (both windows; app up in 8 s).
 
 ### 2026-09-29 (later still) — The free test suite was refilling the real daily cap
 
@@ -1496,7 +1523,9 @@ when it does not.
 
 ## 10. How to run
 
-See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
+See [GETTING_STARTED.md](GETTING_STARTED.md). **To run it for real, double-click
+`start.cmd`** (app + Telegram bot, each in its own window; §7 2026-10-10).
+Quick reference:
 
 | Command | Cost | Proves |
 |---|---|---|
@@ -1627,6 +1656,16 @@ See [GETTING_STARTED.md](GETTING_STARTED.md). Quick reference:
    `SecretStr` (or `Field(repr=False)`) on every key field, with a test
    that the repr carries none of them. Free; worth doing before any CI or
    shared logs exist.
+18. **The bot answers anyone.** @Information_Verifier_bot has no allow-list:
+   whoever finds the username can send checks, and every one comes out of
+   the same 5 a day. The cap bounds the money, not who uses it. An
+   owner-only mode (an allow-list of Telegram user ids in `.env`, polite
+   refusal for others, checked before any submit) is small and free.
+19. **The bot's own startup check accepts the demo server.** `app_is_up`
+   wants `{"status": "ok"}`, which `serve_demo.py` also returns, so a bot
+   started by hand next to a running demo would send fake verdicts.
+   `start.ps1` guards by process; the structural fix is a `/health` that
+   says which mode it is in, and a bot that refuses `demo`.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.
