@@ -19,6 +19,7 @@ from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
 from app.engine.job import run_check
+from app.engine.triage import nothing_to_check
 from app.models.answer import Answer, JobStatus
 from app.providers.asr import get_asr_provider
 from app.providers.links import (
@@ -48,6 +49,9 @@ _MSG_BAD_AUDIO = ("The audio in that file couldn't be read. Try sending it "
                   "again, or as a different file.")
 _MSG_NO_ASR = ("Voice notes and videos can't be checked here right now. "
                "Send the message as text instead.")
+_MSG_NOTHING_TO_CHECK = ("That looks like a greeting, not something to check. "
+                         "Paste or forward the message, link or claim you "
+                         "want checked.")
 # ffmpeg sniffs the real container, so the type gate is deliberately loose —
 # browsers label voice notes inconsistently (audio/ogg, application/ogg, …).
 _ALLOWED_MEDIA_PREFIXES = ("audio/", "video/")
@@ -250,6 +254,10 @@ async def _run_media_job(
 async def verify_text(
     req: VerifyTextRequest, background: BackgroundTasks, request: Request
 ) -> JobAccepted:
+    # Before the slot is even claimed: "hi" used to buy a full check and use
+    # up one of the day's capped slots (measured 2026-10-10).
+    if nothing_to_check(req.text):
+        raise HTTPException(422, _MSG_NOTHING_TO_CHECK)
     async with _quota(request) as spend:
         if len(req.text) > settings.max_input_chars:
             raise HTTPException(

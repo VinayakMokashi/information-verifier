@@ -392,7 +392,8 @@ def test_a_crash_still_answers_the_chat():
             raise RuntimeError("app down")
 
     app, tg = ExplodingApp(), StubTG()
-    _handle({"chat": {"id": 7}, "text": "hello"}, app, tg)
+    # A real claim: "hello" is small talk now and never reaches a submit.
+    _handle({"chat": {"id": 7}, "text": "WHO ne kaha 5G se corona"}, app, tg)
     assert "gadbad" in tg.sent[-1][1]
 
 
@@ -672,6 +673,30 @@ def test_a_message_sent_mid_check_hands_over_the_answer_and_says_so():
     assert tg.sent[-1] == (7, B._NOT_CHECKED)
 
 
+def test_a_greeting_is_answered_without_a_check():
+    """MEASURED 2026-10-10: "hi" bought a full check and a daily slot."""
+    app, tg = StubApp(), StubTG()
+    assert B.classify_message(_msg(7, "hi"))[0] == "smalltalk"
+    _handle(_msg(7, "hi"), app, tg)
+    assert app.submissions == []
+    assert tg.sent == [(7, B._SMALLTALK_REPLY)]
+
+
+def test_ok_still_collects_the_report_the_bot_asked_a_poke_for():
+    """When a check outlives the wait, the bot asks for "any message" — and
+    "ok" is what people send. Small talk must still deliver that report,
+    which is why it is not filed under "help" (help answers before the
+    pending-report logic runs)."""
+    app, tg, pending, prompted = _PendingApp(), StubTG(), {}, set()
+    _handle(_msg(7, "WHO ne kaha 5G"), app, tg, pending, prompted)
+    assert prompted == {7}
+    _handle(_msg(7, "ok"), app, tg, pending, prompted)
+    assert len(app.submissions) == 1                 # nothing new was bought
+    assert "This is false." in tg.sent[-1][1]
+    assert pending == {}
+    assert not any(t == B._NOT_CHECKED for _, t in tg.sent)
+
+
 def test_the_poke_a_timed_out_wait_asked_for_gets_no_extra_note():
     """When the wait gave up it asked for "any message"; that message IS the
     request, and telling the person it "was not checked" would only confuse."""
@@ -753,9 +778,12 @@ def test_a_poke_queued_behind_its_own_chat_is_not_paid_for():
         bot = B.Dispatcher(app, tg)
         bot.dispatch(_msg(7, "Kya 5G se corona failta hai?"))
         await _until(lambda: "job1" in app.done)
-        bot.dispatch(_msg(7, "?"))                    # poke 1: takes the lock
+        # Pokes that are NOT small talk: "?" would now never be submitted at
+        # all (triage, 2026-10-10), and the test would pass with the guard
+        # it exists for removed.
+        bot.dispatch(_msg(7, "kab tak?"))             # poke 1: takes the lock
         await _until(lambda: app.peeking == 1)
-        bot.dispatch(_msg(7, "??"))                   # poke 2: queues on it
+        bot.dispatch(_msg(7, "kab tak??"))            # poke 2: queues on it
         await _until(lambda: len(bot._tasks) == 2)
         app.done["job1"].set()
         app.release["job1"].set()                     # delivered in that window

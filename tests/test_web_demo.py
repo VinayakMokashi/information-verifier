@@ -34,9 +34,12 @@ def test_no_cors_grants_are_issued(client):
     from its visitors' browsers. The page itself is same-origin."""
     resp = client.post(
         "/api/v1/verify/text",
-        json={"text": "hello"},
+        # A real claim: "hello" is refused by triage now, and the point is a
+        # request that WOULD spend money.
+        json={"text": "5G causes covid"},
         headers={"Origin": "https://evil.example"},
     )
+    assert resp.status_code == 202
     assert "access-control-allow-origin" not in resp.headers
 
     preflight = client.options(

@@ -28,6 +28,7 @@ import httpx  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.engine.marker import strip_any_sentinel  # noqa: E402
+from app.engine.triage import nothing_to_check  # noqa: E402
 from app.providers.links import allowed_link_host  # noqa: E402
 
 APP_BASE = os.environ.get("APP_BASE", "http://127.0.0.1:8000/api/v1")
@@ -73,9 +74,10 @@ HELP = (
 def classify_message(msg: dict) -> tuple[str, str]:
     """(kind, payload) for one Telegram message. Pure — fully offline-testable.
 
-    kinds: help | text | link | media | image | unsupported. The link test
-    reuses the SERVER's own allowlist check, so the bot and the API can never
-    disagree about what counts as a checkable link.
+    kinds: help | smalltalk | text | link | media | image | unsupported. The
+    link test reuses the SERVER's own allowlist check, and the small-talk test
+    the server's own triage, so the bot and the API can never disagree about
+    what counts as a checkable link or as nothing to check.
     """
     text = (msg.get("text") or "").strip()
     if text.startswith(("/start", "/help")):
@@ -83,6 +85,8 @@ def classify_message(msg: dict) -> tuple[str, str]:
     if text:
         if allowed_link_host(text) is not None:
             return "link", text
+        if nothing_to_check(text):
+            return "smalltalk", text
         return "text", text
     for key in ("voice", "audio", "video", "video_note"):
         if msg.get(key):
@@ -548,6 +552,10 @@ async def _submit(kind: str, payload: str, app: AppClient,
 
 _NOT_CHECKED = ("ℹ️ Yeh naya message check nahi hua, kyunki pichla check chal "
                 "raha tha. Ise check karwana ho to ab dobara bhejiye.")
+_SMALLTALK_REPLY = ("🙂 Kuch check karwana ho to woh message, link, voice note "
+                    "ya photo yahan bhejiye.")
+# Kinds that are never submitted, so never told "this was not checked".
+_NEVER_CHECKED = ("unsupported", "smalltalk")
 
 
 async def handle_message(
@@ -616,7 +624,7 @@ async def handle_message(
             # delivered it meanwhile — then there is nothing to hand over, and
             # this message still arrived during a check.
             if pending.get(chat_id) != stale_job:
-                if kind != "unsupported":
+                if kind not in _NEVER_CHECKED:
                     await tg.send(chat_id, _NOT_CHECKED)
                 return
             if gone:
@@ -638,10 +646,10 @@ async def handle_message(
                 # Otherwise the person sent something new mid-check — say so.
                 was_poke = chat_id in prompted
                 prompted.discard(chat_id)
-                if not was_poke and kind != "unsupported":
+                if not was_poke and kind not in _NEVER_CHECKED:
                     await tg.send(chat_id, _NOT_CHECKED)
                 return
-        elif busy_on_arrival and kind != "unsupported":
+        elif busy_on_arrival and kind not in _NEVER_CHECKED:
             # Its check was delivered while this message waited for the lock.
             # It still arrived mid-check, so it is not checked automatically.
             await tg.send(chat_id, _NOT_CHECKED)
@@ -650,6 +658,13 @@ async def handle_message(
         if kind == "unsupported":
             await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
                                    "text, link, voice note ya photo bhejiye.")
+            return
+        if kind == "smalltalk":
+            # "hi", "ok", "thanks": nothing to check, so nothing is spent and
+            # no daily slot is used (it used to buy a full check). It did
+            # still go through the pending-report logic above, because "ok"
+            # is exactly what people send when told "send any message".
+            await tg.send(chat_id, _SMALLTALK_REPLY)
             return
 
         await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")
