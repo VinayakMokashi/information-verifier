@@ -75,10 +75,13 @@ Vinayak's phone; the summary and the language chooser both ran against the
 real model and worked (§7). Failed searches are now recorded per check,
 and the cap is 5 a day. Found and fixed: the free test suite had been
 refilling the real daily cap one slot per run (§7). **2026-10-10:** a
-one-click launcher, `start.cmd`. **797 tests.**
+one-click launcher, `start.cmd`. **2026-10-11: three cost cuts, measured**
+(§7) — a claim Google's free fact-check database already covers now costs
+**$0.0084 in 6.7 s** (was ~$0.05 and 28–51 s); pass 1 says "not covered" in
+one sentence instead of an essay; "hi" costs nothing. **842 tests.**
 
-**Next** (§11): decide the daily cap, then a few real checks across health,
-science and Indian politics. WhatsApp stays on hold (Meta's approval is slow).
+**Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
+**the WhatsApp bot**, and the remaining to-dos.
 
 ---
 
@@ -417,6 +420,70 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-11 — Three cost cuts, each measured; and a second test-isolation leak
+
+Vinayak: "I want us to try to reduce the costs." The profile first (ledger,
+8 real checks, $0.99): cache writes 32%, web searches 28%, output 25%,
+cache reads 9%, fresh input 4%, ASR 2%. **Every pass carries ~8,000 tokens
+of fixed setup** (free token counter): ~2,000 our instructions, **~5,900
+the web-search tool's own** (the basic `web_search_20250305` would be
+~2,800). Approved: the three cuts that change what the app does, not how
+well it answers, plus ~$0.20 of confirmation runs.
+
+**1. The Google fact-check shortcut** (9b9cf25). Google's free Fact Check
+API, already queried for every message, had a vetted fact-check for **5 of
+10** typical forwards — all well-known English hoaxes; **none** of the
+Hindi/Hinglish ones (Google matches words, and ClaimReview is mostly
+English — §11 20). When it has one, the engine first asks the model to
+answer from those fact-checks with **no tool at all**; only an answer it
+backs with trusted="yes" is kept, anything else falls through to the
+normal search having cost one small call. Its words are held until kept
+(invariant 8). **PAID, MEASURED: "NASA says the Earth will go dark for 6
+days" → $0.0084, 6.7 s, 1 call, 0 searches**, correct, "Fact-checkers",
+95%, summary, 4 vetted sources (PolitiFact, FactCheck.org, Snopes ×2).
+A covered claim used to be $0.048–0.061 and 28–51 s.
+
+**2. Pass 1 says "not covered" in one sentence** (a61cf97, 5f871c0). The
+prompt already said "keep that reply SHORT"; in all three two-pass checks
+pass 1 wrote a full answer anyway (43–45% of the prose). Now the rule is
+concrete, the summary rule exempts that sentence (they contradicted), and
+`PASS1_STEP_NOTE` repeats it at the end of pass 1's own user turn, before
+the language line. **PAID, MEASURED (a made-up Pune rumour): pass 1 wrote
+one sentence, 318 output tokens.** Its first wording ("None of these
+results address…") spoke of results the reader never sees — fixed in the
+prompt, free, not yet re-run.
+
+**3. "hi" no longer buys a check** (e8f77a9). `app/engine/triage.py`:
+a whole message that is small talk (English/Hinglish/Hindi) or has no
+letters/digits is refused before a daily slot is claimed. No length rule
+(a claim can be one "word" in a script without spaces). The bot files it
+as `smalltalk`, NOT `help`: help answers before the pending-report logic,
+and "ok" is what people send when the bot asks for "any message" to show
+a finished report — a test proves the help design would lose that report.
+
+**The open-web pass is now the expensive part, and it was slow.** The
+Pune run: pass 2 cost ~$0.13 of $0.1724, read **180,000 cache tokens**
+across ~16 filtering rounds of the search tool, and took **295 s** —
+longer than the bot waits (~270 s), so on Telegram it would have asked for
+"any message". Earlier two-pass checks took ~57 s, so possibly an outlier;
+it is the strongest case yet for A/B-testing the basic search tool
+(§11 21).
+
+**A second test-isolation leak, and a wrong fix reverted.** The full suite
+began failing 1 run in 3 (`test_the_same_forward_twice_uses_one_slot_not_
+two`). First diagnosis — "the cache-hit refund lands late" — was WRONG:
+e250154 made the test wait, and it failed again with the wait (a 429).
+The captured output told the truth: "[limits] the caller went away before
+its slot arrived" printed DURING that test, and "refund not recorded: no
+such table" in a brand-new test database. Claims cancelled by earlier
+tests were settling on the limiter's 2-worker pool inside LATER tests'
+databases. Bisecting pairs reproduced nothing (20 × 6): it was timing
+across the file (5/12 runs of `test_limits.py`). Fixed for the rule
+(2d07356): `limits.drain()` + the autouse fixture drains after every test,
+before settings are restored; e250154 reverted. After: 0/15 file runs,
+3/3 suites, same suite time. Lesson, again: read what the failing run
+printed before naming a mechanism.
 
 ### 2026-10-10 — A one-click launcher, and what running it showed
 
@@ -1444,6 +1511,13 @@ it costing money or lying.
 | Exact re-forward inside the cache TTL | **$0** | $0 | 0 | instant |
 | 2026-09-29: covered claim via **Telegram**, Hindi | **$0.0587** | — | 2 | 25 s |
 | 2026-09-29: same claim on the **page**, English chosen, 2 min later | **$0.0516** (Claude $0.022 — prompt cache warm) | — | 3 | 24 s |
+| 2026-10-11: **Google fact-check shortcut** ("NASA: 6 days of darkness") | **$0.0084** — 1 call, no tool | — | 0 | 6.7 s |
+| 2026-10-11: fresh rumour, both passes, pass 1 now one sentence (Pune Saturdays) | **$0.1724** (pass 2 ≈ $0.13: 180k cache reads, ~16 filter rounds) | — | 3 | **295 s** |
+
+**Fixed setup per pass, counted 2026-10-10** (free token-count endpoint):
+~2,000 tokens of our instructions + **~5,900 of the web-search tool's own**
+(`web_search_20260209`; the basic `web_search_20250305` counts ~2,800). A
+pass with no tool — the fact-check shortcut — pays only the first part.
 
 Where it goes, over today's runs: roughly **four-fifths Claude, a sixth
 search, the rest transcription**. Most of the Claude share is prompt-cache
@@ -1549,35 +1623,60 @@ Quick reference:
 
 ## 11. Open items
 
-### THE TODO LIST (updated 2026-09-29 — the authoritative one)
+### THE TODO LIST (updated 2026-10-11 — the authoritative one)
 
-**THE NEXT STEPS (in order):**
+**THE NEXT STEPS, agreed 2026-10-11 (Vinayak: "We need to make this into an
+app/website which anyone can access and also a whatsapp bot. And also work
+on the remaining todo's"):**
 
-0. ~~**Switch the Telegram bot on, with Vinayak there.**~~ **DONE 2026-09-29**
-   (§7): the bot, the summary and the language chooser all ran against the
-   real model. Next: **decide the cap** (raising it is one number), then **a
-   few more real checks** across health, science and Indian politics to
-   judge answer quality on fresh rumours. **WhatsApp stays on hold** —
-   Meta's approval is slow. **Cap raised to 5 and search errors recorded,
-   both 2026-09-29 (later)** — the quality checks are next.
+A. **A website / app anyone can use.** Today it runs on this PC and the page
+   opens only here. What going public needs — decisions first, then code:
+   - **Where it runs, 24/7.** Options: a small cloud host (Render, Railway,
+     Fly.io, or a ₹400–800/month VPS) with a persistent disk for SQLite and
+     ffmpeg + yt-dlp installed — ONE worker (in-memory stream registry and
+     rate limiter); or keep it on this PC behind a named Cloudflare Tunnel
+     with a real domain (free, but the PC must stay on). `share_demo.ps1`
+     already does a temporary tunnel.
+   - **Who pays, and how much a day.** The cap is deployment-wide (5/day): the
+     public would exhaust it in minutes, and then everyone is refused. Decide
+     a daily dollar budget, per-person limits (IP today; phone number on
+     WhatsApp), and a bot shield (Cloudflare Turnstile) — maybe sign-in.
+     Set a monthly spend limit in the Anthropic console as the hard backstop.
+   - **Before any public URL:** §11 17 (a `Settings` repr prints the API
+     keys — fix first), §11 18 (who may use the bot), privacy note + terms
+     (messages kept 30 days), SQLite backups (the ledger is the spend record).
+     The dashboard already 404s for anyone but this machine.
+   - **"App":** the page is mobile-first; a web-app manifest + icon makes it
+     installable from the phone's browser ("Add to Home screen") — no app
+     store needed. A store app is a separate, much larger project.
+B. **The WhatsApp bot.** Meta's WhatsApp Business Platform (Cloud API):
+   a Meta Business account, a phone number not already on WhatsApp,
+   business verification (slow — start it early), and a public HTTPS
+   webhook (which A provides). Replies inside the 24-hour window after a
+   person writes are free-form; anything later needs an approved template —
+   check Meta's current pricing before building. Code: a webhook route, a
+   WhatsApp formatter (it uses *bold*/_italic_, not Telegram's HTML; the
+   rest of `format_reply`'s budgeting carries over), media download via the
+   Graph API into the existing image/voice paths, and the bot's per-chat
+   lock + pending-report logic. A sandbox (Meta's test number, or a provider
+   like Twilio) can be built against before verification completes.
+C. **The remaining to-dos** — items 4–23 below, in roughly value order.
 
-**Next, with Vinayak present:**
+**Running it (with Vinayak present):**
 
-1. **Running the bot:** `uvicorn app.main:app` in one terminal,
-   `scripts\telegram_bot.py` in the other (it refuses to start unless the
-   app's `/health` answers). The PC must stay awake — the bot lives here.
-   The 2-a-day cap is shared with the web page; a repeat of the same message
-   is free and does not count. A message sent while that chat's check is
-   still running is NOT checked automatically (the cap) — the bot says so
-   and asks for it again. Before a restart after downtime, check
-   `getWebhookInfo`'s `pending_update_count`: the bot processes a queued
-   backlog on start (the cap bounds what that can cost).
+1. **Double-click `start.cmd`** (app + bot in two windows; it refuses if the
+   demo server is up). The PC must stay awake — the bot lives here. The cap
+   is shared with the web page; a repeat is free; "hi"/"ok"/"thanks" cost
+   nothing since 2026-10-11. A message sent while that chat's check is still
+   running is NOT checked automatically — the bot says so. Before a restart
+   after downtime, `getWebhookInfo`'s `pending_update_count` shows any
+   backlog the bot will process on start (the cap bounds its cost).
+   **After pulling new code, restart both windows** — a running app keeps
+   the code it started with.
 
-**On hold, deliberately:**
+**On hold until A exists:**
 
-2. **WhatsApp bot** — Meta business verification + webhook tunnel +
-   5-recipient test cap. "We can come back to it later." When it happens it
-   reuses the Telegram bot's `format_reply` unchanged.
+2. **WhatsApp bot** — see B. Not "later" any more: next after A.
 
 **Worth doing next, in code (value order):**
 
@@ -1590,7 +1689,9 @@ Quick reference:
    reply short (it wrote five paragraphs before escalating). MEASURED again
    2026-09-23 (the Wangchuk reel, §7 2026-09-29): pass 1 wrote a complete
    answer and pass 2 another, so the reader got the same ground twice and
-   paid for 8.7k output tokens.
+   paid for 8.7k output tokens. **The two-answers half is FIXED 2026-10-11**
+   (one sentence, 318 tokens, paid-measured); quality across health /
+   science / politics is still to judge — with an eval set (item 22).
 5. **Mixed-language messages** (an English caption over a Hindi transcript)
    get "reply in the Indic script" today — sensible for reels, but untested
    with a real sender who writes English about Hindi content.
@@ -1666,6 +1767,27 @@ Quick reference:
    started by hand next to a running demo would send fake verdicts.
    `start.ps1` guards by process; the structural fix is a `/health` that
    says which mode it is in, and a bot that refuses `demo`.
+20. **Google's fact-check lookup misses Hindi and Hinglish.** MEASURED
+   2026-10-10: 5/10 typical forwards had a vetted match, all English; none
+   of the Hindi/Hinglish versions — not even the ₹2000 GPS-chip story in
+   Devanagari. Translating the query to English first (one tiny call, or a
+   cheap model) would let the $0.0084 shortcut serve most Indian forwards.
+   Measure the hit rate on translated queries for free before building.
+21. **A/B the basic search tool** (`web_search_20250305`) against the
+   filtering one. ~3,100 fewer setup tokens per pass, citations that would
+   fix item 15's ₹20-page problem, and no filtering rounds — the Pune run's
+   pass 2 took 295 s and read 180k cache tokens over ~16 of them. But raw
+   results go into the context unfiltered, so it may cost MORE per search.
+   Only a paid side-by-side on a few claims can say (~$0.30).
+22. **An eval set** — six to ten claims with known answers (health, science,
+   Indian politics; English, Hindi, Hinglish; one reel). It is the quality
+   check this project lacks, and it gates every remaining cost trade-off:
+   effort `low` vs `medium` (Anthropic measured a third to half off for 1–3
+   points on research tasks), 2 vs 3 vetted searches, item 21. ~$0.60 a run.
+23. **Pass 2 can outlast the bot's wait.** 295 s measured against the bot's
+   ~270 s poll window: the person is asked for "any message" to collect it.
+   Either raise `_POLL_MAX`, or bound pass 2's search work (item 21 may
+   solve it).
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

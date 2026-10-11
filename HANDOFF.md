@@ -3,10 +3,10 @@
 > **Read this first in a new session.** It is written so nothing is lost when
 > a conversation ends: what the thing is, how it got here, what it costs, what
 > is decided, what is open, and how to run it. Depth lives in
-> [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log) and
-> [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
+> [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log, §11 the to-do
+> list) and [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-09-29**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-10-11**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -25,34 +25,42 @@ FIRST, read these in order:
 1. HANDOFF.md      — the whole project in one file: state, costs, decisions, to-dos.
 2. CLAUDE.md       — how we work here: money rules, the 10 invariants, conventions.
 3. PROJECT_PLAN.md — depth. §0 status, §7 decisions log (newest first: read the
-   2026-09-23 and 2026-09-22 entries), §8 MEASURED costs, §11 THE TODO LIST.
+   2026-10-11, 2026-10-10 and 2026-09-29 entries), §8 MEASURED costs,
+   §11 THE TODO LIST (A: website, B: WhatsApp, C: the rest).
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 797 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 842 passing
 
-Money: I'm cost-conscious. MEASURED per check: ~$0.05-0.06 when a fact-checker
-covered the claim, ~$0.15 when it searches the wider web, ~$0.08 + ₹0.58 for a
-reel, $0 for a repeat. The whole app is capped at 5 CHECKS A DAY (raised from
-2 on 2026-09-29 for quality testing). DON'T run paid tests without asking me —
+Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
+fact-check database already covers the claim (about half of English hoaxes),
+~$0.05-0.06 when a fact-checker covered it, ~$0.15-0.17 when it searches the
+wider web, ~$0.08-0.26 for a reel, $0 for a repeat or for "hi". The whole app
+is capped at 5 CHECKS A DAY. DON'T run paid tests without asking me —
 CLAUDE.md has a table of free paths that cover nearly everything.
 
-Work the way we have been: systematic layered commits PUSHED AFTER EACH ONE,
-adversarial review of the diff INCLUDING of the fixes themselves (on 2026-09-22
-a third of the defects came from the fixes for earlier defects), measure rather
-than assume, and keep PROJECT_PLAN.md + HANDOFF.md current. Process rules we
-learned the hard way are in CLAUDE.md: check pytest's own exit code; write
-anything containing a backslash with the Edit/Write tools, never a shell
-heredoc; look at a UI in headless Chrome before calling it done; concurrency
-tests need fakes that suspend; a test that HANGS on the bug is not a test that
-fails.
+To run it: double-click start.cmd (the app + the Telegram bot, two windows).
+Restart both windows after pulling new code.
 
-What I want to do today:
-  (a) The Telegram bot is LIVE (2026-09-29). Start the app and the bot for me
-      (HANDOFF §7) and keep watching the logs while I use it.
-  (b) A few real checks across health / science / Indian politics to judge
-      answer quality (§11 item 4). Failed searches are now recorded, so read
-      each check's search_errors (dashboard, or the stored answer's usage).
+Work the way we have been: systematic layered commits PUSHED AFTER EACH ONE,
+adversarial review of the diff INCLUDING of the fixes themselves, measure
+rather than assume — and read what a failing run PRINTED before naming a
+mechanism (on 2026-10-11 a fix built on a wrong diagnosis had to be
+reverted). Keep PROJECT_PLAN.md + HANDOFF.md current. Process rules we learned
+the hard way are in CLAUDE.md: check pytest's own exit code; write anything
+containing a backslash with the Edit/Write tools, never a shell heredoc; look
+at a UI in headless Chrome before calling it done; concurrency tests need
+fakes that suspend; a test that HANGS on the bug is not a test that fails;
+work that outlives a test must not touch the next one.
+
+What I want to do now (PROJECT_PLAN §11 A-C):
+  (A) Make it a website/app anyone can access. Start by laying out the
+      choices — where it runs 24/7, the daily budget and limits for
+      strangers, what must be fixed before any public URL (§11 17, 18) —
+      and ask me to decide before building.
+  (B) Then the WhatsApp bot (Meta's Cloud API; business verification is
+      slow, so tell me early what I need to start).
+  (C) And the remaining to-dos in §11, in value order.
 ```
 
 ---
@@ -66,15 +74,17 @@ pasted the thing into a chat**: in the language the message arrived in (or one
 you pick), streamed word by word, with a confidence %, a highlighted two-line
 summary you can skim, and clickable sources underneath.
 
-It checks a **vetted whitelist first** (Alt News, BOOM, Factly, PIB, The
-Quint, WHO, NASA, Snopes, Full Fact… 57 trusted domains, 43 of them
-searchable) and only then the **open web**, which it labels clearly as such.
-It is allowed to say "nobody reliable has covered this" — that is a real
-answer here, not a failure.
+It first asks **Google's free fact-check database**; when that already has a
+vetted fact-check, it answers from it without searching at all. Otherwise it
+searches a **vetted whitelist** (Alt News, BOOM, Factly, PIB, The Quint, WHO,
+NASA, Snopes, Full Fact… 57 trusted domains, 43 searchable) and only then the
+**open web**, which it labels clearly as such. It is allowed to say "nobody
+reliable has covered this" — that is a real answer here, not a failure.
 
-**Surfaces:** a chat web page (the main one), a Telegram bot (live since
-2026-09-29), a local-only spending dashboard, and a set of console scripts.
-A WhatsApp bot is on hold.
+**Surfaces:** a chat web page (on this PC only, for now), a **Telegram bot**
+(@Information_Verifier_bot, live since 2026-09-29, usable from any device
+while this PC runs it), a local-only spending dashboard, and console scripts.
+**Next: a public website/app, then a WhatsApp bot** (§6).
 
 ---
 
@@ -85,37 +95,47 @@ A WhatsApp bot is on hold.
 | Jul 2026 | Built as a 6-stage pipeline producing a rigid "Truth Report" (rating enum, per-claim verdicts). Worked; read like a form. |
 | Jul 28 | Reel/Shorts link ingestion built and paid-verified ($0.279 for a 6-claim reel). |
 | **Sep 10–11** | **The pivot** (§7): one streaming Claude **Sonnet 5** call, two at most, producing prose. Truth Report, rating enum and the semantic cache deleted — with them went sqlite-vec, sentence-transformers and a 1.2 GB model. |
-| Sep 22 (day) | **First paid runs of the new engine.** Costs measured (2–3× cheaper than modelled). Found and fixed: English answered in Hinglish, a self-contradicting trust label, a server that could not start on the real database, two whitelisted domains that block the crawler. Built: the 2-a-day cap, retention, the transcript cache, the spending dashboard, a concurrent Telegram bot, plain-language errors. Sonnet 5 beat Opus 5 on the same reel at a quarter of the cost. |
+| Sep 22 (day) | **First paid runs of the new engine.** Costs measured (2–3× cheaper than modelled). Found and fixed: English answered in Hinglish, a self-contradicting trust label, a server that could not start on the real database, two whitelisted domains that block the crawler. Built: the daily cap, retention, the transcript cache, the spending dashboard, a concurrent Telegram bot, plain-language errors. Sonnet 5 beat Opus 5 on the same reel at a quarter of the cost. |
 | Sep 22 (eve) | **Two adversarial reviews** of that day's work: 13 defects, all reproduced, all fixed. Then **two reviews of those fixes**: 15 more, five of them introduced by the fixes themselves. |
 | **Sep 23** | The reader's two controls: a **skimmable summary** and a **reply-language chooser**. |
-| **Sep 29** | **The Telegram bot goes live** from Vinayak's phone. The summary and the language chooser both work against the real model. Fixed: the bot's startup health check checked nothing. Found: a ₹2000 answer showed an RBI ₹20-note page as a receipt, and an unrecorded Sep 23 politics reel paid for 5 searches that returned nothing. Then: failed searches are recorded per check, the cap goes to **5 a day**, and the free test suite is caught **refilling the real daily cap** one slot per run (fixed, re-measured with a canary). |
+| **Sep 29** | **The Telegram bot goes live** from Vinayak's phone; summary and language chooser proven on the real model. Failed searches recorded per check; the cap goes to **5 a day**; the free test suite caught **refilling the real daily cap** (fixed with a canary). |
+| **Oct 10** | **One-click launcher** `start.cmd`. Found: the app and bot had kept running unseen for a week after the session that started them. |
+| **Oct 11** | **Three cost cuts, measured:** the Google fact-check shortcut (**$0.0084, 6.7 s** for a covered hoax, was ~$0.05 and 28–51 s); pass 1 says "not covered" in one sentence (318 tokens, was an essay); "hi"/"ok"/"thanks" cost nothing. A second test leak (late claims landing in other tests' databases) fixed — after a wrong first fix was reverted. |
 
 ---
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **797 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **842 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
-- The engine has run for real; the web page, the link path, the caches, **the
-  Telegram bot, the summary and the language chooser** are all proven.
-- **Spent to date: $1.2364** — the spend ledger's own total, 13 rows: five
-  checks on the page or bot ($0.37), a $0.26 politics reel on 2026-09-23 that
-  the docs had missed, and $0.61 of operator scripts (the Sonnet-vs-Opus A/B
-  and the language diagnostics). Watch it at `http://127.0.0.1:8000/dashboard`.
-- **Open problems found on real runs:** source narrowing is per *domain*,
-  so big sites bring unrelated pages; a fresh rumour gets two full answers
-  (pass 1 does not stop short); and search errors are not recorded anywhere
-  that survives the console (PROJECT_PLAN §11 items 4, 15, 16).
+- Proven on the real model: the web page, links/reels, the caches, the
+  Telegram bot, the summary, the language chooser, and (2026-10-11) the
+  Google fact-check shortcut and the one-sentence pass 1.
+- **Spent to date: $1.7437** — the spend ledger's own total, 17 rows (the
+  ledger, not anyone's sum, is the truth: it once caught a $0.26 check the
+  docs had missed). Watch it at `http://127.0.0.1:8000/dashboard`.
+- **Open problems found on real runs** (PROJECT_PLAN §11):
+  the open-web pass is now the expensive and slow part — one took **295 s**,
+  longer than the bot waits (items 21, 23); Google's lookup misses Hindi and
+  Hinglish forwards entirely (20); source narrowing is per *domain*, so a big
+  site brings unrelated pages (15); there is no eval set, so quality
+  trade-offs can't yet be tested safely (22); a `Settings` object prints the
+  API keys if anything ever displays it (17); the bot answers anyone (18).
 
-**Measured costs** (Sonnet 5, 2026-09-22):
+**Measured costs** (Sonnet 5):
 
 | Check | Cost | Time |
 |---|---|---|
-| A claim a fact-checker has covered (one pass) | **$0.048–0.061** | 28–51 s |
-| A fresh rumour (whitelist, then open web) | **$0.150** | 57 s |
-| A real reel | **$0.082** + ₹0.58 ASR, once per video | 34 s |
+| A hoax Google's fact-check database covers (shortcut, 2026-10-11) | **$0.0084** | 6.7 s |
+| A claim a fact-checker covered (searched, one pass) | **$0.048–0.061** | 28–51 s |
+| A fresh rumour (whitelist, then open web) | **$0.150–0.172** | 57–295 s |
+| A real reel | **$0.082–0.256** + ASR (₹0.58 per 70 s, once per video) | 34 s+ |
+| "hi", "ok", "thanks" (2026-10-11) | **$0** — refused before any spend | instant |
 | The same thing sent again (cache) | **$0** | instant |
-| A long political reel, both passes, searches all failed (Sep 23) | **$0.256** | — |
+
+**Every pass carries ~8,000 tokens of fixed setup** — ~2,000 our
+instructions, ~5,900 the web-search tool's own. That is why the shortcut,
+which sends no tool, is so cheap.
 
 **Safety settings in force:** 5 checks a day deployment-wide (persisted in
 SQLite, India's day, shared by page and bot, fails closed); messages deleted
@@ -129,9 +149,10 @@ anything that is not this machine.
 The ten invariants are in [CLAUDE.md](CLAUDE.md); these are the ones that bite:
 
 1. **The label is evidence, never assertion.** "Fact-checkers" requires a
-   trusted URL the API itself returned. The model can LOWER the label, never
-   raise it — and **only the whitelist pass can earn it**, because the
-   open-web pass is *told* to say no vetted source covered the claim.
+   trusted URL an API itself returned (web search, or Google's fact-check
+   database). The model can LOWER the label, never raise it — and the
+   open-web pass can never earn it, because it is *told* to say no vetted
+   source covered the claim.
 2. **"Could not verify" is a real answer.** Never manufacture a decisive one.
 3. **Prose is never a receipt.** Links, confidence and the summary come from
    structured fields; the model's markdown renders as text everywhere.
@@ -141,26 +162,31 @@ The ten invariants are in [CLAUDE.md](CLAUDE.md); these are the ones that bite:
    taken atomically in SQLite, failing closed.
 6. **Caches degrade to doing the work, and expire.**
 7. **The verdict tag is never visible and never forgeable.**
-8. **Streaming never forks the truth** — the persisted answer is canonical.
+8. **Streaming never forks the truth** — the persisted answer is canonical
+   (why the fact-check shortcut holds its words until it is kept).
 9. **Every paid seam has a fake, and the fake is pinned.**
 10. **Messages are forgotten; costs are not.**
 
 ---
 
-## 6. The next steps (updated 2026-09-29)
+## 6. The next steps (agreed 2026-10-11)
 
-1. ~~**Switch the Telegram bot on.**~~ **Done 2026-09-29.**
-1a. ~~**Record search error codes in the answer.**~~ **Done 2026-09-29**
-   (c5e06c2): `usage.search_errors`, the ledger, and the dashboard.
-2. ~~**Decide the cap.**~~ **5 a day since 2026-09-29.** Decide again after
-   the quality checks (one number in `app/config.py` + its pinning test).
-3. **A few more real checks** across health, science and Indian politics, to
-   judge answer quality on fresh rumours (only one two-pass run so far).
-4. **WhatsApp stays on hold** — Meta's approval is slow. When it happens it
-   reuses the bot's `format_reply` unchanged.
+Vinayak: *"We need to make this into an app/website which anyone can access
+and also a whatsapp bot. And also work on the remaining todo's."*
+PROJECT_PLAN §11 A–C has the detail.
 
-Everything else open — smaller code items, residuals from the reviews — is in
-**PROJECT_PLAN §11**, which is the authoritative to-do list.
+- **A. A website/app anyone can use.** Decide first: where it runs 24/7 (a
+  small cloud host with a disk, or this PC behind a named Cloudflare Tunnel),
+  the daily budget and per-person limits for strangers (the 5/day cap is
+  deployment-wide and would run out in minutes), and a bot shield. Fix §11 17
+  (keys in a `Settings` repr) and decide §11 18 before any public URL. A
+  web-app manifest makes the page installable on phones — the cheap "app".
+- **B. The WhatsApp bot**, once A gives it a public webhook: Meta Cloud API,
+  business verification (slow — start early), a WhatsApp formatter, the
+  Telegram bot's per-chat logic reused.
+- **C. The remaining to-dos**, value order: the eval set (22) — it gates
+  every quality-for-cost trade-off — then the basic-search-tool A/B (21),
+  Hindi queries for the Google lookup (20), and the rest of §11.
 
 ---
 
@@ -171,7 +197,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 797 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 842 tests, ~1 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
@@ -185,7 +211,8 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 answers, then opens the bot in a second; it starts nothing that is already
 running, and refuses if the free demo server holds the port (a bot wired to
 it would send fake answers). Stop: Ctrl+C in each window, or close them.
-By hand, the same two steps:
+**After pulling new code, close both windows and start again** — a running
+app keeps the code it started with. By hand, the same two steps:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app       # one worker only
@@ -193,8 +220,9 @@ By hand, the same two steps:
 .\.venv\Scripts\python.exe scripts\telegram_bot.py       # terminal 2, for the bot
 ```
 
-`scripts\smoke_test.py "claim"` and `scripts\link_smoke.py <url>` run one real
-check from the console and print the bill.
+`scripts\smoke_test.py --raw "claim"` and `scripts\link_smoke.py <url>` run one
+real check from the console and print the bill (`--raw`: every API request's
+usage, which is how the shortcut's single no-tool call was confirmed).
 
 ---
 
@@ -202,14 +230,18 @@ check from the console and print the bill.
 
 `app/api/` routes (text / image / media / link) → `app/engine/job.py`
 (`run_check`: cache → engine → persist → spend ledger) → `app/engine/chat.py`
-(pass 1 whitelist, pass 2 open web) → `app/store/` persists.
-`app/engine/marker.py` is the streaming filter that pulls the verdict tag and
+(Google fact-check shortcut, then pass 1 whitelist, then pass 2 open web) →
+`app/store/` persists. `app/engine/chat_prompts.py` holds every prompt (their
+fingerprint keys the answer cache); `app/engine/triage.py` decides what is
+not worth checking ("hi"); `app/engine/marker.py` pulls the verdict tag and
 the summary out of the model's words. `app/providers/` wraps every external
 service. `app/api/stream.py` is the live SSE preview, `app/api/dashboard.py`
-the local-only spending page, `app/hosts.py` the ONE place a URL's host is
-read. `static/index.html` is the whole web page; `scripts/telegram_bot.py` the
-bot; `scripts/fake_stages.py` the fakes that make everything above free to test.
+the local-only spending page, `app/api/limits.py` the daily cap,
+`app/hosts.py` the ONE place a URL's host is read. `static/index.html` is the
+whole web page; `scripts/telegram_bot.py` the bot; `start.ps1`/`start.cmd`
+the launcher; `scripts/fake_stages.py` the fakes that make it free to test.
 
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` →
 poll `/reports/{job_id}`, with an optional `/stream/{job_id}` for live text.
-Every surface uses the same two calls.
+Every surface — page, Telegram, and the WhatsApp bot to come — uses the same
+two calls.

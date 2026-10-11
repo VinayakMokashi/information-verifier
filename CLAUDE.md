@@ -11,11 +11,15 @@ is how to work here.
 
 ## Money rules (the user is cost-conscious — this matters most)
 
-- **Never run a paid test without asking.** MEASURED 2026-09-22 (Sonnet 5):
-  **$0.05–0.06** for a single pass, **$0.15** when the open-web pass also runs,
-  **$0.08** for a real 70 s reel (+ ₹0.58 ASR, now paid once per video). The
-  models said 2–3× more. Every answer carries its own bill in `answer.usage`,
-  and **`http://127.0.0.1:8000/dashboard`** (this machine only) shows the total.
+- **Never run a paid test without asking.** MEASURED (Sonnet 5): **$0.0084**
+  when Google's free fact-check database already covers the claim (the
+  no-tool shortcut, 2026-10-11), **$0.05–0.06** for a searched single pass,
+  **$0.15–0.17** when the open-web pass also runs, **$0.08** for a real 70 s
+  reel (+ ₹0.58 ASR, paid once per video). Every pass with the search tool
+  carries ~8,000 tokens of fixed setup, ~5,900 of them the tool's own. Every
+  answer carries its own bill in `answer.usage`, and
+  **`http://127.0.0.1:8000/dashboard`** (this machine only) shows the total;
+  the spend ledger's total is the truth, not anyone's sum.
 - **The deployment is capped at 5 checks a day** (Vinayak, 2026-09-22: 2 a
   day "just to be safe … we can increase it later"; raised to 5 on
   2026-09-29 for quality testing). Persisted in SQLite, India's day,
@@ -78,6 +82,10 @@ limiter are both in-memory.
    web" under its 75 cap. Measured twice: an unrelated who.int result labelled
    a Times of India answer at 90%, and then — after that fix — a BOOM page
    pass 1 had explicitly disowned did the same.
+   The **fact-check shortcut** (2026-10-11) is a whitelist-tier pass: its
+   evidence is what Google's Fact Check API returned (trust-filtered), it is
+   kept only when the model itself says trusted="yes", and anything else
+   falls through to the searched pass 1.
 2. **The engine may say it could not verify.** Tier `none` is a real answer.
    Never force a decisive-looking call out of nothing.
 3. **Prose is never a receipt.** The model can write a convincing fake URL.
@@ -162,6 +170,12 @@ limiter are both in-memory.
   session fixture in `conftest.py` makes the unpatched default a throwaway
   file; `tests/test_isolation.py` pins it. To check the suite touches nothing
   real, run it with `DB_PATH` pointed at a canary file and diff the file.
+  Late work also lands in the NEXT test's database (2026-10-11: a random 429
+  in 1 full run of 3), so the autouse fixture `limits.drain()`s the pool
+  after every test, before the settings are restored.
+- **Read what the failing run printed before naming a mechanism.** On
+  2026-10-11 a flaky test was "fixed" by waiting for a refund that was never
+  late (e250154, reverted); its own captured output named the real cause.
 - **A test that hangs on the bug is not a test that fails.** Make the broken
   version FAIL: stubs that finish work submitted late, and a thread with a
   join timeout around anything that could spin synchronously (measured:
@@ -181,8 +195,12 @@ limiter are both in-memory.
 
 `app/api/` routes (text / image / media / **link** — a pasted Reel, Shorts or
 Facebook URL) → `app/engine/job.py` (`run_check`: cache → engine → persist →
-spend ledger) → `app/engine/chat.py` (pass 1 whitelist, pass 2 open web if
-nothing vetted covered it) → `app/store/` persists. Providers
+spend ledger) → `app/engine/chat.py` (the no-tool shortcut when Google's
+fact-check database has a vetted match, else pass 1 whitelist, then pass 2
+open web if nothing vetted covered it) → `app/store/` persists.
+`app/engine/triage.py` refuses small talk before any spend; every prompt is
+in `app/engine/chat_prompts.py`, whose fingerprint keys the answer cache.
+`start.cmd` / `start.ps1` launch the app and the bot. Providers
 (`app/providers/`) wrap every external service. `app/api/stream.py` carries
 the live SSE preview; `app/api/dashboard.py` the local-only spending page;
 `app/hosts.py` is the ONE place a URL's host is read (both the trust label and
