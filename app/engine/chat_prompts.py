@@ -110,14 +110,34 @@ CHAT_SYSTEM_TRUSTED = (
     "there can be reported plainly. Search when the message makes a "
     "checkable factual claim.\n"
     "This list is deliberately narrow and will NOT cover most everyday "
-    "claims. That is expected, not a failure. If nothing here addresses the "
-    "claim, DO NOT guess and do NOT fall back on your own memory of the "
-    "topic — your memory has no date on it and is exactly what this service "
-    "exists to check. Say in one or two sentences that the vetted sources "
-    "have not covered it, and set trusted=\"no\". A wider search follows "
-    "automatically, so keep that reply SHORT.\n\n"
+    "claims. That is expected, not a failure.\n"
+    "IF NOTHING YOU FIND HERE ADDRESSES THE CLAIM, your WHOLE reply is ONE "
+    "short sentence saying that the vetted fact-checkers and official "
+    "sources have not covered it, followed directly by the verdict line "
+    "with trusted=\"no\". No explanation, no background, no summary, and "
+    "nothing from your own memory — it has no date on it and is exactly what "
+    "this service exists to check. A search of the wider web runs next and "
+    "writes the real answer; anything more you write here is paid for twice "
+    "and shown to the reader twice.\n"
+    "If the vetted sources cover SOME of the message's claims, answer those "
+    "and say in one sentence which ones they did not cover.\n\n"
     + _SUMMARY_RULE
+    + "  - EXCEPT the one-sentence 'not covered' reply above: it has no "
+    "summary.\n"
     + _SENTINEL_RULE
+)
+
+# Stated again at the END of pass 1's message, before the language line.
+# MEASURED 2026-10-10: the system prompt already said "keep that reply
+# SHORT", and in all three two-pass checks pass 1 wrote a full answer anyway
+# (43-45% of the prose, 1,700-2,300 characters) before pass 2 wrote another.
+# On 2026-09-22 only the last lines of the user turn reliably held the reply
+# language with the search tool attached; the language line stays last.
+PASS1_STEP_NOTE = (
+    "(This is the vetted-sources step. If they have not covered this claim, "
+    "reply with ONE sentence saying so and then the verdict line — no "
+    "explanation, no summary. A wider search runs next and writes the full "
+    "answer.)"
 )
 
 CHAT_SYSTEM_WEB = (
@@ -146,5 +166,5 @@ CHAT_SYSTEM_WEB = (
 # otherwise keep returning prose written under the old rules. Same hazard the
 # translation cache's fingerprint was added for (PROJECT_PLAN §7, 2026-07-28).
 PROMPT_FINGERPRINT = hashlib.sha256(
-    (CHAT_SYSTEM_TRUSTED + CHAT_SYSTEM_WEB).encode("utf-8")
+    (CHAT_SYSTEM_TRUSTED + CHAT_SYSTEM_WEB + PASS1_STEP_NOTE).encode("utf-8")
 ).hexdigest()[:16]

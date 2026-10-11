@@ -44,7 +44,7 @@ import anthropic
 
 from app.config import settings
 from app.engine.chat_prompts import (
-    CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB, as_prompt_data,
+    CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB, PASS1_STEP_NOTE, as_prompt_data,
 )
 from app.engine.marker import MarkerFilter
 from app.models.answer import AnswerSection, Source, Tier
@@ -271,7 +271,10 @@ def _chosen_language(language: str | None) -> str | None:
 
 
 def _render_input(text: str, heard: str | None, factchecks: list,
-                  language: str | None = None) -> str:
+                  language: str | None = None,
+                  step_note: str | None = None) -> str:
+    """The user turn. `step_note` is a pass-specific reminder, placed just
+    before the closing instructions so that the LANGUAGE line stays last."""
     parts = [f"<message>\n{as_prompt_data(text, _MAX_INPUT_CHARS)}\n</message>"]
     if heard and heard.strip() and heard.strip() != text.strip():
         parts.append(
@@ -291,6 +294,8 @@ def _render_input(text: str, heard: str | None, factchecks: list,
             "(Prior published fact-checks the system found for this text. "
             "Treat them as strong evidence and say which publisher said what.)"
         )
+    if step_note:
+        parts.append(step_note)
     picked = _chosen_language(language)
     if picked:
         # The reader asked for a language, so the sender's own no longer
@@ -527,6 +532,8 @@ async def answer(text: str, *, heard: str | None = None,
         factchecks = []
 
     user_content = _render_input(text, heard, factchecks, language)
+    pass1_content = _render_input(text, heard, factchecks, language,
+                                  step_note=PASS1_STEP_NOTE)
     prior = [
         Source(url=s.url, title=s.title, publisher=s.publisher,
                tier=_tier_of(s.url), via="factcheck")
@@ -535,7 +542,7 @@ async def answer(text: str, *, heard: str | None = None,
 
     await emit("status", {"text": "Checking trusted fact-checkers…"})
     first = await _run_pass(
-        CHAT_SYSTEM_TRUSTED, user_content, trusted=True,
+        CHAT_SYSTEM_TRUSTED, pass1_content, trusted=True,
         budget=settings.chat_max_searches_trusted, emit=emit,
         section_tier="trusted",
     )
