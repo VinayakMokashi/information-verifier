@@ -397,19 +397,10 @@ def test_the_same_forward_twice_uses_one_slot_not_two(limited, monkeypatch):
     the day's allowance on an answer served from cache for $0."""
     monkeypatch.setattr(settings, "max_checks_per_day", 2)
     monkeypatch.setattr(settings, "max_checks_per_hour", 100)
-    import time
-
     first = _check(limited, "The same forward")
     second = _check(limited, "The same forward")
     assert first.status_code == second.status_code == 202
     assert limited.get(f"/api/v1/reports/{second.json()['job_id']}").json()["cached"]
-    # The slot is handed back AFTER the answer is saved, so the report can be
-    # readable a moment before the refund lands. Measured 2026-10-11: reading
-    # the counter at once failed 1 full-suite run in 3. Wait on the condition,
-    # with a deadline - a refund that never comes still fails.
-    deadline = time.monotonic() + 5
-    while limits.used_today() != 1 and time.monotonic() < deadline:
-        time.sleep(0.01)
     assert limits.used_today() == 1
     # ...so a different message still fits today.
     assert _check(limited, "A different forward").status_code == 202

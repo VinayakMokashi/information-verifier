@@ -39,7 +39,8 @@ _daily = DailyQuota()
 # GET /reports (a thread call too, and the only way an answer reaches anyone)
 # stalled for the full 30 s busy timeout. Two workers is plenty — claims are
 # tiny, and they serialize on `_lock` anyway.
-_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="quota")
+_POOL_WORKERS = 2
+_pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix="quota")
 
 
 def _rollback(request: Request, future) -> None:
@@ -213,6 +214,25 @@ def refund(request: Request, day: str | None) -> None:
         mine = _per_client.get(_client_of(request))
         if mine:
             mine.pop()
+
+
+def drain(timeout: float = 10.0) -> bool:
+    """Test helper — wait until every claim already on the pool has finished,
+    the slot-returning callbacks included. False if that took too long.
+
+    MEASURED 2026-10-11: a test that cancels claims left them settling on this
+    pool after it ended — in the NEXT tests' databases. One took a slot inside
+    another test's 2-slot cap (a random 429), and one refund hit a database so
+    new it had no tables yet. The pool is FIFO: once one barrier task per
+    worker is running at the same moment, everything queued before them has
+    finished, and a future's callbacks run in its worker before it moves on.
+    """
+    import concurrent.futures
+
+    barrier = threading.Barrier(_POOL_WORKERS)
+    marks = [_pool.submit(barrier.wait, timeout) for _ in range(_POOL_WORKERS)]
+    done, pending = concurrent.futures.wait(marks, timeout=timeout)
+    return not pending and all(f.exception() is None for f in done)
 
 
 def reset() -> None:

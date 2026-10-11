@@ -31,6 +31,13 @@ def _no_rate_limit(monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_enabled", False)
     limits.reset()
     yield
+    # No claim may outlive the test that made it. MEASURED 2026-10-11: claims
+    # a test cancelled settled later in OTHER tests' databases — one took a
+    # slot in another test's 2-slot cap (a 429 in 1 full run of 3). Drained
+    # HERE, before monkeypatch undoes this test's settings, so late work
+    # still lands in this test's own database. It used to fall back to the
+    # real one (the session fixture above).
+    assert limits.drain(), "a quota claim was still running 10 s after its test"
     limits.reset()
 
 
