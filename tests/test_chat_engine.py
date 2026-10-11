@@ -309,6 +309,90 @@ def test_every_streamed_request_reports_its_own_usage(no_factcheck, monkeypatch)
     assert snap.estimated_usd > 0
 
 
+# -- the free fact-check shortcut (2026-10-10) ---------------------------------
+
+PRIOR_URL = "https://www.boomlive.in/fact-check/5g-covid-hoax"
+
+
+@pytest.fixture()
+def a_prior_factcheck(monkeypatch):
+    """Google's free API found a vetted fact-check for the message."""
+    from app.models.answer import Source
+
+    async def found(_query):
+        return [Source(url=PRIOR_URL, title="[Rated: False] 5G does not "
+                       "spread the coronavirus", publisher="BOOM")]
+    monkeypatch.setattr(C, "search_factcheck", found)
+
+
+def _streamed(events) -> str:
+    return "".join(d["text"] for kind, d in events if kind == "text")
+
+
+def test_a_vetted_prior_factcheck_is_answered_without_searching(
+        a_prior_factcheck, monkeypatch):
+    from app.engine.chat_prompts import CHAT_SYSTEM_PRIOR
+
+    reply = "False — BOOM checked it. " + SENTINEL_YES
+    client = StubClient([(_final(reply), _deltas(reply))])
+    result, events = _run(client, monkeypatch)
+
+    assert len(client.requests) == 1                 # one call, no search pass
+    assert "tools" not in client.requests[0]         # ~5,900 tokens not sent
+    assert client.requests[0]["system"][0]["text"] == CHAT_SYSTEM_PRIOR
+    assert result.tier == "trusted"
+    assert any(s.url == PRIOR_URL for s in result.sources)
+    assert "BOOM checked it" in _streamed(events)
+
+
+def test_a_declined_shortcut_falls_back_to_the_full_search(
+        a_prior_factcheck, monkeypatch):
+    client = StubClient([
+        (_final(SENTINEL_NO), _deltas(SENTINEL_NO)),
+        (_final("Searched. " + SENTINEL_YES, results=[TRUSTED_URL], searches=1),
+         _deltas("Searched. " + SENTINEL_YES)),
+    ])
+    result, _ = _run(client, monkeypatch)
+    assert "tools" not in client.requests[0]
+    assert "tools" in client.requests[1]             # the normal pass 1
+    assert result.sections[0].markdown.startswith("Searched.")
+
+
+@pytest.mark.parametrize("shortcut_reply", [
+    "Probably false. " + SENTINEL_NO,     # wrote prose, then declined
+    "Probably false.",                    # no verdict line at all
+])
+def test_words_from_a_shortcut_that_was_not_kept_never_reach_the_reader(
+        a_prior_factcheck, monkeypatch, shortcut_reply):
+    """Invariant 8: had they streamed live, they would sit above the real
+    answer in the reader's view until the final re-render."""
+    client = StubClient([
+        (_final(shortcut_reply), _deltas(shortcut_reply)),
+        (_final("Searched. " + SENTINEL_YES, results=[TRUSTED_URL], searches=1),
+         _deltas("Searched. " + SENTINEL_YES)),
+    ])
+    result, events = _run(client, monkeypatch)
+    assert "Probably false." not in _streamed(events)
+    assert all("Probably false." not in s.markdown for s in result.sections)
+    assert "Searched." in _streamed(events)
+
+
+def test_without_a_vetted_prior_factcheck_there_is_no_shortcut(
+        no_factcheck, monkeypatch):
+    client = StubClient([(_final("x " + SENTINEL_YES, results=[TRUSTED_URL],
+                                 searches=1), _deltas("x " + SENTINEL_YES))])
+    _run(client, monkeypatch)
+    assert "tools" in client.requests[0]
+
+
+def test_the_shortcut_has_a_kill_switch(a_prior_factcheck, monkeypatch):
+    monkeypatch.setattr(settings, "factcheck_shortcut_enabled", False)
+    client = StubClient([(_final("x " + SENTINEL_YES, results=[TRUSTED_URL],
+                                 searches=1), _deltas("x " + SENTINEL_YES))])
+    _run(client, monkeypatch)
+    assert "tools" in client.requests[0]
+
+
 def _user_turn(request) -> str:
     return request["messages"][0]["content"]
 
@@ -348,7 +432,8 @@ def test_editing_the_step_note_invalidates_cached_answers():
     from app.engine import chat_prompts as P
 
     assert P.PROMPT_FINGERPRINT == P.hashlib.sha256(
-        (P.CHAT_SYSTEM_TRUSTED + P.CHAT_SYSTEM_WEB + P.PASS1_STEP_NOTE)
+        (P.CHAT_SYSTEM_TRUSTED + P.CHAT_SYSTEM_WEB + P.PASS1_STEP_NOTE
+         + P.CHAT_SYSTEM_PRIOR + P.PRIOR_STEP_NOTE)
         .encode("utf-8")).hexdigest()[:16]
 
 
@@ -703,6 +788,10 @@ def test_a_pass_that_wrote_nothing_escalates_even_with_prior_factchecks(monkeypa
         return [FactCheckSource(url="https://factly.in/prior", title="[Rated: False] x",
                                 publisher="Factly")]
     monkeypatch.setattr(C, "search_factcheck", prior)
+    # Off, so the outage lands on the searched pass 1 this test is about —
+    # with it on, the outage hits the fact-check shortcut instead (tested
+    # separately just below).
+    monkeypatch.setattr(settings, "factcheck_shortcut_enabled", False)
 
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     outage = anthropic.InternalServerError(
@@ -719,6 +808,27 @@ def test_a_pass_that_wrote_nothing_escalates_even_with_prior_factchecks(monkeypa
     # Not "fact-checked": pass 1 wrote nothing, so the prior fact-check it
     # was handed cannot label an answer written by the open-web pass.
     assert answer.tier == "web"
+
+
+def test_an_outage_in_the_shortcut_falls_back_to_the_searched_pass(
+        a_prior_factcheck, monkeypatch):
+    """A free extra must never sink a check: the shortcut failing is just
+    the old path, one small call later."""
+    import anthropic
+    import httpx
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    outage = anthropic.InternalServerError(
+        "Error code: 500 - overloaded",
+        response=httpx.Response(500, request=request), body=None)
+    client = _Scripted([outage], _final(
+        "Searched: it is false. " + SENTINEL_YES, results=[TRUSTED_URL]))
+    answer, _ = _run(client, monkeypatch)
+
+    assert "tools" not in client.requests[0]         # the shortcut, which failed
+    assert "tools" in client.requests[1]             # the normal pass 1
+    assert answer.markdown.startswith("Searched: it is false.")
+    assert answer.tier == "trusted"
 
 
 def test_no_measured_blocked_domain_is_offered_to_search():

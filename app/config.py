@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     chat_max_searches_trusted: int = 3
     chat_max_searches_web: int = 2
     web_tier_enabled: bool = True    # False = whitelist only, never escalate
+    # When Google's free Fact Check API found vetted fact-checks, answer from
+    # them with no search tool first (2026-10-10, PROJECT_PLAN §7). False =
+    # always search; the kill switch if its answers ever disappoint.
+    factcheck_shortcut_enabled: bool = True
     # An answer resting only on general web sources can never show a
     # fact-checker-grade number. None = no cap (a trust decision; see §11).
     web_tier_confidence_cap: int | None = 75

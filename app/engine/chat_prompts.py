@@ -127,6 +127,41 @@ CHAT_SYSTEM_TRUSTED = (
     + _SENTINEL_RULE
 )
 
+# The free shortcut (2026-10-10): Google's Fact Check API already found
+# vetted fact-checks for this text, so first try answering from them with NO
+# search tool — about 2,000 tokens of setup instead of 8,000, and no
+# searches. Measured on 10 typical forwards: 5 had a vetted match, all of
+# them well-known English hoaxes. A decline costs about half a cent and the
+# normal search runs.
+CHAT_SYSTEM_PRIOR = (
+    _SHARED_RULES
+    + "EVIDENCE\n"
+    "For this step you have NO search tool. The system has already found "
+    "published fact-checks for this message, listed in <prior_factchecks> "
+    "with each one's publisher, the rating it gave and its headline — all "
+    "from fact-checkers this service vouches for.\n"
+    "- If they directly address the message's central claim, answer from "
+    "them: say which publisher checked it and what they found. You may add "
+    "widely known background, but the verdict must rest on those "
+    "fact-checks.\n"
+    "- If they do NOT address it — a different claim, a different event, "
+    "place or year, or only a side point of a message that makes several "
+    "claims — write NOTHING except the verdict line, with confidence=\"0\" "
+    "trusted=\"no\" used=\"\". A full search runs next, so declining costs "
+    "almost nothing, while an answer resting on the wrong fact-check "
+    "misleads the reader.\n"
+    "In the rules below, 'search results' means the fact-checks listed in "
+    "<prior_factchecks>.\n\n"
+    + _SUMMARY_RULE
+    + "  - EXCEPT when you write nothing but the verdict line: no summary.\n"
+    + _SENTINEL_RULE
+)
+
+PRIOR_STEP_NOTE = (
+    "(Answer only if the fact-checks above address this message's central "
+    "claim. If they do not, reply with ONLY the verdict line, trusted=\"no\".)"
+)
+
 # Stated again at the END of pass 1's message, before the language line.
 # MEASURED 2026-10-10: the system prompt already said "keep that reply
 # SHORT", and in all three two-pass checks pass 1 wrote a full answer anyway
@@ -166,5 +201,6 @@ CHAT_SYSTEM_WEB = (
 # otherwise keep returning prose written under the old rules. Same hazard the
 # translation cache's fingerprint was added for (PROJECT_PLAN §7, 2026-07-28).
 PROMPT_FINGERPRINT = hashlib.sha256(
-    (CHAT_SYSTEM_TRUSTED + CHAT_SYSTEM_WEB + PASS1_STEP_NOTE).encode("utf-8")
+    (CHAT_SYSTEM_TRUSTED + CHAT_SYSTEM_WEB + PASS1_STEP_NOTE
+     + CHAT_SYSTEM_PRIOR + PRIOR_STEP_NOTE).encode("utf-8")
 ).hexdigest()[:16]

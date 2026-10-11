@@ -44,7 +44,8 @@ import anthropic
 
 from app.config import settings
 from app.engine.chat_prompts import (
-    CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB, PASS1_STEP_NOTE, as_prompt_data,
+    CHAT_SYSTEM_PRIOR, CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB, PASS1_STEP_NOTE,
+    PRIOR_STEP_NOTE, as_prompt_data,
 )
 from app.engine.marker import MarkerFilter
 from app.models.answer import AnswerSection, Source, Tier
@@ -328,8 +329,13 @@ def _render_input(text: str, heard: str | None, factchecks: list,
 
 
 async def _run_pass(system: str, user_content: str, *, trusted: bool,
-                    budget: int, emit: Emit, section_tier: Tier) -> PassResult:
+                    budget: int, emit: Emit, section_tier: Tier,
+                    search: bool = True) -> PassResult:
     """One evidence tier: stream an answer, resuming paused turns.
+
+    `search=False` sends no tool at all — the fact-check shortcut answers
+    from evidence already in the message, and the search tool alone is
+    about 5,900 tokens of setup (counted 2026-10-10).
 
     The search budget is enforced HERE rather than trusted to `max_uses`,
     which is per-REQUEST: a paused turn resumes as a new request and could
@@ -353,7 +359,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
     excluded: set[str] = set()
 
     for _ in range(_MAX_CONTINUATIONS):
-        if trusted and not _offered(core_only, excluded):
+        if search and trusted and not _offered(core_only, excluded):
             # Never send an empty allowed_domains: it may well mean "no
             # restriction", quietly turning this pass into an open-web one.
             # Checked HERE, before every request, because the paths to an
@@ -365,17 +371,19 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                   "the trusted pass cannot search")
             result.error = "no searchable whitelist domain left"
             break
+        request = dict(
+            model=settings.chat_model,
+            max_tokens=settings.chat_max_tokens,
+            system=[{"type": "text", "text": system,
+                     "cache_control": {"type": "ephemeral"}}],
+            output_config={"effort": settings.chat_effort},
+            messages=messages,
+        )
+        if search:
+            request["tools"] = _tools(trusted, remaining, core_only=core_only,
+                                      excluded=excluded)
         try:
-            async with async_client.messages.stream(
-                model=settings.chat_model,
-                max_tokens=settings.chat_max_tokens,
-                system=[{"type": "text", "text": system,
-                         "cache_control": {"type": "ephemeral"}}],
-                output_config={"effort": settings.chat_effort},
-                tools=_tools(trusted, remaining, core_only=core_only,
-                             excluded=excluded),
-                messages=messages,
-            ) as stream:
+            async with async_client.messages.stream(**request) as stream:
                 async for event in stream:
                     kind = getattr(event, "type", "")
                     if kind == "content_block_start":
@@ -402,7 +410,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                                                     "tier": section_tier})
                 final = await stream.get_final_message()
         except anthropic.APIError as exc:
-            if trusted and getattr(exc, "status_code", None) == 400:
+            if search and trusted and getattr(exc, "status_code", None) == 400:
                 offered = _offered(core_only, excluded)
                 named = domains_named_in(str(exc), offered)
                 remaining_domains = [d for d in offered if d not in named]
@@ -511,6 +519,64 @@ def _keep_used(sources: list[Source], used: list[str] | None) -> list[Source]:
     return kept
 
 
+class _HeldText:
+    """An emit that holds a pass's words until the engine decides to keep it.
+
+    The fact-check shortcut can decline and hand over to the full search. Had
+    its words gone out live, they would sit in the reader's view above the
+    real answer until the final re-render (invariant 8: the stream must not
+    fork the truth). Status events pass straight through.
+    """
+
+    def __init__(self, emit: Emit) -> None:
+        self._emit = emit
+        self._held: list[dict] = []
+
+    async def __call__(self, kind: str, data: dict) -> None:
+        if kind == "text":
+            self._held.append(data)
+        else:
+            await self._emit(kind, data)
+
+    async def release(self) -> None:
+        for data in self._held:
+            await self._emit("text", data)
+        self._held.clear()
+
+
+async def _try_prior_factchecks(text: str, heard: str | None, factchecks: list,
+                                language: str | None, prior: list[Source],
+                                emit: Emit) -> PassResult | None:
+    """Answer from Google's vetted fact-checks with no search tool, or None.
+
+    MEASURED 2026-10-10: Google's free API had a vetted fact-check for 5 of
+    10 typical forwards (all well-known English hoaxes; none of the Hindi or
+    Hinglish ones). There it can cost roughly a third of a searched check.
+    Only an answer the model itself backs (trusted="yes") is kept; anything
+    else — a decline, a parse failure, an outage — returns None and the
+    normal search runs, having cost at most a small no-tool call.
+    """
+    if not settings.factcheck_shortcut_enabled:
+        return None
+    if not any(s.tier == "trusted" for s in prior):
+        return None
+    await emit("status", {"text": "Found published fact-checks — reading them…"})
+    held = _HeldText(emit)
+    result = await _run_pass(
+        CHAT_SYSTEM_PRIOR,
+        _render_input(text, heard, factchecks, language,
+                      step_note=PRIOR_STEP_NOTE),
+        trusted=True, budget=0, emit=held, section_tier="trusted",
+        search=False,
+    )
+    if (result.markdown.strip() and result.model_says_trusted is True
+            and not result.error):
+        await held.release()
+        return result
+    print("[chat] the prior fact-checks did not settle it; searching")
+    return None
+
+
 async def answer(text: str, *, heard: str | None = None,
                  emit: Emit | None = None,
                  language: str | None = None) -> ChatAnswer:
@@ -540,12 +606,15 @@ async def answer(text: str, *, heard: str | None = None,
         for s in factchecks
     ]
 
-    await emit("status", {"text": "Checking trusted fact-checkers…"})
-    first = await _run_pass(
-        CHAT_SYSTEM_TRUSTED, pass1_content, trusted=True,
-        budget=settings.chat_max_searches_trusted, emit=emit,
-        section_tier="trusted",
-    )
+    first = await _try_prior_factchecks(text, heard, factchecks, language,
+                                        prior, emit)
+    if first is None:
+        await emit("status", {"text": "Checking trusted fact-checkers…"})
+        first = await _run_pass(
+            CHAT_SYSTEM_TRUSTED, pass1_content, trusted=True,
+            budget=settings.chat_max_searches_trusted, emit=emit,
+            section_tier="trusted",
+        )
 
     sections = [AnswerSection(tier="trusted", markdown=first.markdown)]
     sources = prior + first.sources
