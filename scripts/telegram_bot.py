@@ -476,6 +476,28 @@ class TelegramClient:
         self._api = f"https://api.telegram.org/bot{token}"
         self._files = f"https://api.telegram.org/file/bot{token}"
 
+    @staticmethod
+    def _check(resp: httpx.Response, method: str) -> None:
+        """raise_for_status(), minus the URL.
+
+        Every Bot API URL carries the token, and an httpx status error's text
+        IS its URL. MEASURED 2026-10-15: a voice note over Telegram's 20 MB
+        getFile limit made the submit catch-all print the token. Raised
+        directly, not re-raised, so no chained original can show it either;
+        still an httpx.HTTPStatusError, because the poll loop retries on that.
+        """
+        if resp.is_success:
+            return
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        why = body.get("description") if isinstance(body, dict) else None
+        raise httpx.HTTPStatusError(
+            f"Telegram {method} answered HTTP {resp.status_code}"
+            + (f": {str(why)[:200]}" if why else ""),
+            request=resp.request, response=resp)
+
     async def get_updates(self, offset: int, confirm_only: bool = False) -> list[dict]:
         """Long-poll for updates. `confirm_only` acknowledges `offset` and
         returns immediately — used to mark a batch handled BEFORE the paid
@@ -486,7 +508,7 @@ class TelegramClient:
                     **({"limit": 1} if confirm_only else {})},
             timeout=30.0 if confirm_only else 60.0,
         )
-        resp.raise_for_status()
+        self._check(resp, "getUpdates")
         return resp.json().get("result", [])
 
     async def send(self, chat_id: int, text: str) -> bool:
@@ -527,10 +549,10 @@ class TelegramClient:
     async def file_bytes(self, file_id: str) -> tuple[bytes, str]:
         meta = await self._http.get(f"{self._api}/getFile",
                                     params={"file_id": file_id})
-        meta.raise_for_status()
+        self._check(meta, "getFile")
         path = meta.json()["result"]["file_path"]
         data = await self._http.get(f"{self._files}/{path}")
-        data.raise_for_status()
+        self._check(data, "file download")
         return data.content, path
 
 

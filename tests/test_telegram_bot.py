@@ -975,3 +975,84 @@ def test_a_summary_is_escaped_like_everything_else_a_model_wrote():
     reply = B.format_reply(_answer(summary='<script>alert(1)</script> & "quoted"'))
     assert "<script>" not in reply
     assert "&lt;script&gt;" in reply
+
+
+# -- the bot token never reaches a printed line --------------------------------
+
+# Every Bot API URL carries the token, and an httpx error's text IS its URL.
+_TOKEN = "123456:PLANTED-token-must-never-print"
+
+
+def _real_tg_run(handler, body):
+    """Drive the REAL TelegramClient against a fake Telegram."""
+    import httpx
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await body(B.TelegramClient(http, _TOKEN))
+
+    return asyncio.run(run())
+
+
+def test_a_voice_note_telegram_will_not_hand_over_never_prints_the_token(capsys):
+    """Telegram refuses getFile over 20 MB ("file is too big"), so anyone can
+    cause this by sending a big video. The refusal surfaced as an httpx
+    error whose text is the request URL, and the submit catch-all printed
+    it — the token, in the log (and in a host's log store, once public)."""
+    import json
+
+    import httpx
+
+    sent = []
+
+    def handler(request):
+        if request.url.path.endswith("/getFile"):
+            return httpx.Response(400, json={"ok": False, "error_code": 400,
+                                             "description": "Bad Request: file is too big"})
+        if request.url.path.endswith("/sendMessage"):
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"ok": True, "result": {}})
+        return httpx.Response(404, json={"ok": False})
+
+    _real_tg_run(handler, lambda tg: B.handle_message(
+        {"chat": {"id": 7}, "voice": {"file_id": "v9"}}, StubApp(), tg))
+
+    out = capsys.readouterr()
+    assert _TOKEN not in out.out + out.err
+    assert "getFile" in out.out             # the failure is still logged...
+    assert "gadbad" in sent[-1]["text"]     # ...and the chat still hears back
+
+
+@pytest.mark.parametrize("call, failing, status", [
+    ("get_updates", "/getUpdates", 409),    # another poller holds the token
+    ("file_bytes", "/getFile", 400),        # over Telegram's 20 MB limit
+    ("file_bytes", "/file/", 404),          # the download itself (its own URL)
+])
+def test_no_error_leaving_the_telegram_client_carries_the_token(call, failing, status):
+    """The rule at the seam, for every call that can raise: whatever prints
+    the error — a catch-all, a traceback — prints no token. It must stay an
+    httpx.HTTPError: the poll loop's retry catches exactly that."""
+    import traceback
+
+    import httpx
+
+    def handler(request):
+        if failing in request.url.path:
+            return httpx.Response(status, json={"ok": False, "error_code": status,
+                                                "description": "refused"})
+        if request.url.path.endswith("/getFile"):
+            return httpx.Response(200, json={"ok": True,
+                                             "result": {"file_path": "voice/file_1.oga"}})
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    async def body(tg):
+        if call == "get_updates":
+            return await tg.get_updates(0)
+        return await tg.file_bytes("f1")
+
+    with pytest.raises(httpx.HTTPError) as info:
+        _real_tg_run(handler, body)
+    shown = (str(info.value) + repr(info.value)
+             + "".join(traceback.format_exception(info.value)))
+    assert _TOKEN not in shown
+    assert str(status) in str(info.value)   # still says what went wrong
