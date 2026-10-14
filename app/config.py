@@ -5,18 +5,31 @@ check and vision OCR both run on Sonnet 5 since the 2026-09 pivot.
 """
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _credential():
+    """A key field that no repr, str or dump of Settings ever shows.
+
+    MEASURED 2026-09-29: a failing assert displayed this object with the
+    start of the real Anthropic key (PROJECT_PLAN §11 17). Plain `str`, not
+    SecretStr, on purpose: providers, the demo's key-blanking and the tests
+    all assign and read plain strings. tests/test_secrets.py fails any field
+    named like a credential that is declared without this.
+    """
+    return Field(default="", repr=False, exclude=True)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Credentials
-    anthropic_api_key: str = ""
-    google_factcheck_api_key: str = ""
-    sarvam_api_key: str = ""
-    hf_token: str = ""  # unused since the pivot removed the local embedding model
-    telegram_bot_token: str = ""  # from @BotFather; used only by scripts/telegram_bot.py
+    anthropic_api_key: str = _credential()
+    google_factcheck_api_key: str = _credential()
+    sarvam_api_key: str = _credential()
+    hf_token: str = _credential()  # unused since the pivot removed the local embedding model
+    telegram_bot_token: str = _credential()  # from @BotFather; used only by scripts/telegram_bot.py
 
     # Vision OCR still needs a model of its own (it is not the chat call).
     vision_model: str = "claude-sonnet-5"
