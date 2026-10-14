@@ -71,10 +71,16 @@ HELP = (
 )
 
 
+# The Bot API hands a bot files up to 20 MB (getFile); bigger ones are
+# refused with "file is too big" whatever the app's own upload cap says.
+_TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024
+
+
 def classify_message(msg: dict) -> tuple[str, str]:
     """(kind, payload) for one Telegram message. Pure — fully offline-testable.
 
-    kinds: help | smalltalk | text | link | media | image | unsupported. The
+    kinds: help | smalltalk | text | link | media | image | too_big |
+    unsupported. The
     link test reuses the SERVER's own allowlist check, and the small-talk test
     the server's own triage, so the bot and the API can never disagree about
     what counts as a checkable link or as nothing to check.
@@ -90,6 +96,10 @@ def classify_message(msg: dict) -> tuple[str, str]:
         return "text", text
     for key in ("voice", "audio", "video", "video_note"):
         if msg.get(key):
+            # Telegram refuses getFile over this, every time — so saying
+            # "try again later" after the download fails can never come true.
+            if (msg[key].get("file_size") or 0) > _TG_DOWNLOAD_LIMIT:
+                return "too_big", ""
             return "media", msg[key].get("file_id", "")
     if msg.get("photo"):
         # Telegram sends multiple sizes; the last is the largest.
@@ -576,8 +586,11 @@ _NOT_CHECKED = ("ℹ️ Yeh naya message check nahi hua, kyunki pichla check cha
                 "raha tha. Ise check karwana ho to ab dobara bhejiye.")
 _SMALLTALK_REPLY = ("🙂 Kuch check karwana ho to woh message, link, voice note "
                     "ya photo yahan bhejiye.")
+_TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi file "
+                  "download nahi kar sakte. Chhota clip (5 minute tak) bhejiye, "
+                  "ya video ka link.")
 # Kinds that are never submitted, so never told "this was not checked".
-_NEVER_CHECKED = ("unsupported", "smalltalk")
+_NEVER_CHECKED = ("unsupported", "smalltalk", "too_big")
 
 
 async def handle_message(
@@ -680,6 +693,9 @@ async def handle_message(
         if kind == "unsupported":
             await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
                                    "text, link, voice note ya photo bhejiye.")
+            return
+        if kind == "too_big":
+            await tg.send(chat_id, _TOO_BIG_REPLY)
             return
         if kind == "smalltalk":
             # "hi", "ok", "thanks": nothing to check, so nothing is spent and

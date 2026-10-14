@@ -1056,3 +1056,34 @@ def test_no_error_leaving_the_telegram_client_carries_the_token(call, failing, s
              + "".join(traceback.format_exception(info.value)))
     assert _TOKEN not in shown
     assert str(status) in str(info.value)   # still says what went wrong
+
+
+# -- a file Telegram will not hand a bot is refused up front -------------------
+
+_OVER_TG_LIMIT = 21 * 1024 * 1024
+
+
+@pytest.mark.parametrize("key", ["voice", "audio", "video", "video_note"])
+def test_media_over_telegrams_bot_download_limit_is_classified_up_front(key):
+    msg = {"chat": {"id": 7}, key: {"file_id": "big", "file_size": _OVER_TG_LIMIT}}
+    assert B.classify_message(msg)[0] == "too_big"
+
+
+def test_media_at_or_under_the_limit_or_of_unknown_size_is_still_media():
+    at = {"voice": {"file_id": "a", "file_size": 20 * 1024 * 1024}}
+    unknown = {"voice": {"file_id": "b"}}           # file_size is optional
+    assert B.classify_message(at) == ("media", "a")
+    assert B.classify_message(unknown) == ("media", "b")
+
+
+def test_a_too_big_file_gets_the_real_reason_not_try_again_later():
+    """Telegram refuses getFile over 20 MB, every time. The bot used to say
+    "Checking…", fail the download, and then "try again later" — advice
+    that can never work, so a person retries and waits for nothing."""
+    app, tg = StubApp(), StubTG()
+    _handle({"chat": {"id": 7},
+             "video": {"file_id": "big", "file_size": _OVER_TG_LIMIT}}, app, tg)
+    assert app.submissions == []                    # nothing downloaded or sent
+    assert len(tg.sent) == 1
+    assert "20 MB" in tg.sent[0][1]
+    assert "Checking" not in tg.sent[0][1]
