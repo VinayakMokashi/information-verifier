@@ -2,8 +2,8 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-09-22**
-> (first paid runs, the 2-a-day cap, dashboard, two adversarial reviews — see §7).
+> Keep it updated as the project moves. Last updated: **2026-10-15**
+> (secrets out of every printed line; the public-launch choices — see §7, §11 A).
 
 ---
 
@@ -78,7 +78,9 @@ refilling the real daily cap one slot per run (§7). **2026-10-10:** a
 one-click launcher, `start.cmd`. **2026-10-11: three cost cuts, measured**
 (§7) — a claim Google's free fact-check database already covers now costs
 **$0.0084 in 6.7 s** (was ~$0.05 and 28–51 s); pass 1 says "not covered" in
-one sentence instead of an essay; "hi" costs nothing. **842 tests.**
+one sentence instead of an essay; "hi" costs nothing. **2026-10-15:** no
+credential reaches any printed line (§11 17 closed, and the bot token's own
+leak through error text); translated Hindi lookups measured. **858 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -420,6 +422,34 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-15 — Before any public URL: no secret in any printed line
+
+Vinayak asked for the website/WhatsApp/to-do plan (§11 A–C), choices laid
+out before anything is built. The fixes every option needs came first:
+
+- **§11 17 closed** (e4a9822). Every credential field is `repr=False,
+  exclude=True`; plain `str`, not `SecretStr`, because the providers, the
+  demo's key-blanking and dozens of tests assign plain strings. The test
+  pins the rule by field NAME, with a guard that the pattern still finds
+  the five known keys (a pattern matching nothing would pass vacuously).
+  Failed first: 25 leaks — 5 keys × repr/str/format/model_dump/json.
+- **The bot token leaked the same way** (63f8049), found by reading for
+  the rule rather than the instance: every Bot API URL carries the token,
+  an httpx status error's text IS its URL, and the submit catch-all printed
+  it. Anyone could trigger it — Telegram refuses `getFile` over 20 MB.
+  `TelegramClient._check` raises without the URL (directly, so no chained
+  original shows it; still an `httpx.HTTPStatusError`, which the poll loop
+  retries on). The failing run printed exactly the predicted line.
+- **And the advice that came with it was wrong** (9a737bd): after that
+  refusal the person was told "try again later", which can never work.
+  `file_size` arrives with the message, so an over-limit file is answered
+  at once with what to send instead — no download, no slot.
+- **Measured, free: translating Hindi/Hinglish forwards to English more
+  than doubles Google fact-check matches** (3/12 → 7/12) — §11 20.
+- PowerShell 5.1 splits a `git commit -m` here-string at embedded double
+  quotes (the first commit attempt failed with "pathspec … did not match");
+  commit messages go through `git commit -F <file>`.
 
 ### 2026-10-11 — Three cost cuts, each measured; and a second test-isolation leak
 
@@ -1750,13 +1780,14 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    2026-09-29** (c5e06c2): recorded per check in `usage.search_errors`, the
    ledger and the dashboard. The next politics check that hits one will
    say which error it was.
-17. **`Settings` prints its secrets.** Its repr includes
-   `anthropic_api_key` and the other keys in full; MEASURED 2026-09-29 when
-   a failing assert displayed one. Anything that prints the object — a test
-   failure, a traceback with locals, a debug line — leaks them. Fix:
-   `SecretStr` (or `Field(repr=False)`) on every key field, with a test
-   that the repr carries none of them. Free; worth doing before any CI or
-   shared logs exist.
+17. ~~**`Settings` prints its secrets.**~~ **DONE 2026-10-15** (e4a9822):
+   every credential field is `Field(repr=False, exclude=True)` — plain
+   `str`, because providers, the demo's key-blanking and the tests assign
+   plain strings. `tests/test_secrets.py` pins the RULE by field name, so
+   the WhatsApp and Turnstile keys to come cannot be the ones that print.
+   Same day, same rule (63f8049): the **bot token** leaked through httpx
+   error text (every Bot API URL carries it) whenever Telegram refused a
+   file over 20 MB — `TelegramClient._check` now raises without the URL.
 18. **The bot answers anyone.** @Information_Verifier_bot has no allow-list:
    whoever finds the username can send checks, and every one comes out of
    the same 5 a day. The cap bounds the money, not who uses it. An
@@ -1772,7 +1803,14 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    of the Hindi/Hinglish versions — not even the ₹2000 GPS-chip story in
    Devanagari. Translating the query to English first (one tiny call, or a
    cheap model) would let the $0.0084 shortcut serve most Indian forwards.
-   Measure the hit rate on translated queries for free before building.
+   **MEASURED 2026-10-15 (free, the engine's own `search_factcheck`):** 12
+   Hindi/Hinglish forwards of known hoaxes — **3/12** had a vetted match as
+   forwarded, **7/12** in a hand English translation (5G, NASA darkness,
+   hot water ×2, WhatsApp charges, salt-water gargle, UNESCO anthem). Google
+   matches WORDS: the ₹2000 GPS-chip story misses even in English, as do
+   free laptops, Coca-Cola/HIV, cow urine and onion-in-socks. Translation
+   more than doubles the shortcut's reach; worth building (a match still
+   needs the model's trusted="yes" to be kept).
 21. **A/B the basic search tool** (`web_search_20250305`) against the
    filtering one. ~3,100 fewer setup tokens per pass, citations that would
    fix item 15's ₹20-page problem, and no filtering rounds — the Pune run's

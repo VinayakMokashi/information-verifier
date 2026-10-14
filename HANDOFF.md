@@ -6,7 +6,7 @@
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log, §11 the to-do
 > list) and [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-10-11**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-10-15**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -30,7 +30,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 842 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 858 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -100,13 +100,14 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 | **Sep 23** | The reader's two controls: a **skimmable summary** and a **reply-language chooser**. |
 | **Sep 29** | **The Telegram bot goes live** from Vinayak's phone; summary and language chooser proven on the real model. Failed searches recorded per check; the cap goes to **5 a day**; the free test suite caught **refilling the real daily cap** (fixed with a canary). |
 | **Oct 10** | **One-click launcher** `start.cmd`. Found: the app and bot had kept running unseen for a week after the session that started them. |
+| **Oct 15** | Before going public: no credential reaches any printed line (§11 17, and the bot token's leak through error text); an over-20 MB Telegram file gets the real reason; translated Hindi lookups double Google fact-check matches (3/12 → 7/12). Public-launch options researched (§11 A). |
 | **Oct 11** | **Three cost cuts, measured:** the Google fact-check shortcut (**$0.0084, 6.7 s** for a covered hoax, was ~$0.05 and 28–51 s); pass 1 says "not covered" in one sentence (318 tokens, was an essay); "hi"/"ok"/"thanks" cost nothing. A second test leak (late claims landing in other tests' databases) fixed — after a wrong first fix was reverted. |
 
 ---
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **842 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **858 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
@@ -119,8 +120,9 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
   longer than the bot waits (items 21, 23); Google's lookup misses Hindi and
   Hinglish forwards entirely (20); source narrowing is per *domain*, so a big
   site brings unrelated pages (15); there is no eval set, so quality
-  trade-offs can't yet be tested safely (22); a `Settings` object prints the
-  API keys if anything ever displays it (17); the bot answers anyone (18).
+  trade-offs can't yet be tested safely (22); the bot answers anyone (18).
+  (17, keys in a `Settings` repr, was fixed 2026-10-15 — with the bot
+  token's own leak through error text.)
 
 **Measured costs** (Sonnet 5):
 
@@ -178,8 +180,8 @@ PROJECT_PLAN §11 A–C has the detail.
 - **A. A website/app anyone can use.** Decide first: where it runs 24/7 (a
   small cloud host with a disk, or this PC behind a named Cloudflare Tunnel),
   the daily budget and per-person limits for strangers (the 5/day cap is
-  deployment-wide and would run out in minutes), and a bot shield. Fix §11 17
-  (keys in a `Settings` repr) and decide §11 18 before any public URL. A
+  deployment-wide and would run out in minutes), and a bot shield. §11 17
+  is fixed (2026-10-15); decide §11 18 before any public URL. A
   web-app manifest makes the page installable on phones — the cheap "app".
 - **B. The WhatsApp bot**, once A gives it a public webhook: Meta Cloud API,
   business verification (slow — start early), a WhatsApp formatter, the
