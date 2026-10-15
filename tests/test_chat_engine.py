@@ -734,6 +734,54 @@ def test_a_refusal_for_money_pauses_the_check_and_is_never_retried(no_factcheck,
     assert "paused" in str(paused.value) and "later" in str(paused.value)
 
 
+class _InOrder:
+    """Plays each step in order: a final message to stream, or an error."""
+
+    def __init__(self, steps):
+        self.steps, self.requests = list(steps), []
+        outer = self
+
+        class Messages:
+            def stream(self, **kw):
+                outer.requests.append(kw)
+                step = outer.steps.pop(0)
+                if isinstance(step, Exception):
+                    raise step
+                return _Stream(step, _deltas(step.content[0].text))
+
+        self.messages = Messages()
+
+
+def test_an_answer_already_on_screen_is_kept_when_the_next_pass_is_refused_for_money(
+        no_factcheck, monkeypatch):
+    """Reviewing the pause itself (2026-10-16): pass 1 had written — and
+    streamed — its answer when the spend limit landed before pass 2, and the
+    whole check failed as "paused" under the reader's eyes. "A search-tool
+    outage must not sink an answer we can still give": keep it, say it was
+    cut short, never cache it."""
+    pass1 = "No fact-checker has covered this. " + SENTINEL_NO
+    client = _InOrder([_final(pass1, results=[WEB_URL], searches=1),
+                       _refused_for_money(400, "You have reached your specified "
+                                               "API usage limits.")])
+    result, events = _run(client, monkeypatch)
+    assert result.markdown.startswith("No fact-checker has covered this.")
+    assert "cut short" in result.markdown
+    assert result.degraded, "a cut-short answer would be cached for days"
+    assert len(client.requests) == 2
+
+
+def test_a_refused_shortcut_stops_at_one_call(a_prior_factcheck, monkeypatch):
+    """The no-tool shortcut over Google's fact-checks is the first call when
+    one exists; refused for money, the searched pass would be refused too."""
+    client = _Scripted([_refused_for_money(402, "billing", "billing_error")] * 3,
+                       _final("unused"))
+    monkeypatch.setattr(C, "async_client", client)
+    with pytest.raises(C.ServicePaused):
+        asyncio.run(C.answer("5G spreads corona"))
+    assert len(client.requests) == 1
+    assert "tools" not in client.requests[0], "that was not the shortcut"
+
+
 def test_a_crawler_400_drops_only_the_domains_it_names(no_factcheck, monkeypatch):
     """MEASURED: one blocked domain 400s the whole allowed_domains list. The
     engine used to answer that by falling back to the five core domains —

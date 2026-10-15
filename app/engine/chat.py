@@ -91,11 +91,13 @@ class CheckUnavailable(Exception):
 
 
 class ServicePaused(CheckUnavailable):
-    """Anthropic refused for MONEY (app/providers/llm.paused_reason): a spend
-    limit, the tier's monthly cap, a billing problem, an empty balance. It
-    fails for every check until someone pays, so it is never retried, and it
-    cost nothing ("failed requests aren't charged") — the route gives the
-    whole reservation back and pauses new checks (routes._finish)."""
+    """Anthropic refused for MONEY (app/providers/llm.paused_reason) before a
+    word of the answer was written: a spend limit, the tier's monthly cap, a
+    billing problem, an empty balance. It fails for every check until someone
+    pays, so it is never retried, and the refused call cost nothing ("failed
+    requests aren't charged") — the route settles at the recorded cost and
+    pauses new checks (routes._finish). Refused AFTER words were written, the
+    answer is kept instead, marked cut short (answer())."""
 
 
 @dataclass
@@ -108,6 +110,7 @@ class PassResult:
     error: str | None = None       # for the server log only, never the reader
     used: list[str] | None = None  # domains the answer rests on; None = unsaid
     summary: str | None = None     # the reader's own two lines, for its box
+    paused: bool = False           # Anthropic refused for money (llm.paused_reason)
 
 
 @dataclass
@@ -426,12 +429,14 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
         except anthropic.APIError as exc:
             reason = paused_reason(exc)
             if reason:
-                # It fails for every check until someone pays or the month
-                # turns: no retry on the core domains, no second pass (a
-                # spend-limit 400 was taken for a whitelist rejection and
-                # retried; then the open-web pass tried again).
+                # It fails for every call until someone pays or the month
+                # turns: no retry on the core domains (a spend-limit 400 was
+                # taken for a whitelist rejection), and answer() sends no
+                # further pass. What this pass already wrote is kept there.
                 tell_owner_paused(reason)
-                raise ServicePaused(PAUSED_MESSAGE) from exc
+                result.paused = True
+                result.error = reason
+                break
             if search and trusted and getattr(exc, "status_code", None) == 400:
                 offered = _offered(core_only, excluded)
                 named = domains_named_in(str(exc), offered)
@@ -591,6 +596,9 @@ async def _try_prior_factchecks(text: str, heard: str | None, factchecks: list,
         trusted=True, budget=0, emit=held, section_tier="trusted",
         search=False,
     )
+    if result.paused:
+        # The search would be refused the same way: stop at one call.
+        raise ServicePaused(PAUSED_MESSAGE)
     if (result.markdown.strip() and result.model_says_trusted is True
             and not result.error):
         await held.release()
@@ -607,6 +615,9 @@ _SEARCH_SKIPPED = (
     "Today's budget for this service is nearly used up, so new searches are "
     "paused until midnight India time — and no published fact-check settled "
     "this one. Please send it again after midnight.")
+_CUT_SHORT = (
+    "This check was cut short: the checking service paused before it "
+    "finished. Send it again later for a fuller check.")
 
 
 async def _budget_answer(prior: list[Source], emit: Emit) -> ChatAnswer:
@@ -665,6 +676,8 @@ async def answer(text: str, *, heard: str | None = None,
             budget=settings.chat_max_searches_trusted, emit=emit,
             section_tier="trusted",
         )
+    if first.paused and not first.markdown.strip():
+        raise ServicePaused(PAUSED_MESSAGE)
 
     sections = [AnswerSection(tier="trusted", markdown=first.markdown)]
     sources = prior + first.sources
@@ -697,6 +710,14 @@ async def answer(text: str, *, heard: str | None = None,
     )
 
     degraded = False
+    if first.paused:
+        # Refused for money after writing something (a continuation): keep
+        # it — "a search-tool outage must not sink an answer we can still
+        # give" — but never cache it, and send no pass that would be refused.
+        should_escalate = False
+        degraded = True
+        sections.append(AnswerSection(tier="none", markdown=_CUT_SHORT))
+        await emit("text", {"text": _CUT_SHORT, "tier": "none"})
     if should_escalate and mode != "full":
         should_escalate = False
         # Only when pass 1 answered: a pass 1 that wrote nothing is an
@@ -722,6 +743,13 @@ async def answer(text: str, *, heard: str | None = None,
         if second.confidence is not None:
             confidence = second.confidence
         truncated = truncated or second.truncated
+        if second.paused:
+            # Pass 1's answer is already on the reader's screen: keep it, and
+            # say why the wider search stopped. Never cached.
+            degraded = True
+            if any(s.markdown.strip() for s in sections):
+                sections.append(AnswerSection(tier="none", markdown=_CUT_SHORT))
+                await emit("text", {"text": _CUT_SHORT, "tier": "none"})
 
     seen: set[str] = set()
     unique_sources = []
@@ -769,6 +797,8 @@ async def answer(text: str, *, heard: str | None = None,
     if not sections:
         # Sources alone (Google's prior fact-checks, a result list) are not an
         # answer; a confidence badge over an empty box is worse than nothing.
+        if second is not None and second.paused:
+            raise ServicePaused(PAUSED_MESSAGE)
         errored = first.error or (second is not None and second.error)
         if errored:
             raise CheckUnavailable(
