@@ -36,10 +36,13 @@ app — they never did) · ad79c00 (the research so far, persisted in
 A research file whose top says **"status: in progress"** means its agent died:
 re-run that one task, seeded from the file.
 
-**Next:** when those are in — write the decision brief (hosting; daily budget
-and per-person limits; the bot's policy, §11 18; the pre-public fix list from
-the audits; WhatsApp "start today"), ask Vinayak, record his answers in
-PROJECT_PLAN §7/§11, then build in layered commits. Pre-public **blockers**
+**Now:** the decision brief is written —
+[docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md)
+— and Vinayak has been asked four questions: where it runs; the daily
+ceiling; the bot's access (§11 18); the domain. **Next:** record his answers
+in PROJECT_PLAN §7/§11, then build in the brief's §6 order, layered commits.
+When `whatsapp.md` and the verifications land, fold any correction into the
+brief (its † marks what was unverified). Pre-public **blockers**
 already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
 one stranger can use up the day's cap; a 25 MB text post freezes the server
 for 10–19 s; the bot answers anyone, even with no public URL; any website can
