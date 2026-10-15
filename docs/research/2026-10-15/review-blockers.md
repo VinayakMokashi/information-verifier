@@ -1,6 +1,6 @@
 # Adversarial review of the 2026-10-15 security/ops fixes
 
-status: in progress
+status: complete
 
 Reviewer: subagent (Opus 5.5), 2026-10-15. Scope: the fixes committed today —
 e4a9822, 63f8049, 9a737bd, ca76538, 50dcf3b, 1080d2d, 020e26f — read against
@@ -15,13 +15,41 @@ The working tree was being edited live during this review (55d3de0, the
 per-person daily allowance, landed after it started, and more was
 uncommitted), so the scripts run against `git archive` snapshots of fixed
 commits in `scratchpad/review/snap-<sha>/` (020e26f = the seven fixes; 55d3de0
-= HEAD when checked), never the live tree. `_rboot.py` asserts which snapshot
-was imported. Each finding says whether it still holds at 55d3de0.
+and then 0951150 = HEAD as it moved), never the live tree. `_rboot.py` asserts
+which snapshot was imported (`REVIEW_SNAP=<sha>` selects it). Each finding
+says whether it still holds at 55d3de0 and at 0951150 (the $1-a-day budget,
+which landed while this review ran).
+
+## Summary
+
+| # | Severity | Commit | In one line |
+|---|---|---|---|
+| R1 | blocker - FIXED 5f8e7db (re-checked) | 020e26f | The refunded-hold lockout still works with 5 subjects (5 IPv6 /64s from one free /48); at 0951150 three suffice and also force everyone into the no-search shortcut mode |
+| R2 | should-fix - FIXED 2f4d825 (re-checked) | ca76538 | `https://www.facebook.com:<port>/share/...` makes the server connect to any port; Facebook drops them, so each is a free ~31 s hold (and, with a raised cap, pool starvation) |
+| R3 | should-fix - FIXED 2f4d825 (re-checked) | ca76538 | A share link + newline (a normal Telegram message) is an uncaught `httpx.InvalidURL` -> 500 -> "try again later"; it was a 422 before |
+| R4 | nice-to-have | 1080d2d, 50dcf3b | With a root_path (`--root-path` / `UVICORN_ROOT_PATH`) both middlewares stop matching: cross-site POSTs pass again, uploads over 64 KiB are refused |
+| R5 | nice-to-have | 1080d2d | A DNS-rebinding page is "same-origin" and passes; the paid routes never check Host |
+| R6 | nice-to-have | 020e26f | The person is released after the bookkeeping, so "poll until COMPLETE, then submit" gets "already running" about half the time |
+| R7 | nice-to-have | 50dcf3b | The pinned body-cap arithmetic is x6 per character; an emoji is x12 |
+| R8 | nice-to-have | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
+| R9 | should-fix | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
+| R10 | nice-to-have | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
+| R11 | nice-to-have | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |
+| R12 | nice-to-have | 020e26f x OPS-07 | After a bot restart, "wait for its answer" promises an answer the bot forgot |
+| R13 | nice-to-have | 020e26f | All anonymous group admins (and all "post as channel" senders) are one Telegram person |
+| R14 | should-fix | 0951150 (outside the seven) | Cache-hit repeats skip every limit: unbounded job rows and in-memory streams from one visitor |
+| R15 | should-fix | 020e26f (+5f8e7db) | `release()` (and at HEAD `admit()`) take the limiter lock on the event loop while a claim holds it across a contended SQLite write: /health froze 7 s |
+
+Sound (details at the end): release exactly once on all 28/29 route paths at
+all three snapshots; cancellation; the hop-by-hop SSRF fence; RefuseCrossSite's
+header handling and the app's own page in real Chrome; the body cap for every
+legitimate request; Settings never displays a key; the bot's token paths; the
+20 MiB Telegram rule.
 
 ## Findings
 
 ### R1. The refunded-hold lockout (audit blocker 5) still works: it needs five visitors instead of one
-*blocker · 020e26f (with ca76538 as the amplifier, R2) · `app/api/limits.py:194` (the daily fast path) and `app/api/routes.py:533` (the claim before the free resolve) · still true at 55d3de0*
+*blocker · 020e26f (with ca76538 as the amplifier, R2) · `app/api/limits.py:194` (the daily fast path) and `app/api/routes.py:533` (the claim before the free resolve) · still true at 55d3de0; WORSE at 0951150 - three subjects suffice (below)*
 
 **Scenario.** The fix stops ONE subject from holding several slots (one check
 in flight per person). It does not stop five subjects from holding one each.
@@ -58,15 +86,34 @@ and never answers. Printed at 020e26f, and identically at 55d3de0:
    afterwards: used_today=0  answers rows=0  spend_ledger rows=0
 ```
 
-**Suggested fix.** Do not hold a DAILY slot during free work. For
-/verify/link, run the free resolve under the per-person in-flight gate only,
-and take the daily slot (atomically, as now) after it succeeds; same for the
-media route's free ffmpeg decode. Independently: when the cap is reached only
-by unsettled claims, say "busy - try again in a minute", never "tomorrow".
-Optionally count IPv6 by /56 for the in-flight and hourly limits.
+**Worse at HEAD 0951150 (the $1-a-day budget, landed during this review).**
+A link claim now RESERVES $0.30 of the $1.00 before its free resolve, so
+THREE held links commit $0.90, the day's mode reads "shortcut", every other
+person's screenshot, voice note and link is refused "until midnight", and
+their texts are answered in the no-search shortcut mode - all for free, all
+refunded afterwards. `scratchpad/review/r05b_lockout_budget.py`
+(REVIEW_SNAP=0951150, default settings):
+
+```
+held by 3 subjects: committed $0.90  mode now: shortcut
+  victim's reel link -> (429, "Today's budget for this service is nearly used up. Screenshots,
+  voice notes and links can be checked again after midnight India time; ...")
+  victim's text      -> (202, ...)      the engine was told mode=['shortcut']
+attackers' answers: [(502, 'The platform could not be reached right now...')]
+afterwards: committed $0.00  mode full
+```
+
+**Suggested fix.** Do not hold a DAILY slot - or, at HEAD, a budget
+reservation - during free work. For /verify/link, run the free resolve under
+the per-person in-flight gate only, and take the slot and the reservation
+(atomically, as now) after it succeeds; same for the media route's free
+ffmpeg decode. Independently: when the cap or budget is reached only by
+unsettled claims, say "busy - try again in a minute", never "tomorrow", and
+do not let unsettled reservations choose the budget mode. Optionally count
+IPv6 by /56 for the in-flight and hourly limits.
 
 ### R2. A Facebook share link with an explicit port makes the server connect to that port, and hold a slot for ~31 s
-*should-fix · ca76538 · `app/providers/links.py` `expand_share_link` (and `allowed_link_host`, which admits any port) · still true at 55d3de0*
+*should-fix · ca76538 · `app/providers/links.py` `expand_share_link` (and `allowed_link_host`, which admits any port) · still true at 55d3de0 and at 0951150*
 
 **Scenario.** `allowed_link_host` reads only the host, so
 `https://www.facebook.com:1/share/r/x/` (or `fb.watch:6379/...`) passes, and
@@ -87,6 +134,10 @@ then `HTTP 502 after 15.9 s`, refunded. ONE live, free connection attempt by
 the app's own `expand_share_link` (`scratchpad/review/r06_live_port_probe.py`):
 `https://www.facebook.com:1/share/r/17RQxbYP2j/ -> after 31.0 s:
 LinkError[network] The platform could not be reached right now.`
+Before/after, network blocked (`scratchpad/review/r19_before_after_ca76538.py`):
+at ca76538^ `resolve_link -> LinkError[other] That link could not be read.
+(0.5 s)`, route `HTTP 422`, no connection attempted; at 020e26f the same URL
+attempts the connection (`LinkError[network]`, route `HTTP 502`).
 
 Once the daily cap is raised (the per-person allowances of 55d3de0 are the
 step towards that), the same holds also starve asyncio's default thread pool
@@ -103,7 +154,7 @@ expansion all agree), and give the share expansion one overall deadline
 resolves on a small pool of their own, not asyncio's default one.
 
 ### R3. A share link with a line break after it is a 500, and the bot says "try again later" - which can never work
-*should-fix · ca76538 · `app/providers/links.py` `expand_share_link` (only `httpx.HTTPError` is classified) · still true at 55d3de0*
+*should-fix · ca76538 · `app/providers/links.py` `expand_share_link` (only `httpx.HTTPError` is classified) · still true at 55d3de0 and at 0951150*
 
 **Scenario.** A Telegram user sends a Facebook share link with a question on
 the next line ("https://www.facebook.com/share/r/17RQxbYP2j/\nKya yeh sach
@@ -127,6 +178,10 @@ handle_message + AppClient against the real app over ASGI) printed:
 `scratchpad/review/r04_share_edges.py` part B: tab, LF and CR variants each
 `route -> HTTP 500 Internal Server Error`; part A: `UNCAUGHT InvalidURL` /
 `UnicodeEncodeError` / `InvalidCodepoint` for those Locations.
+`scratchpad/review/r19_before_after_ca76538.py`: at ca76538^ the same
+message gives `HTTP 422 {"detail":"That link could not be read."}`; at
+020e26f `UNCAUGHT InvalidURL: Invalid non-printable ASCII character in URL,
+'\n' at position 44.` and `HTTP 500 Internal Server Error`.
 
 **Suggested fix (R3).** In `expand_share_link`, treat any exception from building
 or requesting a URL as `LinkError` (catch `Exception`, or at least
@@ -136,7 +191,7 @@ module's stated discipline) - or have the bot and route take only the first
 whitespace-delimited token as the link.
 
 ### R4. RefuseCrossSite and the upload cap read `scope["path"]`, which uvicorn prefixes with root_path - set one, and both silently stop working
-*nice-to-have (latent: no launcher sets it today) · 1080d2d + 50dcf3b · `app/main.py:69` and `app/main.py:156` · still true at 55d3de0*
+*nice-to-have (latent: no launcher sets it today) · 1080d2d + 50dcf3b · `app/main.py:69` and `app/main.py:156` · still true at 55d3de0 and at 0951150*
 
 **Scenario.** uvicorn builds `scope["path"] = root_path + path`, and takes
 root_path from `--root-path` or the `UVICORN_ROOT_PATH` environment variable
@@ -157,7 +212,7 @@ deployment (a reverse proxy at /verifier) would hit this on day one.
 yourself) before comparing, and add the root_path case to the tests.
 
 ### R5. A DNS-rebinding page passes RefuseCrossSite: "same-origin" to its own name is trusted without looking at the Host
-*nice-to-have · 1080d2d · `app/main.py:113-136` (`_cross_site`) · still true at 55d3de0*
+*nice-to-have · 1080d2d · `app/main.py:113-136` (`_cross_site`) · still true at 55d3de0 and at 0951150*
 
 **Scenario.** A page the owner visits re-resolves its own name to 127.0.0.1
 and POSTs to `http://evil.example:8000/api/v1/verify/...`. The browser calls
@@ -179,7 +234,7 @@ names (the local names `is_this_machine` accepts, plus the public hostname
 from settings) - a Host allowlist, as `TrustedHostMiddleware` would do.
 
 ### R6. A finished check still counts as "running" for a moment: a client that waits for COMPLETE and then submits is told to wait for its answer
-*nice-to-have · 020e26f · `app/api/routes.py:142-158` (`_check` releases after `_settle_quota`) · still true at 55d3de0*
+*nice-to-have · 020e26f · `app/api/routes.py:142-158` (`_check` releases after `_settle_quota`) · still true at 55d3de0 and at 0951150*
 
 **Scenario.** run_check saves the COMPLETE answer (pollers see it at once),
 then writes the ledger, emits "done", returns; `_check` then runs
@@ -206,7 +261,7 @@ bookkeeping: call `release(subject)` right after `run_check` returns (before
 final save. Keep the `finally` as the backstop.
 
 ### R7. The test that ties the body cap to the message limit uses the wrong arithmetic (x6 a character; an emoji is x12)
-*nice-to-have (no failure at today's settings) · 50dcf3b · `tests/test_spend_bounds.py` `test_the_small_cap_always_fits_a_maximum_length_message`*
+*nice-to-have (no failure at today's settings) · 50dcf3b · `tests/test_spend_bounds.py` `test_the_small_cap_always_fits_a_maximum_length_message` · unchanged at 0951150*
 
 **Scenario.** `len()` counts code points, and a \u-escaping client (Python's
 `json.dumps` default) writes an astral character as a surrogate PAIR,
@@ -257,7 +312,7 @@ that closes both paths; and catch `httpx.HTTPStatusError` in the probe,
 printing only the status and Google's message.
 
 ### R9. One in flight per IPv4 ADDRESS is one in flight per carrier-NAT pool or office: unrelated people are told "you already have a check running"
-*should-fix · 020e26f · `app/api/limits.py:79-91` (`_ip_subject`) with `max_in_flight_per_person = 1` · still true at 55d3de0*
+*should-fix · 020e26f · `app/api/limits.py:79-91` (`_ip_subject`) with `max_in_flight_per_person = 1` · still true at 55d3de0 and at 0951150*
 
 **Scenario.** A web visitor's "person" is their IPv4 address. Under carrier
 NAT (most Indian mobile IPv4, Vi especially) and on any office or college
@@ -276,7 +331,7 @@ for an IPv4 subject.
 `person_daily_limits`: 1 for tg/tgchat/wa/dev/ip6, a few (e.g. 3) for `ip`.
 
 ### R10. The bot's right to name a person rests on "this request looks local" - it fails open behind a header-less local proxy, and fails silently if the bot ever moves
-*nice-to-have (neither shape is today's) · 020e26f · `app/api/local.py` `is_this_machine`, used by `limits.subject_of` · still true at 55d3de0*
+*nice-to-have (neither shape is today's) · 020e26f · `app/api/local.py` `is_this_machine`, used by `limits.subject_of` · still true at 55d3de0 and at 0951150*
 
 **Scenario.** (a) Behind a local reverse proxy in nginx's default shape
 (Host rewritten to 127.0.0.1:8000, no X-Forwarded-For - the audit's F10
@@ -299,7 +354,7 @@ anywhere; and have the 202 echo the subject it counted, so the bot can log
 loudly when its naming was not honoured.
 
 ### R11. A check that outlives the TTL makes the next one uncounted: its late release pops the NEXT check's entry
-*nice-to-have (needs a check longer than in_flight_ttl_s = 900 s) · 020e26f · `app/api/limits.py:280-291` (`release` pops by position, not by identity) · still true at 55d3de0*
+*nice-to-have (needs a check longer than in_flight_ttl_s = 900 s) · 020e26f · `app/api/limits.py:280-291` (`release` pops by position, not by identity) · still true at 55d3de0 and at 0951150*
 
 **Scenario.** Check 1 hangs past 900 s, so the TTL prunes it and check 2 is
 granted. When check 1 finally ends, `release()` pops the first stamp in the
@@ -318,7 +373,7 @@ returned by `reserve` and carried in `_Spend`; `release(subject, token)`
 removes exactly that one and ignores a token already pruned.
 
 ### R12. After a bot restart, the new "already running" refusal promises an answer the bot has forgotten
-*nice-to-have (a consequence of OPS-07, which stays the root fix) · 020e26f · `app/api/limits.py` `_BUSY`, shown verbatim by `scripts/telegram_bot.py` · still true at 55d3de0*
+*nice-to-have (a consequence of OPS-07, which stays the root fix) · 020e26f · `app/api/limits.py` `_BUSY`, shown verbatim by `scripts/telegram_bot.py` · still true at 55d3de0 and at 0951150*
 
 **Scenario.** The bot keeps its undelivered job ids in memory (OPS-07). If
 it restarts while a person's check runs, the person's next message is
@@ -341,7 +396,7 @@ would hand one NAT neighbour another's message), return the running job's
 id with the 429, so the bot can resume and deliver it instead of refusing.
 
 ### R13. Every anonymous group admin, and everyone posting "as a channel", is ONE Telegram person
-*nice-to-have (groups and channels are a side use of the bot) · 020e26f · `scripts/telegram_bot.py` `subject_of_message` · still true at 55d3de0*
+*nice-to-have (groups and channels are a side use of the bot) · 020e26f · `scripts/telegram_bot.py` `subject_of_message` · still true at 55d3de0 and at 0951150*
 
 **Scenario.** `subject_of_message` keys on `from.id`. Telegram fills `from`
 with a shared placeholder for anonymous group admins (GroupAnonymousBot,
@@ -362,9 +417,85 @@ tg:1087968824`, `group C, someone posting as channel X -> tg:136817688`,
 (`tgchat:<sender_chat.id>`), else `from.id`; consider counting channels per
 owning user if allowances matter there.
 
+### R14. (HEAD 0951150, outside the seven) "Repeats stay free" has no limit at all: one visitor can create job rows and in-memory streams without bound
+*should-fix · 0951150 · `app/api/routes.py` `verify_text` (the cache-hit branch before `_quota`)*
+
+**Scenario.** To keep repeats free, a cached text is now served before any
+claim - so before the hourly limit, the in-flight rule and every other
+per-person bound. Each repeat still writes a job row (kept 30 days) and
+registers a JobStream (kept in memory 15 minutes after it finishes). The
+audit's F4 counted on the hourly limit to bound the stream registry; for
+cache hits nothing bounds it now. Any claim that was checked once (the
+attacker's own, or any viral one) is enough.
+
+**Reproduction.** `scratchpad/review/r18_cache_hit_flood.py`
+(REVIEW_SNAP=0951150, TestClient, one visitor): `600 repeats from ONE
+visitor in 43.7 s: 202 x600 (hourly limit is 10)`, `job rows: 601   streams
+held in memory (kept 900 s after finishing): 601`.
+
+**Suggested fix.** Keep repeats free of MONEY but not of limits: count a
+cache hit against the per-person hourly limit (it is an abuse guard, not a
+spend guard), or answer a repeat from the same person within the stream TTL
+with the job id they already have instead of a new job.
+
+### R15. release() - and at HEAD admit() - take the limiter's lock ON THE EVENT LOOP, while claims hold that lock across SQLite writes: a contended write now freezes the whole server
+*should-fix · 020e26f (`release`), widened by 5f8e7db (`admit`, "safe to call on the event loop") · `app/api/limits.py` `release()` / `admit()` vs `reserve()` (`with _lock:` around `_daily.take`, and at HEAD `_budget.reserve`) · true at 020e26f and at 2f4d825*
+
+**Scenario.** Claims run on the limiter's pool precisely because "on the
+event loop, a claim waiting for another writer's lock froze every request
+and every live stream" (measured earlier; limits.py says so). But the claim
+holds `limits._lock` across its SQLite statements, which wait up to the
+30 s busy timeout when another writer has the database (housekeeping's
+DELETE, a burst of saves - R14's free flood makes those on demand). 020e26f
+added `release()`, which takes the same lock and is called ON THE LOOP by
+every route refusal and every finished background check; 5f8e7db added
+`admit()`, also on the loop, for every link and media submission. Either
+then blocks the event loop until the contended claim finishes: every page,
+stream, poll and the bot stop.
+
+**Reproduction.** `scratchpad/review/r20_loop_lock.py` (real uvicorn; a second
+connection holds the scratch DB's write lock for 8 s; visitor A's text claim
+waits in the pool holding `_lock`; /health timed right after the trigger):
+
+```
+=== 020e26f   trigger=none     GET /health took  0.00 s
+              trigger=release  GET /health took  6.97 s   (B's check ends -> release() on the loop)
+=== 2f4d825   trigger=none     GET /health took  0.00 s
+              trigger=release  GET /health took  6.97 s
+              trigger=admit    GET /health took  7.00 s   (C submits a link -> admit() on the loop)
+```
+
+**Suggested fix.** Never hold `_lock` across I/O: do the in-memory
+bookkeeping (hour, in flight, person) under `_lock`, and the database's own
+conditional statements - already atomic - outside it, undoing the in-memory
+part if the database refuses; or run `release()`/`admit()` on the pool too.
+A test: hold the DB's write lock in another connection, start a claim, call
+`release()` from the loop, assert the loop answers in well under a second.
+
+## The fixes made for R1-R3 while this review ran (5f8e7db, 2f4d825), re-checked
+
+- R1 fix (5f8e7db, two-phase admit/fund) holds for free work: five subjects'
+  links whose free resolve takes 4 s and is then refused hold nothing -
+  `during the resolves used_today=0 committed=$0.00 mode=full in_flight=5`,
+  an unrelated visitor's text `-> (202, ...)`, the five get their 422, and
+  afterwards `in_flight=0` (`scratchpad/review/r05c_lockout_fixcheck.py`,
+  REVIEW_SNAP=2f4d825). When the resolves SUCCEED, funding happens at the paid
+  step: 3 x 202, then "The service is busy right now - please try again in a
+  few minutes" and the budget's "nearly used up" - the honest messages. But
+  `admit()` runs on the event loop and takes `_lock`: see R15 (measured
+  7.00 s freeze at 2f4d825).
+- R2 fix (2f4d825): `https://www.facebook.com:1/share/...` -> `LinkError[unsupported]`,
+  route `HTTP 422`, no connection (`r19_before_after_ca76538.py`).
+- R3 fix (2f4d825): the share link + newline -> route `HTTP 422`; the bot now
+  files that message as TEXT (its pinned rule; PROJECT_PLAN 11.24 records the
+  product question); every unparseable hop Location is a LinkError, none
+  uncaught, none requested (`r04_share_edges.py`, `r04b_share_newline_bot.py`).
+  In this scratch run the bot's text check then failed only because the
+  engine had dummy keys and no network.
+
 ## Checked and found sound
 
-- 020e26f, release on every route exit (r01_release_paths.py, 28 paths): text/image/media/link success, every 4xx/5xx refusal, a failed `_new_job`, OCR raising, and a background job raising in run_check, `_settle_quota`, ASR, `_check`, `fail_job` or gather - each released exactly once, `_in_flight` empty after. Over-length and small-talk refusals claim nothing and release nothing. Re-run at 55d3de0 (its `owns_release` change): all 28 still exactly once; r02 identical.
+- 020e26f, release on every route exit (r01_release_paths.py, 28 paths): text/image/media/link success, every 4xx/5xx refusal, a failed `_new_job`, OCR raising, and a background job raising in run_check, `_settle_quota`, ASR, `_check`, `fail_job` or gather - each released exactly once, `_in_flight` empty after. Over-length and small-talk refusals claim nothing and release nothing. Re-run at 55d3de0 (its `owns_release` change): all 28 still exactly once; r02 identical. Re-run at 0951150 (`_finish` replaced `_check`/`_settle_quota`; r01b_release_paths_head.py, 29 paths incl. the new claim-free cache-hit branch and a `settle` that raises): all exactly once.
 - 020e26f, cancellation (r02_cancel_paths.py): a route cancelled during the link resolve releases once and refunds; a claim cancelled while still in the pool is refunded and released once by `_rollback`. One edge, moot in practice: a SECOND cancellation landing on `_quota`'s shielded refund skips `release()` (`C3 ... releases=0 ... next check: 429 You already have a check running`), because the release follows the shielded await instead of sitting in a `finally`. Neither uvicorn nor Starlette cancels a plain JSON handler on disconnect, so only shutdown (asyncio.run's final cancel-all) can do this, and the in-memory table dies with the process. Moving `release` into a `finally` would make it unconditional.
 - 020e26f, one subject cannot hold two checks: five concurrent links from one /64 -> 1 runs, 4 x 429 "already running" (r05 part 1).
 - ca76538, the SSRF fence on hops (r04_share_edges.py part A, 19 Locations): protocol-relative, off-allowlist, http downgrade, 127.0.0.1, [::1], userinfo `@`, backslash-userinfo, homoglyph and punycode hosts, javascript:/data: - none was ever requested; uppercase host and relative paths resolve correctly; /login and /login.php land as "gated"; the hop count is bounded at 3.
