@@ -1232,3 +1232,59 @@ def test_both_prompts_ask_for_a_summary_that_stands_alone():
         assert "<summary>" in prompt
         assert "stand alone" in prompt
         assert "Same language and script as the rest of your reply." in prompt
+
+
+# -- the day's budget running low (Vinayak's $1 a day, 2026-10-15) --------------
+# "Gets cheaper as it runs low": with under 40% of the day's budget left, no
+# open-web pass (mode "vetted"); under 15%, only the ~$0.008 fact-check
+# shortcut (mode "shortcut"). An answer the mode cut short says so, and is
+# marked `degraded` so it is never cached as if it were the full check.
+
+def test_vetted_mode_never_buys_the_open_web_pass(no_factcheck, monkeypatch):
+    client = StubClient([(
+        _final("Not covered. " + SENTINEL_NO, searches=1),
+        _deltas("Not covered. " + SENTINEL_NO))])
+    answer, _ = _run(client, monkeypatch, mode="vetted")
+    assert len(client.requests) == 1                 # "full" would have run pass 2
+    assert answer.tier == "none"
+    assert answer.degraded
+    assert "budget" in answer.markdown.lower()       # the reader is told why
+
+
+def test_vetted_mode_changes_nothing_when_a_fact_checker_covered_it(no_factcheck, monkeypatch):
+    client = StubClient([(
+        _final("It is false. " + SENTINEL_YES, citations=[_citation(TRUSTED_URL)],
+               searches=1), _deltas("It is false. " + SENTINEL_YES))])
+    answer, _ = _run(client, monkeypatch, mode="vetted")
+    assert answer.tier == "trusted" and not answer.degraded
+
+
+def test_shortcut_mode_without_a_published_factcheck_spends_nothing(no_factcheck, monkeypatch):
+    client = StubClient([])                          # any request fails the test
+    answer, _ = _run(client, monkeypatch, mode="shortcut")
+    assert client.requests == []
+    assert answer.tier == "none" and answer.degraded
+    assert "budget" in answer.markdown.lower()
+
+
+def test_shortcut_mode_still_answers_from_a_published_factcheck(a_prior_factcheck, monkeypatch):
+    reply = "False — BOOM checked it. " + SENTINEL_YES
+    client = StubClient([(_final(reply), _deltas(reply))])
+    answer, _ = _run(client, monkeypatch, mode="shortcut")
+    assert len(client.requests) == 1 and "tools" not in client.requests[0]
+    assert answer.tier == "trusted" and not answer.degraded
+
+
+def test_shortcut_mode_stops_where_a_search_would_begin(a_prior_factcheck, monkeypatch):
+    client = StubClient([(_final(SENTINEL_NO), _deltas(SENTINEL_NO))])   # declined
+    answer, _ = _run(client, monkeypatch, mode="shortcut")
+    assert len(client.requests) == 1                 # no searched pass 1 bought
+    assert answer.degraded and "budget" in answer.markdown.lower()
+    assert any(s.url == PRIOR_URL for s in answer.sources)   # still worth opening
+
+
+def test_a_pass_one_outage_in_vetted_mode_is_an_outage_not_a_budget_note(no_factcheck, monkeypatch):
+    client = StubClient([(_final("", searches=0), _deltas(""))])
+    monkeypatch.setattr(C, "async_client", client)
+    with pytest.raises(C.CheckUnavailable):
+        asyncio.run(C.answer("something", mode="vetted"))

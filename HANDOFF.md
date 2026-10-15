@@ -56,10 +56,12 @@ reviewer agent is checking all of today's fixes → it writes
 DOLLAR budget DONE (each check reserves its kind's worst case — text $0.20,
 image $0.25, reel/voice $0.30 — and settles at its real cost; the database
 refuses past $1; the 5-checks count is now a 40 backstop) — blocker 1
-closed · NEXT: get cheaper as the day drains (below 40% skip the open web,
-below 15% only cached/shortcut answers) and never cache a degraded answer;
-then Anthropic's "out of credit / spend limit" errors read "back later"
-and refund; then the budget on the dashboard (look at it in headless Chrome).
+closed · cheaper as the day drains DONE (under 40% left: no open-web pass;
+under 15%: text only, answered from published fact-checks or an honest
+"budget used up" — never cached) and repeats served free even at zero ·
+NEXT: Anthropic's "out of credit / spend limit" errors read "back later"
+and give the reservation back; then the budget on the dashboard (look at
+it in headless Chrome); then Turnstile + the web device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

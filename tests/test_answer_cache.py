@@ -143,7 +143,7 @@ def test_prune_drops_only_what_is_past_every_ttl(repo):
 # -- the job runner ------------------------------------------------------------
 
 def _run(repo, answer, chat_answer=None, boom=None, monkeypatch=None, **kw):
-    async def fake_answer(text, *, heard=None, emit=None, language=None):
+    async def fake_answer(text, *, heard=None, emit=None, language=None, mode="full"):
         if boom:
             raise boom
         if emit:
@@ -172,7 +172,7 @@ def test_a_repeat_forward_is_served_free(repo, monkeypatch):
 
     calls = {"n": 0}
 
-    async def must_not_run(text, *, heard=None, emit=None, language=None):
+    async def must_not_run(text, *, heard=None, emit=None, language=None, mode="full"):
         calls["n"] += 1
         raise AssertionError("a cached answer must not reach the engine")
 

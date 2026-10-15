@@ -41,12 +41,24 @@ def cache_key(text: str, language: str | None = None) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+_NO_LONGER_CACHED = ("That answer is no longer available. Please send the "
+                     "message again.")
+
+
 async def run_check(job_id: str, text: str, repo, stream=None, *,
                     derived_text: str | None = None,
                     meter: UsageMeter | None = None,
                     kind: str = "text",
-                    language: str | None = None) -> None:
-    """Check `text`, stream it, store it. Never raises."""
+                    language: str | None = None,
+                    mode: str = "full",
+                    cache_only: bool = False) -> None:
+    """Check `text`, stream it, store it. Never raises.
+
+    `mode` is what the day's budget still buys (chat.answer). `cache_only`:
+    the route served a repeat for free, with no slot and no reservation, on
+    the strength of a cache hit — so a miss here (it expired in between)
+    must FAIL rather than buy an unbudgeted check.
+    """
     answer = await asyncio.to_thread(repo.get, job_id)
     if answer is None:                      # defensive: the row is made first
         return
@@ -93,9 +105,14 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 await emit("done", {"cached": True})
                 return
 
+        if cache_only:
+            answer.status = JobStatus.FAILED
+            answer.error = _NO_LONGER_CACHED
+            return
+
         with meter.activate():
             result = await chat.answer(text, heard=derived_text, emit=emit,
-                                       language=language)
+                                       language=language, mode=mode)
 
         answer.sections = result.sections
         answer.summary = result.summary
@@ -105,7 +122,9 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         answer.truncated = result.truncated
         answer.status = JobStatus.COMPLETE
 
-        if result.sections:
+        # Never an answer the day's budget cut short: the same message after
+        # midnight deserves the full check, not this one served for days.
+        if result.sections and not result.degraded:
             answer.usage = meter.snapshot()
             await safe_cache_call(repo.cache.put, key, result.tier,
                                   answer.model_dump_json())

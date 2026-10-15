@@ -125,3 +125,73 @@ def test_the_budget_is_the_decision():
     checks is now only a backstop above it."""
     assert settings.daily_budget_usd == 1.0
     assert settings.max_checks_per_day >= 30
+
+
+# -- cheaper as the day drains; repeats stay free (2026-10-15) ----------------
+
+def test_the_mode_follows_what_is_left_of_the_day(budgeted, monkeypatch):
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    day = limits.today()
+    assert limits.budget_mode(day) == "full"
+    DailyBudget().reserve(day, 0.65, 1.0)           # 35% left
+    assert limits.budget_mode(day) == "vetted"
+    DailyBudget().reserve(day, 0.25, 1.0)           # 10% left
+    assert limits.budget_mode(day) == "shortcut"
+
+
+def test_a_cheaper_mode_reserves_less(budgeted):
+    assert limits.reserve_usd("text", "vetted") < limits.reserve_usd("text", "full")
+    assert limits.reserve_usd("text", "shortcut") <= 0.02
+
+
+def test_near_the_end_of_the_day_only_text_can_still_be_checked(budgeted, monkeypatch):
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    DailyBudget().reserve(limits.today(), 0.90, 1.0)    # 10% left
+    link = budgeted.post("/api/v1/verify/link",
+                         json={"url": "https://www.youtube.com/watch?v=ccccccccccc"})
+    assert link.status_code == 429 and "text" in link.json()["detail"].lower()
+    assert budgeted.post("/api/v1/verify/text",
+                         json={"text": "a fresh claim"}).status_code == 202
+
+
+def test_the_engine_is_told_the_mode(budgeted, monkeypatch):
+    import app.engine.chat as C
+    import scripts.fake_stages as F
+
+    seen = []
+
+    async def spy(text, **kw):
+        seen.append(kw.get("mode"))
+        return await F.fake_answer(text, **kw)
+
+    monkeypatch.setattr(C, "answer", spy)
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    DailyBudget().reserve(limits.today(), 0.65, 1.0)    # 35% left
+    budgeted.post("/api/v1/verify/text", json={"text": "a vetted-only claim"})
+    assert seen == ["vetted"]
+
+
+def test_a_degraded_answer_is_never_cached(budgeted, monkeypatch):
+    import app.engine.chat as C
+    from app.engine.job import cache_key
+    from app.models.answer import AnswerSection
+
+    async def cut_short(text, **kw):
+        return C.ChatAnswer(sections=[AnswerSection(tier="none", markdown="Budget.")],
+                            tier="none", degraded=True)
+
+    monkeypatch.setattr(C, "answer", cut_short)
+    budgeted.post("/api/v1/verify/text", json={"text": "cut short today"})
+    assert R._repo.cache.get(cache_key("cut short today")) is None
+
+
+def test_a_repeat_is_served_free_even_when_the_day_is_spent(budgeted):
+    first = budgeted.post("/api/v1/verify/text", json={"text": "The same forward"})
+    assert first.status_code == 202                     # now in the cache
+    DailyBudget().reserve(limits.today(), 0.50, 0.50)   # the rest of the day, gone
+    fresh = budgeted.post("/api/v1/verify/text", json={"text": "A brand new forward"})
+    assert fresh.status_code == 429
+    again = budgeted.post("/api/v1/verify/text", json={"text": "The same forward"})
+    assert again.status_code == 202
+    report = budgeted.get(f"/api/v1/reports/{again.json()['job_id']}").json()
+    assert report["cached"] is True and report["usage"]["estimated_usd"] == 0

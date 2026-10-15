@@ -59,8 +59,9 @@ _FAKE_SOURCES = [
 ]
 
 
-async def fake_answer(text, *, heard=None, emit=None, language=None):
+async def fake_answer(text, *, heard=None, emit=None, language=None, mode="full"):
     """Offline stand-in for the whole chat engine. No network, no spend.
+    (`mode` is the day's budget mode; the canned answer is the same in all.)
 
     Streams the canned answer in word-sized pieces on purpose: the demo then
     exercises the page's incremental rendering, the status line and the

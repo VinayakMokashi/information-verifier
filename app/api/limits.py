@@ -61,11 +61,50 @@ _budget = DailyBudget()
 _now = time.monotonic                         # a seam: tests move the clock
 
 
-def reserve_usd(kind: str) -> float:
+def reserve_usd(kind: str, mode: str = "full") -> float:
     """What a check of this kind reserves of the day's budget before it
-    spends anything; it settles at its real cost when it ends."""
+    spends anything, in this budget mode; it settles at its real cost when
+    it ends."""
+    if mode == "shortcut":
+        return settings.budget_shortcut_reserve_usd
     table = settings.budget_reserve_usd
-    return table.get(kind, max(table.values()))
+    full = table.get(kind, max(table.values()))
+    return full / 2 if mode == "vetted" else full
+
+
+def budget_mode(day: str) -> str:
+    """What the day's money still buys: "full", then "vetted" (no open-web
+    pass), then "shortcut" (published fact-checks only) as it drains —
+    Vinayak's "$1 a day ... gets cheaper as it runs low" (2026-10-15).
+
+    A soft guide read without the lock: two claims at once may both see
+    "full". The HARD guard is the reservation, which the database refuses
+    past the budget whatever mode a claim believed it was in.
+    """
+    if not settings.rate_limit_enabled or settings.daily_budget_usd <= 0:
+        return "full"
+    left = (settings.daily_budget_usd - _budget.committed(day)) / settings.daily_budget_usd
+    if left >= settings.budget_vetted_below:
+        return "full"
+    if left >= settings.budget_shortcut_below:
+        return "vetted"
+    return "shortcut"
+
+
+_NEARLY_SPENT = (
+    "Today's budget for this service is nearly used up. Screenshots, voice "
+    "notes and links can be checked again after midnight India time; a "
+    "forwarded TEXT can still be checked against published fact-checks.")
+
+
+def _claim_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
+    """On the pool: decide what the day's money buys, then reserve it."""
+    mode = budget_mode(today())
+    if mode == "shortcut" and kind != "text":
+        # Its OCR or transcription alone could outrun what is left, and it
+        # would end in a shortcut-only answer anyway.
+        raise HTTPException(429, _NEARLY_SPENT)
+    return reserve(request, subject, kind, mode), mode
 
 # Claiming a slot is a blocking SQLite WRITE, so it runs off the event loop —
 # a contended write there froze every request and every live stream. It does
@@ -81,12 +120,12 @@ _pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix="quota"
 def _rollback(request: Request, subject: str, kind: str, future) -> None:
     """Hand back a slot whose claimant is already gone. Runs in the pool."""
     try:
-        day = future.result()
+        day, mode = future.result()
     except Exception:       # noqa: BLE001 — it never got a slot to give back
         return
     if day:
         print("[limits] the caller went away before its slot arrived; returning it")
-        refund(request, day, kind)
+        refund(request, day, kind, mode)
         release(subject)
 
 
@@ -114,7 +153,7 @@ def subject_of(request: Request) -> str:
 
 
 async def claim(request: Request, subject: str | None = None,
-                kind: str = "text") -> str | None:
+                kind: str = "text") -> tuple[str | None, str]:
     """reserve(), off the loop and out of the shared pool. -> the day charged.
 
     A plain thread future, not run_in_executor, so that a caller cancelled
@@ -125,7 +164,7 @@ async def claim(request: Request, subject: str | None = None,
     checks, with no job row to show for it.
     """
     subject = subject or subject_of(request)
-    future = _pool.submit(reserve, request, subject, kind)
+    future = _pool.submit(_claim_now, request, subject, kind)
     try:
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
@@ -133,15 +172,18 @@ async def claim(request: Request, subject: str | None = None,
         raise
 
 
-async def give_back(request: Request, day: str | None, kind: str = "text") -> None:
+async def give_back(request: Request, day: str | None, kind: str = "text",
+                    mode: str = "full") -> None:
     """refund(), on the same pool."""
-    await asyncio.get_running_loop().run_in_executor(_pool, refund, request, day, kind)
+    await asyncio.get_running_loop().run_in_executor(_pool, refund, request, day,
+                                                     kind, mode)
 
 
-async def settle(day: str | None, kind: str, actual: float | None) -> None:
+async def settle(day: str | None, kind: str, actual: float | None,
+                 mode: str = "full") -> None:
     """settle_budget(), on the same pool."""
     await asyncio.get_running_loop().run_in_executor(_pool, settle_budget,
-                                                     day, kind, actual)
+                                                     day, kind, actual, mode)
 
 
 async def give_back_day(day: str | None) -> None:
@@ -187,7 +229,7 @@ def _client_of(request: Request) -> str:
 
 
 def reserve(request: Request, subject: str | None = None,
-            kind: str = "text") -> str | None:
+            kind: str = "text", mode: str = "full") -> str | None:
     """Claim one check, or raise 429. -> the day charged (None if disabled).
 
     Checking and claiming MUST be atomic. An earlier version checked here and
@@ -260,7 +302,8 @@ def reserve(request: Request, subject: str | None = None,
         # by one conditional statement; the database refuses it past the
         # budget. Settled at the real cost when the check ends.
         try:
-            funded = _budget.reserve(day, reserve_usd(kind), settings.daily_budget_usd)
+            funded = _budget.reserve(day, reserve_usd(kind, mode),
+                                     settings.daily_budget_usd)
         except Exception as exc:  # noqa: BLE001 — fail closed, never open
             print(f"[limits] budget unwritable: {type(exc).__name__}: {exc}")
             _give_back_quietly(day)
@@ -306,7 +349,8 @@ def _give_back_quietly(day: str) -> None:
         print(f"[limits] slot not returned: {type(exc).__name__}: {exc}")
 
 
-def settle_budget(day: str | None, kind: str, actual: float | None) -> None:
+def settle_budget(day: str | None, kind: str, actual: float | None,
+                  mode: str = "full") -> None:
     """A check ended: its reservation becomes what it really cost.
 
     `actual` None means the cost is not known — the reservation is KEPT:
@@ -317,7 +361,7 @@ def settle_budget(day: str | None, kind: str, actual: float | None) -> None:
     if day is None or actual is None or not settings.rate_limit_enabled:
         return
     try:
-        _budget.settle(day, reserve_usd(kind), actual)
+        _budget.settle(day, reserve_usd(kind, mode), actual)
     except Exception as exc:  # noqa: BLE001 — over-counting is the safe side
         print(f"[limits] budget settle not recorded: {type(exc).__name__}: {exc}")
 
@@ -337,7 +381,8 @@ def refund_daily(day: str | None) -> None:
         print(f"[limits] refund not recorded: {type(exc).__name__}: {exc}")
 
 
-def refund(request: Request, day: str | None, kind: str = "text") -> None:
+def refund(request: Request, day: str | None, kind: str = "text",
+           mode: str = "full") -> None:
     """Give back a reservation for a submission that never reached paid work.
 
     `day` is what reserve() returned. It used to be recomputed here, and a
@@ -351,7 +396,7 @@ def refund(request: Request, day: str | None, kind: str = "text") -> None:
     if not settings.rate_limit_enabled:
         return
     refund_daily(day)
-    settle_budget(day, kind, 0.0)          # nothing was spent
+    settle_budget(day, kind, 0.0, mode)    # nothing was spent
     give_back_person(subject_of(request), day)
 
 

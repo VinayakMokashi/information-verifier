@@ -19,7 +19,7 @@ from app.api.limits import (claim, give_back, give_back_day, give_back_person,
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
-from app.engine.job import run_check
+from app.engine.job import cache_key, run_check
 from app.engine.triage import nothing_to_check
 from app.models.answer import Answer, JobStatus
 from app.providers.asr import get_asr_provider
@@ -66,17 +66,20 @@ class _Spend:
     limiting is off), carried to the background job, which settles it when
     the check ends (`_finish`). `subject` is whose check this is
     (limits.subject_of), released then so that person's next check may
-    start. `kind` decides what was reserved of the day's dollar budget.
+    start. `kind` and `mode` (what the day's budget still buys —
+    limits.budget_mode) decide what was reserved of the day's dollar budget,
+    and the engine is told the mode.
     """
 
-    __slots__ = ("started", "day", "subject", "kind")
+    __slots__ = ("started", "day", "subject", "kind", "mode")
 
     def __init__(self, day: str | None = None, subject: str | None = None,
-                 kind: str = "text") -> None:
+                 kind: str = "text", mode: str = "full") -> None:
         self.started = False
         self.day = day
         self.subject = subject
         self.kind = kind
+        self.mode = mode
 
     def begin(self) -> None:
         """Call immediately BEFORE the first paid call of the request."""
@@ -105,8 +108,8 @@ async def _quota(request: Request, kind: str):
     this trap now runs behind the 202, where no refund path exists at all.)
     """
     subject = subject_of(request)
-    day = await claim(request, subject, kind)
-    spend = _Spend(day, subject if day else None, kind)
+    day, mode = await claim(request, subject, kind)
+    spend = _Spend(day, subject if day else None, kind, mode)
     try:
         yield spend
     except BaseException:
@@ -118,7 +121,7 @@ async def _quota(request: Request, kind: str):
         # if it does not. After paid work (the image route's OCR), the slot
         # and the reservation stay: the real cost is not known here.
         if not spend.started:
-            await asyncio.shield(give_back(request, spend.day, spend.kind))
+            await asyncio.shield(give_back(request, spend.day, spend.kind, spend.mode))
         # No background check exists to release this person later: it ends here.
         release(spend.subject)
         raise
@@ -146,10 +149,11 @@ async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
             answer = await asyncio.to_thread(repo.get, job_id)
             usage = answer.usage if answer is not None else None
             actual = None
+            reserved = reserve_usd(quota.kind, quota.mode)
             if usage is not None and (answer.status is JobStatus.COMPLETE
-                                      or usage.estimated_usd > reserve_usd(quota.kind)):
+                                      or usage.estimated_usd > reserved):
                 actual = usage.estimated_usd
-            await settle(quota.day, quota.kind, actual)
+            await settle(quota.day, quota.kind, actual, quota.mode)
             if answer is not None and answer.cached and actual == 0:
                 await give_back_day(quota.day)
                 give_back_person(quota.subject, quota.day)
@@ -163,6 +167,7 @@ async def _run_check_job(job_id: str, text: str, repo, stream=None, *,
                          quota: _Spend | None = None, **check) -> None:
     """The background job of /verify/text and /verify/image: the check, then
     its day settled (`_finish`), however the check ended."""
+    check.setdefault("mode", quota.mode if quota is not None else "full")
     try:
         await run_check(job_id, text, repo, stream, **check)
     finally:
@@ -245,14 +250,15 @@ async def _run_media_job(
     """The background job of /verify/media. Whatever ends it — an answer, a
     transcription failure, a crash — settles its day (`_finish`)."""
     try:
-        await _media_job(job_id, wav, duration, repo, meter, stream, language=language)
+        await _media_job(job_id, wav, duration, repo, meter, stream, language=language,
+                         mode=quota.mode if quota is not None else "full")
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
-    language: str | None = None,
+    language: str | None = None, mode: str = "full",
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> the check.
 
@@ -286,7 +292,7 @@ async def _media_job(
         await fail("No speech could be transcribed from this audio.")
         return
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                    kind="media", language=language)
+                    kind="media", language=language, mode=mode)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -306,6 +312,16 @@ async def verify_text(
     # up one of the day's capped slots (measured 2026-10-10).
     if nothing_to_check(req.text):
         raise HTTPException(422, _MSG_NOTHING_TO_CHECK)
+    # Repeats stay free (Vinayak's $1-a-day decision, 2026-10-15; audit-ops
+    # OPS-15): an answer already in the cache costs nothing, so it is served
+    # with no slot and no reservation — even when the day's budget or this
+    # person's allowance is spent. cache_only makes the job FAIL, not pay, if
+    # the entry expires in the instant between here and there.
+    if await safe_cache_call(_repo.cache.get, cache_key(req.text, req.language)):
+        answer, stream = await _new_job(req.text)
+        background.add_task(_run_check_job, answer.job_id, req.text, _repo, stream,
+                            language=req.language, cache_only=True)
+        return JobAccepted(job_id=answer.job_id, status=answer.status)
     async with _quota(request, "text") as spend:
         answer, stream = await _new_job(req.text)
         background.add_task(_run_check_job, answer.job_id, req.text, _repo, stream,
@@ -476,13 +492,14 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
     """The background job of /verify/link; settles its day (`_finish`)
     however it ends."""
     try:
-        await _link_job(job_id, info, repo, stream, language=language)
+        await _link_job(job_id, info, repo, stream, language=language,
+                        mode=quota.mode if quota is not None else "full")
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
-                    language: str | None = None) -> None:
+                    language: str | None = None, mode: str = "full") -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
@@ -514,7 +531,7 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
         if key and text.strip() != _caption_text(info).strip():
             await safe_cache_call(repo.transcripts.put, key, text)
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                    kind="link", language=language)
+                    kind="link", language=language, mode=mode)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)

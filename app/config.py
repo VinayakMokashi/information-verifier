@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     daily_budget_usd: float = 1.0
     budget_reserve_usd: dict[str, float] = {"text": 0.20, "image": 0.25,
                                             "media": 0.30, "link": 0.30}
+    # "Gets cheaper as it runs low" (the same decision): with less than this
+    # share of the day's budget left, no open-web pass (reserving half)...
+    budget_vetted_below: float = 0.40
+    # ...and below this, only answers from Google's published fact-checks
+    # (~$0.008, reserving this much) and only for text; never a search.
+    budget_shortcut_below: float = 0.15
+    budget_shortcut_reserve_usd: float = 0.02
     # When "a day" rolls over. IST (UTC+5:30), because the person watching the
     # bill is in India and "2 a day" means his day. A fixed offset rather than
     # a zone name: India has no DST, and zoneinfo needs the tzdata package on

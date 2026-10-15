@@ -112,6 +112,10 @@ class ChatAnswer:
     # Two short lines the model writes for the reader, shown in a box of
     # their own so a long answer can be skimmed (Vinayak, 2026-09-23).
     summary: str | None = None
+    # The day's budget cut this check short (mode "vetted" skipped the open
+    # web, or "shortcut" stopped before a search). Never cached: the same
+    # message after midnight deserves the full check.
+    degraded: bool = False
 
     @property
     def markdown(self) -> str:
@@ -577,15 +581,41 @@ async def _try_prior_factchecks(text: str, heard: str | None, factchecks: list,
     return None
 
 
+_WEB_SKIPPED = (
+    "Today's budget for this service is nearly used up, so the wider web was "
+    "not searched for this one. Send it again after midnight India time for "
+    "a fuller check.")
+_SEARCH_SKIPPED = (
+    "Today's budget for this service is nearly used up, so new searches are "
+    "paused until midnight India time — and no published fact-check settled "
+    "this one. Please send it again after midnight.")
+
+
+async def _budget_answer(prior: list[Source], emit: Emit) -> ChatAnswer:
+    """Mode "shortcut" found no published fact-check to answer from: say so,
+    honestly and for nothing (invariant 2), rather than buy a search."""
+    await emit("text", {"text": _SEARCH_SKIPPED, "tier": "none"})
+    for source in prior:
+        await emit("source", source.model_dump())
+    return ChatAnswer(sections=[AnswerSection(tier="none", markdown=_SEARCH_SKIPPED)],
+                      sources=prior, tier="none", degraded=True)
+
+
 async def answer(text: str, *, heard: str | None = None,
                  emit: Emit | None = None,
-                 language: str | None = None) -> ChatAnswer:
+                 language: str | None = None,
+                 mode: str = "full") -> ChatAnswer:
     """Fact-check `text` and return one chat-style answer.
 
     `emit(kind, data)` receives live events — `status`, `text`, `tier`,
     `source` — for the SSE stream. Omit it and the call is a plain await.
     `language` is the reply language the READER picked; None means "the
     language the message came in", which is what the engine works out itself.
+
+    `mode` is what the day's budget still buys (limits.budget_mode, Vinayak's
+    "$1 a day ... gets cheaper as it runs low", 2026-10-15): "full"; "vetted"
+    — never the open-web pass; "shortcut" — only an answer from Google's
+    published fact-checks (~$0.008), never a search.
     """
     emit = emit or _noop_emit
 
@@ -608,6 +638,8 @@ async def answer(text: str, *, heard: str | None = None,
 
     first = await _try_prior_factchecks(text, heard, factchecks, language,
                                         prior, emit)
+    if first is None and mode == "shortcut":
+        return await _budget_answer(prior, emit)
     if first is None:
         await emit("status", {"text": "Checking trusted fact-checkers…"})
         first = await _run_pass(
@@ -645,6 +677,16 @@ async def answer(text: str, *, heard: str | None = None,
              or ((first.model_says_trusted is False or not has_trusted)
                  and first.model_says_trusted is not True))
     )
+
+    degraded = False
+    if should_escalate and mode != "full":
+        should_escalate = False
+        # Only when pass 1 answered: a pass 1 that wrote nothing is an
+        # outage, and must read as one (CheckUnavailable, below).
+        if first.markdown.strip():
+            degraded = True
+            sections.append(AnswerSection(tier="none", markdown=_WEB_SKIPPED))
+            await emit("text", {"text": _WEB_SKIPPED, "tier": "none"})
 
     second: PassResult | None = None
     if should_escalate:
@@ -725,4 +767,5 @@ async def answer(text: str, *, heard: str | None = None,
         tier=tier,
         truncated=truncated,
         summary=summary,
+        degraded=degraded,
     )
