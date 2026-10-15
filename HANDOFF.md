@@ -74,11 +74,15 @@ funding), 4f6be5c (a rollback never on the event loop), 2147412 (release
 needs the claim's token — R11 had survived as the no-token call), 56c3990
 (a second cancellation cannot strand a person). PROJECT_PLAN §7 has the
 entry; §11 25–26 hold the DEFERRED R10 (authenticate the bot with a
-secret, not "looks local") and R12 (bot restart → OPS-07) · NEXT: R4+R5
-(root_path; a Host allowlist for paid POSTs), R7 (test arithmetic), R8
-(the Google key in a header). Then Anthropic's "out of credit / spend
-limit" errors read "back later"; the budget on the dashboard (and its
-ledger reads off the event loop); Turnstile + device cookie.
+secret, not "looks local") and R12 (bot restart → OPS-07) · R4 456701b
+(a root path no longer blinds the middlewares) · R5 786c046 (a paid check
+must name this app: **going live, put the domain in PUBLIC_HOSTS in .env**,
+or every visitor is refused — the server prints each refused name once;
+share_demo.ps1 sets its own) · R7 (the body-cap test builds the costliest
+real message instead of trusting 6 bytes a character) · NEXT: R8 (the
+Google key in a header). Then Anthropic's "out of credit / spend limit"
+errors read "back later"; the budget on the dashboard (and its ledger
+reads off the event loop); Turnstile + device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

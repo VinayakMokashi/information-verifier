@@ -148,7 +148,28 @@ def test_an_image_upload_still_gets_the_upload_allowance(client):
     assert resp.status_code == 202
 
 
-def test_the_small_cap_always_fits_a_maximum_length_message():
-    """A message at max_input_chars, JSON-escaped (\\uXXXX = 6 bytes a
-    character) plus the language field, must never meet the body cap."""
-    assert settings.max_json_bytes >= settings.max_input_chars * 6 + 1024
+def test_the_small_cap_always_fits_a_maximum_length_message(client):
+    """A message at max_input_chars and a language at its limit, in the
+    COSTLIEST JSON a client can send, must reach the route, never the body
+    cap. Both limits count code POINTS, and a \\u-escaping client (Python's
+    json.dumps by default) writes one outside the BMP — an emoji — as a
+    surrogate PAIR, "\\ud83d\\ude00": 12 bytes. Review R7: this test used to
+    assume 6 a character, so it allowed max_input_chars up to ~10,700 while
+    past ~5,400 an emoji-heavy message inside the limit was refused as "too
+    long". Built, not computed: the arithmetic was only ever a model."""
+    import json
+
+    from annotated_types import MaxLen
+
+    from app.api.schemas import VerifyTextRequest
+
+    language_max = next(m.max_length for m in VerifyTextRequest.model_fields["language"].metadata
+                        if isinstance(m, MaxLen))
+    body = json.dumps({"text": "\U0001F600" * settings.max_input_chars,
+                       "language": "\U0001F600" * language_max}).encode()
+    assert len(body) <= settings.max_json_bytes, (
+        f"the costliest maximum message is {len(body)} bytes; the cap is "
+        f"{settings.max_json_bytes}")
+    resp = client.post("/api/v1/verify/text", content=body,
+                       headers={"content-type": "application/json"})
+    assert resp.status_code != 413, resp.text
