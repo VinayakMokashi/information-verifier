@@ -157,7 +157,9 @@ def test_slow_refunded_links_cannot_hold_everyones_slots(limiting, monkeypatch):
     for t in threads:
         t.join(15)
 
-    assert held == 1, f"one visitor held {held} of the day's 5 slots"
+    # Was `== 1` (one visitor, one held slot). Since review R1 a link's FREE
+    # resolve holds no slot at all — only the person's place in line.
+    assert held == 0, f"one visitor's pending resolve held {held} of the day's 5 slots"
     assert victim_got_in, "someone else was locked out while they were held"
     assert codes.count(429) == 4
     assert all("already" in d for c, d in zip(codes, details) if c == 429)

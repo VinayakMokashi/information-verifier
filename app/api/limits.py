@@ -97,14 +97,37 @@ _NEARLY_SPENT = (
     "forwarded TEXT can still be checked against published fact-checks.")
 
 
-def _claim_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
-    """On the pool: decide what the day's money buys, then reserve it."""
+def _mode_for(kind: str) -> str:
     mode = budget_mode(today())
     if mode == "shortcut" and kind != "text":
         # Its OCR or transcription alone could outrun what is left, and it
         # would end in a shortcut-only answer anyway.
         raise HTTPException(429, _NEARLY_SPENT)
+    return mode
+
+
+def _claim_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
+    """On the pool: decide what the day's money buys, then reserve it."""
+    mode = _mode_for(kind)
     return reserve(request, subject, kind, mode), mode
+
+
+def _fund_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
+    """On the pool: what the day's money buys, then fund it (phase 2)."""
+    mode = _mode_for(kind)
+    return fund(request, subject, kind, mode), mode
+
+
+async def fund_async(request: Request, subject: str,
+                     kind: str) -> tuple[str | None, str]:
+    """fund(), off the loop and out of the shared pool, like claim()."""
+    future = _pool.submit(_fund_now, request, subject, kind)
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        future.add_done_callback(
+            lambda done: _rollback_funding(request, subject, kind, done))
+        raise
 
 # Claiming a slot is a blocking SQLite WRITE, so it runs off the event loop —
 # a contended write there froze every request and every live stream. It does
@@ -125,8 +148,21 @@ def _rollback(request: Request, subject: str, kind: str, future) -> None:
         return
     if day:
         print("[limits] the caller went away before its slot arrived; returning it")
-        refund(request, day, kind, mode)
+        refund(request, day, kind, mode, subject)
         release(subject)
+
+
+def _rollback_funding(request: Request, subject: str, kind: str, future) -> None:
+    """Hand back money whose claimant is already gone. Runs in the pool. Not
+    release(): the route that admitted the person is still unwinding, and
+    releases them itself."""
+    try:
+        day, mode = future.result()
+    except Exception:       # noqa: BLE001 — nothing was funded
+        return
+    if day:
+        print("[limits] the caller went away before its money arrived; returning it")
+        refund(request, day, kind, mode, subject)
 
 
 def _ip_subject(host: str) -> str:
@@ -173,10 +209,10 @@ async def claim(request: Request, subject: str | None = None,
 
 
 async def give_back(request: Request, day: str | None, kind: str = "text",
-                    mode: str = "full") -> None:
+                    mode: str = "full", subject: str | None = None) -> None:
     """refund(), on the same pool."""
     await asyncio.get_running_loop().run_in_executor(_pool, refund, request, day,
-                                                     kind, mode)
+                                                     kind, mode, subject)
 
 
 async def settle(day: str | None, kind: str, actual: float | None,
@@ -228,9 +264,163 @@ def _client_of(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _daily_full(day: str) -> bool:
+    """The count is full — a fast read; the conditional take is the guard."""
+    try:
+        return _daily.used(day) >= settings.max_checks_per_day
+    except Exception as exc:  # noqa: BLE001 — fail closed, never open
+        print(f"[limits] daily counter unreadable: {type(exc).__name__}: {exc}")
+        raise HTTPException(503, "The service is busy right now. "
+                                 "Please try again in a minute.") from exc
+
+
+def _others_running(client: str, now: float) -> bool:
+    return any(key != client and _prune(starts, settings.in_flight_ttl_s, now)
+               for key, starts in _in_flight.items())
+
+
+def _day_is_full(client: str, now: float, what: str) -> HTTPException:
+    """The day's slots or money are gone. While OTHER checks are still
+    running, much of what they hold comes back as they settle at their real
+    cost — so say "busy", never "tomorrow" (review R1, 2026-10-15: held,
+    refunded resolves told everyone "please try again tomorrow")."""
+    if _others_running(client, now):
+        return HTTPException(429, "The service is busy right now — please try "
+                                  "again in a few minutes.")
+    if what == "money":
+        return HTTPException(
+            429, "Today's checking budget has been used up. It resets at "
+                 f"{_reset_label()} — please come back then.")
+    return _daily_refusal()
+
+
+def _admit_locked(client: str, now: float) -> None:
+    """The person's place in line — this hour's attempts, one check in
+    flight — recorded on success. The caller holds _lock."""
+    mine = _prune(_per_client.get(client, []), 3600, now)
+    if len(mine) >= settings.max_checks_per_hour:
+        _per_client[client] = mine
+        raise HTTPException(
+            429,
+            f"You've used {settings.max_checks_per_hour} checks this hour — "
+            "that's the limit for this demo. Please try again later.",
+        )
+    running = _prune(_in_flight.get(client, []), settings.in_flight_ttl_s, now)
+    if len(running) >= settings.max_in_flight_per_person:
+        _in_flight[client] = running
+        raise HTTPException(429, _BUSY)
+    _per_client[client] = mine + [now]
+    _in_flight[client] = running + [now]
+    if len(_in_flight) > _MAX_TRACKED_CLIENTS:
+        # Only checks that hung past the TTL can pile up here.
+        for key in [k for k, v in _in_flight.items()
+                    if not _prune(v, settings.in_flight_ttl_s, now)]:
+            del _in_flight[key]
+    if len(_per_client) > _MAX_TRACKED_CLIENTS:
+        # Expired visitors first...
+        for ip in [k for k, v in _per_client.items() if not _prune(v, 3600, now)]:
+            del _per_client[ip]
+        # ...then the least-recently-seen, so a flood of distinct IPs
+        # cannot grow this table without bound. Evicting only weakens the
+        # per-visitor limit for a stale IP; the daily cap still bounds
+        # total spend, and the caller we just recorded is never evicted.
+        overflow = len(_per_client) - _MAX_TRACKED_CLIENTS
+        if overflow > 0:
+            oldest = sorted(_per_client.items(), key=lambda kv: kv[1][-1])
+            for ip, _ in oldest[:overflow]:
+                del _per_client[ip]
+
+
+def _unadmit_locked(client: str) -> None:
+    """Undo the in-flight half of an admission whose funding failed: no check
+    runs. The hourly attempt stays counted. The caller holds _lock."""
+    running = _in_flight.get(client)
+    if running:
+        running.pop()
+        if not running:
+            del _in_flight[client]
+
+
+def _fund_locked(client: str, day: str, now: float, kind: str, mode: str) -> None:
+    """The day's slot, the person's daily allowance and the money — all of
+    them, or none. The caller holds _lock."""
+    if _daily_full(day):
+        raise _day_is_full(client, now, "slots")
+    if _person_day[0] != day:
+        _person_today.clear()
+        _person_day[0] = day
+    allowance = _person_limit(client)
+    if _person_today.get(client, 0) >= allowance:
+        raise HTTPException(
+            429,
+            f"You've used your {allowance} check{'' if allowance == 1 else 's'} "
+            f"for today. It resets at {_reset_label()} — please come back then.",
+        )
+    try:
+        granted = _daily.take(day, settings.max_checks_per_day)
+    except Exception as exc:  # noqa: BLE001 — fail closed, never open
+        print(f"[limits] daily counter unwritable: {type(exc).__name__}: {exc}")
+        raise HTTPException(503, "The service is busy right now. "
+                                 "Please try again in a minute.") from exc
+    if not granted:
+        raise _day_is_full(client, now, "slots")
+    # The MONEY (2026-10-15: $1 a day): this check's worst case, reserved by
+    # one conditional statement; the database refuses it past the budget.
+    # Settled at the real cost when the check ends.
+    try:
+        funded = _budget.reserve(day, reserve_usd(kind, mode), settings.daily_budget_usd)
+    except Exception as exc:  # noqa: BLE001 — fail closed, never open
+        print(f"[limits] budget unwritable: {type(exc).__name__}: {exc}")
+        _give_back_quietly(day)
+        raise HTTPException(503, "The service is busy right now. "
+                                 "Please try again in a minute.") from exc
+    if not funded:
+        _give_back_quietly(day)
+        raise _day_is_full(client, now, "money")
+    _person_today[client] = _person_today.get(client, 0) + 1
+
+
+def admit(request: Request, subject: str | None = None) -> bool:
+    """Phase 1, before ANY work: the person's place in line, and nothing
+    anyone else needs. -> True if recorded (False: rate limiting is off).
+
+    For checks whose first steps are FREE but slow — a link's resolve, an
+    upload's decode. REPRODUCED 2026-10-15 (review R1): while those held a
+    daily slot (and, with the budget, $0.30 of the day's $1), five people
+    with slow, refused links locked everyone else out, leaving no trace.
+    In memory only, so it is safe to call on the event loop.
+    """
+    if not settings.rate_limit_enabled:
+        return False
+    client = subject or subject_of(request)
+    with _lock:
+        _admit_locked(client, _now())
+    return True
+
+
+def fund(request: Request, subject: str | None = None, kind: str = "text",
+         mode: str = "full") -> str | None:
+    """Phase 2, right before the first PAID step: the day's slot, the
+    person's allowance and the money. -> the day charged (None if off).
+
+    The slot is taken by a single conditional UPSERT and the money by
+    another, so the DATABASE refuses past the cap or the budget even if two
+    processes ever raced here. Anything that stops either being recorded
+    refuses the check: this guard fails closed.
+    """
+    if not settings.rate_limit_enabled:
+        return None
+    client = subject or subject_of(request)
+    day = today()
+    with _lock:
+        _fund_locked(client, day, _now(), kind, mode)
+    return day
+
+
 def reserve(request: Request, subject: str | None = None,
             kind: str = "text", mode: str = "full") -> str | None:
-    """Claim one check, or raise 429. -> the day charged (None if disabled).
+    """Both phases at once, for checks whose first step is already paid
+    (text, image): claim one check, or raise 429. -> the day charged.
 
     Checking and claiming MUST be atomic. An earlier version checked here and
     consumed later, after the upload had been read and transcoded — 30
@@ -238,106 +428,25 @@ def reserve(request: Request, subject: str | None = None,
     a 2/day cap (measured). Rejected submissions get their claim back via
     refund() instead, so nothing is charged for work that never happened.
 
-    The daily slot is taken by a single conditional UPSERT, so the DATABASE
-    refuses slot 3 even if two processes ever raced here. Anything that stops
-    the counter being recorded refuses the check: this guard fails closed.
-
     A granted claim also starts the person's check IN FLIGHT; whoever ends
     the check — the route on a refusal, the background job otherwise — calls
     release(). Until then the same person is refused, without a slot taken.
     """
     if not settings.rate_limit_enabled:
         return None
-    now = _now()
     client = subject or subject_of(request)
-    day = today()
+    now, day = _now(), today()
     with _lock:
+        # A visitor over BOTH limits should hear "try tomorrow", not "try in
+        # an hour".
+        if _daily_full(day):
+            raise _day_is_full(client, now, "slots")
+        _admit_locked(client, now)
         try:
-            # Fast path, for the clearer message: a visitor over BOTH limits
-            # should hear "try tomorrow", not "try in an hour".
-            if _daily.used(day) >= settings.max_checks_per_day:
-                raise _daily_refusal()
-        except HTTPException:
+            _fund_locked(client, day, now, kind, mode)
+        except BaseException:
+            _unadmit_locked(client)
             raise
-        except Exception as exc:  # noqa: BLE001 — see "fails closed" above
-            print(f"[limits] daily counter unreadable: {type(exc).__name__}: {exc}")
-            raise HTTPException(503, "The service is busy right now. "
-                                     "Please try again in a minute.") from exc
-
-        mine = _prune(_per_client.get(client, []), 3600, now)
-        if len(mine) >= settings.max_checks_per_hour:
-            _per_client[client] = mine
-            raise HTTPException(
-                429,
-                f"You've used {settings.max_checks_per_hour} checks this hour — "
-                "that's the limit for this demo. Please try again later.",
-            )
-
-        running = _prune(_in_flight.get(client, []), settings.in_flight_ttl_s, now)
-        if len(running) >= settings.max_in_flight_per_person:
-            _in_flight[client] = running
-            raise HTTPException(429, _BUSY)
-
-        if _person_day[0] != day:
-            _person_today.clear()
-            _person_day[0] = day
-        allowance = _person_limit(client)
-        if _person_today.get(client, 0) >= allowance:
-            raise HTTPException(
-                429,
-                f"You've used your {allowance} check{'' if allowance == 1 else 's'} "
-                f"for today. It resets at {_reset_label()} — please come back then.",
-            )
-
-        try:
-            granted = _daily.take(day, settings.max_checks_per_day)
-        except Exception as exc:  # noqa: BLE001 — fail closed, never open
-            print(f"[limits] daily counter unwritable: {type(exc).__name__}: {exc}")
-            raise HTTPException(503, "The service is busy right now. "
-                                     "Please try again in a minute.") from exc
-        if not granted:
-            raise _daily_refusal()
-
-        # The MONEY (2026-10-15: $1 a day): this check's worst case, reserved
-        # by one conditional statement; the database refuses it past the
-        # budget. Settled at the real cost when the check ends.
-        try:
-            funded = _budget.reserve(day, reserve_usd(kind, mode),
-                                     settings.daily_budget_usd)
-        except Exception as exc:  # noqa: BLE001 — fail closed, never open
-            print(f"[limits] budget unwritable: {type(exc).__name__}: {exc}")
-            _give_back_quietly(day)
-            raise HTTPException(503, "The service is busy right now. "
-                                     "Please try again in a minute.") from exc
-        if not funded:
-            _give_back_quietly(day)
-            raise HTTPException(
-                429,
-                "Today's checking budget has been used up. It resets at "
-                f"{_reset_label()} — please come back then.",
-            )
-
-        _per_client[client] = mine + [now]
-        _in_flight[client] = running + [now]
-        _person_today[client] = _person_today.get(client, 0) + 1
-        if len(_in_flight) > _MAX_TRACKED_CLIENTS:
-            # Only checks that hung past the TTL can pile up here.
-            for key in [k for k, v in _in_flight.items()
-                        if not _prune(v, settings.in_flight_ttl_s, now)]:
-                del _in_flight[key]
-        if len(_per_client) > _MAX_TRACKED_CLIENTS:
-            # Expired visitors first...
-            for ip in [k for k, v in _per_client.items() if not _prune(v, 3600, now)]:
-                del _per_client[ip]
-            # ...then the least-recently-seen, so a flood of distinct IPs
-            # cannot grow this table without bound. Evicting only weakens the
-            # per-visitor limit for a stale IP; the daily cap still bounds
-            # total spend, and the caller we just recorded is never evicted.
-            overflow = len(_per_client) - _MAX_TRACKED_CLIENTS
-            if overflow > 0:
-                oldest = sorted(_per_client.items(), key=lambda kv: kv[1][-1])
-                for ip, _ in oldest[:overflow]:
-                    del _per_client[ip]
     return day
 
 
@@ -382,7 +491,7 @@ def refund_daily(day: str | None) -> None:
 
 
 def refund(request: Request, day: str | None, kind: str = "text",
-           mode: str = "full") -> None:
+           mode: str = "full", subject: str | None = None) -> None:
     """Give back a reservation for a submission that never reached paid work.
 
     `day` is what reserve() returned. It used to be recomputed here, and a
@@ -397,7 +506,7 @@ def refund(request: Request, day: str | None, kind: str = "text",
         return
     refund_daily(day)
     settle_budget(day, kind, 0.0, mode)    # nothing was spent
-    give_back_person(subject_of(request), day)
+    give_back_person(subject or subject_of(request), day)
 
 
 def _person_limit(subject: str) -> int:

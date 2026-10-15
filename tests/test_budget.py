@@ -63,7 +63,9 @@ def test_claims_stop_at_the_budget_not_at_a_count(budgeted):
     assert limits.reserve(_req("198.51.100.2"), kind="text")
     with pytest.raises(HTTPException) as spent:
         limits.reserve(_req("198.51.100.3"), kind="text")
-    assert spent.value.status_code == 429 and "budget" in spent.value.detail
+    # The two claims above are still RUNNING, and running checks give most of
+    # what they hold back as they settle: "busy", not "used up" (review R1).
+    assert spent.value.status_code == 429 and "busy" in spent.value.detail
     assert limits.used_today() == 2                 # the refusal took no slot
 
 

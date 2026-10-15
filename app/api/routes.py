@@ -14,8 +14,9 @@ import httpx
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
-from app.api.limits import (claim, give_back, give_back_day, give_back_person,
-                            release, reserve_usd, settle, subject_of)
+from app.api.limits import (admit, claim, fund_async, give_back, give_back_day,
+                            give_back_person, release, reserve_usd, settle,
+                            subject_of)
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
@@ -71,15 +72,24 @@ class _Spend:
     and the engine is told the mode.
     """
 
-    __slots__ = ("started", "day", "subject", "kind", "mode")
+    __slots__ = ("started", "day", "subject", "kind", "mode", "_request")
 
     def __init__(self, day: str | None = None, subject: str | None = None,
-                 kind: str = "text", mode: str = "full") -> None:
+                 kind: str = "text", mode: str = "full", request=None) -> None:
         self.started = False
         self.day = day
         self.subject = subject
         self.kind = kind
         self.mode = mode
+        self._request = request
+
+    async def fund(self) -> None:
+        """A deferred claim's money: the day's slot, the person's allowance
+        and the budget — call right BEFORE the first paid step, once the free
+        part (a link's resolve, an upload's decode) has succeeded."""
+        if self.subject is None:          # rate limiting is off
+            return
+        self.day, self.mode = await fund_async(self._request, self.subject, self.kind)
 
     def begin(self) -> None:
         """Call immediately BEFORE the first paid call of the request."""
@@ -87,7 +97,7 @@ class _Spend:
 
 
 @asynccontextmanager
-async def _quota(request: Request, kind: str):
+async def _quota(request: Request, kind: str, *, deferred: bool = False):
     """Claim a check up front; hand it back only if we never spent anything.
 
     Reserving first is what makes the cap real — checking now and consuming
@@ -108,8 +118,14 @@ async def _quota(request: Request, kind: str):
     this trap now runs behind the 202, where no refund path exists at all.)
     """
     subject = subject_of(request)
-    day, mode = await claim(request, subject, kind)
-    spend = _Spend(day, subject if day else None, kind, mode)
+    if deferred:
+        # Free but slow work comes first (review R1, 2026-10-15): hold only
+        # the person's place in line until the route calls spend.fund().
+        admitted = admit(request, subject)
+        spend = _Spend(None, subject if admitted else None, kind, "full", request)
+    else:
+        day, mode = await claim(request, subject, kind)
+        spend = _Spend(day, subject if day else None, kind, mode, request)
     try:
         yield spend
     except BaseException:
@@ -120,8 +136,9 @@ async def _quota(request: Request, kind: str):
         # still lets the refund finish; over-counting is the safe direction
         # if it does not. After paid work (the image route's OCR), the slot
         # and the reservation stay: the real cost is not known here.
-        if not spend.started:
-            await asyncio.shield(give_back(request, spend.day, spend.kind, spend.mode))
+        if not spend.started and spend.day is not None:
+            await asyncio.shield(give_back(request, spend.day, spend.kind,
+                                           spend.mode, spend.subject))
         # No background check exists to release this person later: it ends here.
         release(spend.subject)
         raise
@@ -362,7 +379,7 @@ async def verify_media(
     # `spend.begin()` is never called: since the Sarvam loop moved behind the
     # 202, this route spends nothing before returning, so every rejection here
     # is honestly refundable. `spend` is bound only to carry the day.
-    async with _quota(request, "media") as spend:
+    async with _quota(request, "media", deferred=True) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, _MSG_NOT_MEDIA)
@@ -397,6 +414,8 @@ async def verify_media(
         # at ~100 s while the server kept spending, and a 202-then-poll
         # contract survives that. Same trade as /verify/link, same documented
         # cost: the quota slot stays consumed even if transcription fails.
+        # Funded only now: the decode above was free (review R1).
+        await spend.fund()
         answer, stream = await _new_job()
         background.add_task(_run_media_job, answer.job_id, wav, duration, _repo,
                             meter, stream, quota=spend, language=language)
@@ -550,7 +569,7 @@ async def verify_link(
     a background task, and of the two errors, over-counting is the one the
     wallet survives.
     """
-    async with _quota(request, "link") as spend:
+    async with _quota(request, "link", deferred=True) as spend:
         url = req.url.strip()
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
@@ -580,6 +599,9 @@ async def verify_link(
         if not info.has_media and not info.caption.strip():
             raise HTTPException(422, "That post has no video and no caption to check.")
 
+        # Funded only now, once the free resolve has succeeded: REPRODUCED
+        # (review R1), five people's slow, refused resolves held every slot.
+        await spend.fund()
         answer, stream = await _new_job(url)
         background.add_task(_run_link_job, answer.job_id, info, _repo, stream,
                             quota=spend, language=req.language)

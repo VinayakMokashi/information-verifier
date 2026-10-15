@@ -59,9 +59,16 @@ refuses past $1; the 5-checks count is now a 40 backstop) — blocker 1
 closed · cheaper as the day drains DONE (under 40% left: no open-web pass;
 under 15%: text only, answered from published fact-checks or an honest
 "budget used up" — never cached) and repeats served free even at zero ·
-NEXT: Anthropic's "out of credit / spend limit" errors read "back later"
-and give the reservation back; then the budget on the dashboard (look at
-it in headless Chrome); then Turnstile + the web device cookie.
+the REVIEWER of these fixes (`docs/research/2026-10-15/review-blockers.md`)
+found 8 issues: R1 FIXED (free work — a link's resolve, an upload's decode —
+now holds only the person's place in line, the money is claimed right
+before the first paid step; a full day says "busy" while checks still run)
+· NEXT: R2+R3 (share links: refuse an explicit port and whitespace/control
+characters; any URL error is a LinkError; one overall deadline), R6
+(release when the answer is visible), R4+R5 (root_path; a Host allowlist
+for paid POSTs), R7 (test arithmetic), R8 (the Google key in a header,
+not the URL) — then Anthropic's "out of credit / spend limit" errors read
+"back later"; the budget on the dashboard; Turnstile + device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to
