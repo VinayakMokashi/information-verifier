@@ -9,19 +9,11 @@ Anthropic console remains the source of truth for the invoice.
 
 LOCAL ONLY, and deliberately so. `share_demo.ps1` puts this app on a public
 URL, and what the owner spends is nobody else's business. A request is served
-only when it arrived from this machine AND carries no proxy header: the
-cloudflared tunnel connects from 127.0.0.1 but always adds X-Forwarded-For /
-CF-Connecting-IP (and uvicorn's default proxy handling rewrites the client to
-the visitor's IP anyway). Anything else gets a 404 — not a 403, which would
-announce that something is here.
-
-The Host header is checked too. Found by review, reproduced: DNS rebinding —
-a page the owner visits re-resolves its own name to 127.0.0.1, and its
-same-origin fetch then arrives from this machine with no proxy header. The
-connection cannot tell that apart; the Host header can, because the browser
-still sends the attacker's name.
+only when app/api/local.py says it came from this machine (loopback, no proxy
+header, a local Host — the tunnel and DNS rebinding are explained there).
+Anything else gets a 404 — not a 403, which would announce that something is
+here.
 """
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.api import limits
+from app.api.local import is_this_machine
 from app.config import settings
 from app.store.repository import SpendLedger, operator_day
 
@@ -36,26 +29,9 @@ router = APIRouter()
 _ledger = SpendLedger()
 _PAGE = Path(__file__).resolve().parent / "dashboard.html"
 
-_LOCAL_HOSTS = {"127.0.0.1", "::1"}
-_PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip",
-                  "cf-connecting-ip", "true-client-ip", "x-forwarded-host")
-# The names this machine is asked for by, with an optional port. Exact match:
-# anything a DNS name could be registered as must fail.
-_LOCAL_HOST_HEADER = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?",
-                                re.IGNORECASE)
-
 
 def _local_only(request: Request) -> None:
-    peer = request.client.host if request.client else ""
-    hosts = request.headers.getlist("host")
-    # Exactly one Host: a request carrying two (a local one first, an
-    # attacker's second) passed, because only the first was read. No browser
-    # can send that — it needs a raw client already on this machine — but the
-    # gate should not depend on which one a parser happens to hand over.
-    if (peer not in _LOCAL_HOSTS
-            or any(h in request.headers for h in _PROXY_HEADERS)
-            or len(hosts) != 1
-            or not _LOCAL_HOST_HEADER.fullmatch(hosts[0])):
+    if not is_this_machine(request):
         raise HTTPException(404, "Not Found")
 
 

@@ -115,9 +115,15 @@ def test_visitor_table_does_not_grow_without_bound(limited, monkeypatch):
     assert len(limits._per_client) <= 512
 
 
-def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited):
-    """The cap must hold under parallel uploads, not just sequential ones."""
+def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited, monkeypatch):
+    """The cap must hold under parallel uploads, not just sequential ones.
+
+    About the COUNTER's atomicity, so one-check-in-flight-per-person (which
+    since 2026-10-15 refuses most of this burst on its own) is lifted here;
+    tests/test_per_person.py covers that rule."""
     import concurrent.futures
+
+    monkeypatch.setattr(settings, "max_in_flight_per_person", 100)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
         codes = [f.result().status_code
@@ -343,9 +349,9 @@ def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypat
 
     real = L.reserve
 
-    def slow_reserve(request):
+    def slow_reserve(request, subject=None):
         time.sleep(0.4)                  # a contended write
-        return real(request)
+        return real(request, subject)
 
     monkeypatch.setattr(L, "reserve", slow_reserve)
 
@@ -359,12 +365,15 @@ def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypat
             with pytest.raises(asyncio.CancelledError):
                 await task
         for _ in range(50):              # the rollback runs in the pool thread
-            if limits.used_today() == 0:
+            if limits.used_today() == 0 and not limits._in_flight:
                 return 0
             await asyncio.sleep(0.05)
         return limits.used_today()
 
     assert asyncio.run(scenario()) == 0
+    # ...and the person is not left "in flight" for the TTL: a cancelled
+    # submission must not lock its own sender out of the next check.
+    assert limits._in_flight == {}
 
 
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):

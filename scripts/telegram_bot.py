@@ -26,12 +26,27 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx  # noqa: E402
 
+from app.api.limits import SUBJECT_HEADER  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.engine.marker import strip_any_sentinel  # noqa: E402
 from app.engine.triage import nothing_to_check  # noqa: E402
 from app.providers.links import allowed_link_host  # noqa: E402
 
 APP_BASE = os.environ.get("APP_BASE", "http://127.0.0.1:8000/api/v1")
+
+
+def subject_of_message(msg: dict) -> str:
+    """Whom a check is for, as the API counts people (limits.subject_of).
+
+    Every submission reaches the API from this one connection, so without a
+    name every Telegram user was one person to the limiter (reproduced
+    2026-10-15). The sender's user id; a channel post has none, so its chat
+    is the person. The API honours this only from this machine.
+    """
+    sender = (msg.get("from") or {}).get("id")
+    if sender is not None:
+        return f"tg:{sender}"
+    return f"tgchat:{(msg.get('chat') or {}).get('id')}"
 
 _POLL_S = 3.0
 _POLL_MAX = 90            # ~4.5 min — link jobs download + transcribe first
@@ -402,10 +417,15 @@ class AppClient:
         self._http = http
         self._base = base
 
-    async def submit_json(self, endpoint: str, payload: dict) -> tuple[str | None, str]:
+    @staticmethod
+    def _for(subject: str | None) -> dict:
+        return {SUBJECT_HEADER: subject} if subject else {}
+
+    async def submit_json(self, endpoint: str, payload: dict,
+                          subject: str | None = None) -> tuple[str | None, str]:
         """-> (job_id, "") on 202, (None, readable-detail) on rejection."""
         resp = await self._http.post(f"{self._base}/verify/{endpoint}", json=payload,
-                                     timeout=_SUBMIT_TIMEOUT)
+                                     headers=self._for(subject), timeout=_SUBMIT_TIMEOUT)
         if resp.status_code != 202:
             try:
                 detail = resp.json().get("detail") or _server_trouble(resp.status_code)
@@ -415,10 +435,12 @@ class AppClient:
         return resp.json()["job_id"], ""
 
     async def submit_file(self, endpoint: str, filename: str, content: bytes,
-                          content_type: str) -> tuple[str | None, str]:
+                          content_type: str,
+                          subject: str | None = None) -> tuple[str | None, str]:
         resp = await self._http.post(
             f"{self._base}/verify/{endpoint}",
             files={"file": (filename, content, content_type)},
+            headers=self._for(subject),
             timeout=_SUBMIT_TIMEOUT,
         )
         if resp.status_code != 202:
@@ -567,19 +589,20 @@ class TelegramClient:
 
 
 async def _submit(kind: str, payload: str, app: AppClient,
-                  tg: TelegramClient) -> tuple[str | None, str]:
-    """Send one message's content to the API. -> (job_id, "") or (None, why)."""
+                  tg: TelegramClient, subject: str | None = None) -> tuple[str | None, str]:
+    """Send one message's content to the API, for `subject` (the sender).
+    -> (job_id, "") or (None, why)."""
     if kind == "text":
-        return await app.submit_json("text", {"text": payload})
+        return await app.submit_json("text", {"text": payload}, subject=subject)
     if kind == "link":
-        return await app.submit_json("link", {"url": payload})
+        return await app.submit_json("link", {"url": payload}, subject=subject)
     content, path = await tg.file_bytes(payload)
     name = os.path.basename(path) or "media.bin"
     if kind == "image":
         ext = os.path.splitext(name)[1].lower()
         ctype = "image/png" if ext == ".png" else "image/jpeg"
-        return await app.submit_file("image", name, content, ctype)
-    return await app.submit_file("media", name, content, "audio/ogg")
+        return await app.submit_file("image", name, content, ctype, subject=subject)
+    return await app.submit_file("media", name, content, "audio/ogg", subject=subject)
 
 
 _NOT_CHECKED = ("ℹ️ Yeh naya message check nahi hua, kyunki pichla check chal "
@@ -707,7 +730,7 @@ async def handle_message(
 
         await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")
         try:
-            job_id, err = await _submit(kind, payload, app, tg)
+            job_id, err = await _submit(kind, payload, app, tg, subject_of_message(msg))
         except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
             print(f"[bot] submit failed: {type(exc).__name__}: {exc}")
             await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")

@@ -46,10 +46,13 @@ unverified), and the brief is corrected:
 **Building (resume here):** blocker 1 DONE 50dcf3b (a 25 MB text post froze
 the server 6–10 s; now refused in 0.6 s) · blocker 2 DONE (other sites'
 pages can no longer submit paid checks — proven in real headless Chrome) ·
-NEXT blocker 3: a check is counted per PERSON, not per connection — the bot
-passes its Telegram user to the API (a header honoured only from this
-machine), one check in flight per person, a refund keeps the attempt
-counted — which also ends the free refunded-link lockout (blocker 5).
+blockers 3+5 DONE (checks counted per PERSON: the bot names each Telegram
+user, honoured only from this machine; one check in flight per person; a
+refund keeps the attempt — live-checked through real uvicorn) · NEXT: the
+per-person DAILY quotas (web 3, Telegram 5, WhatsApp 5) and the $1/day
+dollar budget that replaces the 5-checks count — that closes blocker 1 (one
+stranger can still use the whole day's cap) — then a reviewer agent over
+the blocker commits.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

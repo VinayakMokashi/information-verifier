@@ -80,7 +80,14 @@ class Settings(BaseSettings):
     # One submission is one answer since the pivot (it used to fan out to a
     # paid check per claim), so a count of submissions now bounds spend.
     rate_limit_enabled: bool = True
-    max_checks_per_hour: int = 10   # per visitor IP (abuse, not spend)
+    max_checks_per_hour: int = 10   # per PERSON (limits.subject_of) — abuse, not spend
+    # One check at a time per person, from its claim until it ends, however
+    # it ends (Vinayak's decision, 2026-10-15). REPRODUCED: five concurrent
+    # slow link resolves from one visitor held all five daily slots, then
+    # were refunded — a free lockout of everyone. The TTL frees a person
+    # whose check hung without ever ending (the longest measured: 295 s).
+    max_in_flight_per_person: int = 1
+    in_flight_ttl_s: int = 900
     # DECIDED 2026-09-22 by Vinayak, before the first live use: "lower it for
     # now and do only 2 checks per day, just to be safe. We can increase it
     # later." Across the whole deployment — web page and Telegram bot share

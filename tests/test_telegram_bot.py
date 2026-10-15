@@ -316,15 +316,18 @@ class StubApp:
         self.report = report or _answer()
         self.reject = reject
         self.submissions = []
+        self.subjects = []          # whom each submission was made for
 
-    async def submit_json(self, endpoint, payload):
+    async def submit_json(self, endpoint, payload, subject=None):
         self.submissions.append((endpoint, payload))
+        self.subjects.append(subject)
         if self.reject:
             return None, self.reject
         return "job123", ""
 
-    async def submit_file(self, endpoint, filename, content, content_type):
+    async def submit_file(self, endpoint, filename, content, content_type, subject=None):
         self.submissions.append((endpoint, filename, content_type))
+        self.subjects.append(subject)
         return "job123", ""
 
     async def wait_for_report(self, job_id, attempts=None):
@@ -388,7 +391,7 @@ def test_a_rejection_reaches_the_chat_in_words():
 
 def test_a_crash_still_answers_the_chat():
     class ExplodingApp(StubApp):
-        async def submit_json(self, endpoint, payload):
+        async def submit_json(self, endpoint, payload, subject=None):
             raise RuntimeError("app down")
 
     app, tg = ExplodingApp(), StubTG()
@@ -492,7 +495,7 @@ class _GatedApp(StubApp):
         self._n = 0
         self._all_finished = False
 
-    async def submit_json(self, endpoint, payload):
+    async def submit_json(self, endpoint, payload, subject=None):
         await asyncio.sleep(0)                 # a real POST suspends too
         self.submissions.append((endpoint, payload))
         self._n += 1
@@ -885,10 +888,10 @@ def test_the_bot_waits_longer_for_a_202_than_the_server_may_take():
 
 def test_one_failing_message_does_not_stop_the_others():
     class Exploding(StubApp):
-        async def submit_json(self, endpoint, payload):
+        async def submit_json(self, endpoint, payload, subject=None):
             if payload["text"] == "boom":
                 raise RuntimeError("app down")
-            return await super().submit_json(endpoint, payload)
+            return await super().submit_json(endpoint, payload, subject)
 
     async def scenario():
         app, tg = Exploding(), StubTG()
@@ -1087,3 +1090,55 @@ def test_a_too_big_file_gets_the_real_reason_not_try_again_later():
     assert len(tg.sent) == 1
     assert "20 MB" in tg.sent[0][1]
     assert "Checking" not in tg.sent[0][1]
+
+
+# -- each Telegram user is their own person to the API (2026-10-15) ------------
+
+def test_each_telegram_user_is_their_own_subject():
+    """REPRODUCED 2026-10-15: every Telegram user reached the API as ONE
+    client — the bot on 127.0.0.1 — so the per-person limits were one bucket
+    for all of them. The bot names the person on every submission."""
+    app, tg = StubApp(), StubTG()
+    _handle({"chat": {"id": 7}, "from": {"id": 4242}, "text": "5G spreads corona"}, app, tg)
+    assert app.subjects == ["tg:4242"]
+
+    channel = StubApp()           # a channel post has no sender: the chat is the person
+    _handle({"chat": {"id": -100123}, "text": "5G spreads corona"}, channel, StubTG())
+    assert channel.subjects == ["tgchat:-100123"]
+
+    voice = StubApp()
+    _handle({"chat": {"id": 7}, "from": {"id": 4242}, "voice": {"file_id": "v9"}},
+            voice, StubTG())
+    assert voice.subjects == ["tg:4242"]
+
+
+def test_the_real_app_client_sends_the_person_on_every_submission():
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("x-verifier-subject"))
+        return httpx.Response(202, json={"job_id": "j1", "status": "QUEUED"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            app = B.AppClient(http, "http://127.0.0.1:8000/api/v1")
+            await app.submit_json("text", {"text": "x"}, subject="tg:42")
+            await app.submit_file("image", "a.png", b"x", "image/png", subject="tg:42")
+            await app.submit_json("text", {"text": "x"})            # nobody named
+
+    asyncio.run(run())
+    assert seen == ["tg:42", "tg:42", None]
+
+
+def test_the_bot_and_the_api_agree_on_the_header_and_its_shape():
+    """One name for the header, imported, not copied; and every subject the
+    bot can produce is one the API will honour."""
+    from app.api import limits
+
+    assert B.SUBJECT_HEADER is limits.SUBJECT_HEADER
+    for msg in ({"chat": {"id": 7}, "from": {"id": 4242}},
+                {"chat": {"id": -1001234567890}},
+                {"chat": {"id": 7}, "from": {"id": 9_999_999_999}}):
+        assert limits._SUBJECT.fullmatch(B.subject_of_message(msg))

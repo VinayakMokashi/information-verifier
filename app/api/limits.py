@@ -11,11 +11,20 @@ Two counters, deliberately stored differently:
     SQLite and survives restarts. It used to be in memory, and under
     `--reload` every saved file refilled it; a "2 checks a day" cap (Vinayak,
     2026-09-22) that a restart quietly tops up is not a cap.
-  * **The hourly cap** (per visitor IP) is an ABUSE guard, so it stays in
-    memory. Losing it on restart costs nothing, and a visitor's IP is personal
-    data this app has no reason to write to disk.
+  * **The hourly cap** (per person) is an ABUSE guard, so it stays in
+    memory. Losing it on restart costs nothing, and who someone is (an IP, a
+    Telegram id) is personal data this app has no reason to write to disk.
+
+Both count PEOPLE, not connections (2026-10-15, reproduced): every Telegram
+user used to reach this as ONE client — the bot, on 127.0.0.1 — so one
+bucket held them all. See subject_of. And each person runs one check at a
+time, from the claim until the check ends (release): five concurrent slow
+link resolves from one visitor used to hold all five daily slots and then
+be refunded — a free, traceless lockout of everyone.
 """
 import asyncio
+import ipaddress
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -23,14 +32,26 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
 
+from app.api.local import is_this_machine
 from app.config import settings
 from app.store.repository import DailyQuota, operator_day
 
 _MAX_TRACKED_CLIENTS = 512
 
+# The bot submits for many people over ONE connection; it names the person
+# here. Honoured only from this machine (app/api/local.py), so a visitor can
+# never pick a fresh bucket. Shape-checked, so it can be nothing but an id.
+SUBJECT_HEADER = "x-verifier-subject"
+_SUBJECT = re.compile(r"(?:tg|tgchat):-?\d{1,20}|wa:[0-9a-f]{16,64}")
+
+_BUSY = ("You already have a check running. Wait for its answer, then send "
+         "the next one.")
+
 _lock = threading.Lock()
-_per_client: dict[str, list[float]] = {}
+_per_client: dict[str, list[float]] = {}      # subject -> this hour's attempts
+_in_flight: dict[str, list[float]] = {}       # subject -> start of each running check
 _daily = DailyQuota()
+_now = time.monotonic                         # a seam: tests move the clock
 
 # Claiming a slot is a blocking SQLite WRITE, so it runs off the event loop —
 # a contended write there froze every request and every live stream. It does
@@ -43,7 +64,7 @@ _POOL_WORKERS = 2
 _pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix="quota")
 
 
-def _rollback(request: Request, future) -> None:
+def _rollback(request: Request, subject: str, future) -> None:
     """Hand back a slot whose claimant is already gone. Runs in the pool."""
     try:
         day = future.result()
@@ -52,9 +73,33 @@ def _rollback(request: Request, future) -> None:
     if day:
         print("[limits] the caller went away before its slot arrived; returning it")
         refund(request, day)
+        release(subject)
 
 
-async def claim(request: Request) -> str | None:
+def _ip_subject(host: str) -> str:
+    """A visitor's bucket: IPv6 by its /64 — one phone on Jio and Airtel,
+    90%+ IPv6 (APNIC, October 2026) — and IPv4 by address, which carrier
+    NAT shares between many people."""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return f"ip:{host}"
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return f"ip:{ip.ipv4_mapped}"
+        return f"ip6:{ipaddress.ip_network((ip, 64), strict=False)}"
+    return f"ip:{ip}"
+
+
+def subject_of(request: Request) -> str:
+    """Whose check this is: the person the bot names, else the visitor."""
+    claimed = request.headers.get(SUBJECT_HEADER, "")
+    if claimed and _SUBJECT.fullmatch(claimed) and is_this_machine(request):
+        return claimed
+    return _ip_subject(_client_of(request))
+
+
+async def claim(request: Request, subject: str | None = None) -> str | None:
     """reserve(), off the loop and out of the shared pool. -> the day charged.
 
     A plain thread future, not run_in_executor, so that a caller cancelled
@@ -64,11 +109,12 @@ async def claim(request: Request) -> str | None:
     measured — a cancelled submission silently spent one of the day's two
     checks, with no job row to show for it.
     """
-    future = _pool.submit(reserve, request)
+    subject = subject or subject_of(request)
+    future = _pool.submit(reserve, request, subject)
     try:
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
-        future.add_done_callback(lambda done: _rollback(request, done))
+        future.add_done_callback(lambda done: _rollback(request, subject, done))
         raise
 
 
@@ -119,7 +165,7 @@ def _client_of(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def reserve(request: Request) -> str | None:
+def reserve(request: Request, subject: str | None = None) -> str | None:
     """Claim one check, or raise 429. -> the day charged (None if disabled).
 
     Checking and claiming MUST be atomic. An earlier version checked here and
@@ -131,11 +177,15 @@ def reserve(request: Request) -> str | None:
     The daily slot is taken by a single conditional UPSERT, so the DATABASE
     refuses slot 3 even if two processes ever raced here. Anything that stops
     the counter being recorded refuses the check: this guard fails closed.
+
+    A granted claim also starts the person's check IN FLIGHT; whoever ends
+    the check — the route on a refusal, the background job otherwise — calls
+    release(). Until then the same person is refused, without a slot taken.
     """
     if not settings.rate_limit_enabled:
         return None
-    now = time.monotonic()
-    client = _client_of(request)
+    now = _now()
+    client = subject or subject_of(request)
     day = today()
     with _lock:
         try:
@@ -159,6 +209,11 @@ def reserve(request: Request) -> str | None:
                 "that's the limit for this demo. Please try again later.",
             )
 
+        running = _prune(_in_flight.get(client, []), settings.in_flight_ttl_s, now)
+        if len(running) >= settings.max_in_flight_per_person:
+            _in_flight[client] = running
+            raise HTTPException(429, _BUSY)
+
         try:
             granted = _daily.take(day, settings.max_checks_per_day)
         except Exception as exc:  # noqa: BLE001 — fail closed, never open
@@ -169,6 +224,12 @@ def reserve(request: Request) -> str | None:
             raise _daily_refusal()
 
         _per_client[client] = mine + [now]
+        _in_flight[client] = running + [now]
+        if len(_in_flight) > _MAX_TRACKED_CLIENTS:
+            # Only checks that hung past the TTL can pile up here.
+            for key in [k for k, v in _in_flight.items()
+                        if not _prune(v, settings.in_flight_ttl_s, now)]:
+                del _in_flight[key]
         if len(_per_client) > _MAX_TRACKED_CLIENTS:
             # Expired visitors first...
             for ip in [k for k, v in _per_client.items() if not _prune(v, 3600, now)]:
@@ -206,14 +267,28 @@ def refund(request: Request, day: str | None) -> None:
     `day` is what reserve() returned. It used to be recomputed here, and a
     rejection that straddled midnight gave its slot back to the NEXT day,
     which then granted one check over the cap (found by review, reproduced).
+
+    The day's SLOT comes back; the person's hourly ATTEMPT stays counted. It
+    used to be erased too, so a loop of refunded rejections never met the
+    hourly limit at all (reproduced 2026-10-15, the refunded-link lockout).
     """
     if not settings.rate_limit_enabled:
         return
     refund_daily(day)
+
+
+def release(subject: str | None) -> None:
+    """The person's check has ended — answered, failed, refused or refunded —
+    so their next one may start. Safe to call for a subject with nothing
+    running (rate limiting off, or already released)."""
+    if not subject:
+        return
     with _lock:
-        mine = _per_client.get(_client_of(request))
-        if mine:
-            mine.pop()
+        running = _in_flight.get(subject)
+        if running:
+            running.pop(0)
+            if not running:
+                del _in_flight[subject]
 
 
 def drain(timeout: float = 10.0) -> bool:
@@ -244,3 +319,4 @@ def reset() -> None:
     """
     with _lock:
         _per_client.clear()
+        _in_flight.clear()
