@@ -27,6 +27,7 @@ here and committed the moment it exists; see CLAUDE.md, "Interruptions".
 | [policy-legal.md](policy-legal.md) | Policy and compliance for a free public service in India | verified ([policy-legal.verification.md](policy-legal.verification.md)): DPDP dates from the gazette; one-year retention duties from May 2027; Anthropic AUP high-risk categories |
 | [pwa-app.md](pwa-app.md) | The cheap "app": installable PWA, Play Store route | verified |
 | [whatsapp.md](whatsapp.md) | Starting a WhatsApp bot on Meta's Cloud API | complete, **not yet independently verified**; third attempt (the first two were killed) |
+| [critique.md](critique.md) | What was missing: a critic's 10 gaps across all of the above, 4 closed by further research | written before the decisions; G1/G8 (the PC is a personal laptop) matter for hosting |
 
 Each file states its own verification status at the top, and a finding a
 verifier corrected carries the verdict inline. Treat anything unverified as
