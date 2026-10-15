@@ -91,7 +91,18 @@ console says what to fix (f545885; dbd5f08 keeps an answer already
 written) · the dashboard's card shows the day's MONEY — "$0.72 of $1.00",
 what it still buys, "Paused" — with the 40-check count as a backstop
 note, and its reads run off the event loop (looked at in headless Chrome:
-light, dark, paused, phone width). NEXT: Turnstile + a web device cookie.
+light, dark, paused, phone width) 42d1dd9 · Turnstile SERVER side done:
+b6daec5 (the siteverify provider; tests and the demo never reach
+Cloudflare) and f724156 (a web visitor's paid check needs a pass, verified
+before anything is held; a pass earns the signed "vd" device cookie = the
+person, 3 a day; the bot and this machine are never challenged; startup
+warns when PUBLIC_HOSTS is set without Turnstile). NEXT: the PAGE — load
+the widget when the server names a site key (a small config endpoint),
+send a fresh token per check in X-Turnstile-Token, reset after each, and
+handle 403/503; look at it in headless Chrome with Cloudflare's test keys
+(site 1x00000000000000000000AA, secret 1x0000000000000000000000000000000AA).
+Going live then needs TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY in .env
+(an owner action: a free Turnstile widget in the Cloudflare dashboard).
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to
