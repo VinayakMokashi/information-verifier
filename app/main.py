@@ -262,6 +262,14 @@ async def lifespan(app: FastAPI):
     if any(done.values()):
         print(f"[startup] housekeeping: {done}")
     print("[startup] spending dashboard: /dashboard (this machine only)")
+    from app.providers import turnstile
+
+    if settings.public_hosts.strip() and not turnstile.enabled():
+        # Going live without it is silent otherwise: every visitor's browser
+        # could submit paid checks with no person proven behind them.
+        print("[startup] PUBLIC_HOSTS is set but Turnstile is not: visitors' paid "
+              "checks are not challenged. Set TURNSTILE_SITE_KEY and "
+              "TURNSTILE_SECRET_KEY in .env (decided 2026-10-15).")
     task = asyncio.create_task(_housekeeping_loop())
     try:
         yield

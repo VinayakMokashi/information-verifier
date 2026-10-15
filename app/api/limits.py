@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
 
+from app.api.device import device_of
 from app.api.local import is_this_machine
 from app.config import settings
 from app.store.repository import DailyBudget, DailyQuota, operator_day
@@ -220,10 +221,15 @@ def _ip_subject(host: str) -> str:
 
 
 def subject_of(request: Request) -> str:
-    """Whose check this is: the person the bot names, else the visitor."""
+    """Whose check this is: the person the bot names; else the web device a
+    valid signed cookie proves (app/api/device.py — issued only after a
+    Turnstile pass); else the visitor's address."""
     claimed = request.headers.get(SUBJECT_HEADER, "")
     if claimed and _SUBJECT.fullmatch(claimed) and is_this_machine(request):
         return claimed
+    device_id = device_of(request)
+    if device_id:
+        return f"dev:{device_id}"
     return _ip_subject(_client_of(request))
 
 

@@ -12,8 +12,10 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
-                     Request, UploadFile)
+                     Request, Response, UploadFile)
 
+from app.api import device
+from app.api.local import is_this_machine
 from app.api.limits import (admit, attempt, claim, fund_async, give_back, give_back_day,
                             give_back_person, pause, paused, release, reserve_usd,
                             settle, subject_of)
@@ -29,6 +31,7 @@ from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
     download_link_audio, resolve_link, subtitle_text,
 )
+from app.providers import turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
 from app.providers.vision import ocr_image
@@ -104,8 +107,41 @@ class _Spend:
         self.started = True
 
 
+# A web visitor proves a person is asking (decided 2026-10-15): the page sends
+# a fresh Cloudflare Turnstile token with every paid check.
+TURNSTILE_HEADER = "x-turnstile-token"
+_NOT_A_PERSON = ("We couldn't confirm you're a person. Please try again — and if "
+                 "it keeps failing, open this page in Chrome.")
+_COULD_NOT_CONFIRM = ("We couldn't confirm you're a person just now. Please try "
+                      "again in a minute.")
+
+
+async def _person(request: Request, response: Response | None) -> str:
+    """Whose check this is — and, for a web visitor while Turnstile is on,
+    proof first that a person is asking, verified BEFORE any slot, money or
+    place in line is taken: a failed check costs nothing. A pass from a
+    device without a cookie earns one, and this check already counts
+    against it. The bot and this machine are not web visitors."""
+    subject = subject_of(request)
+    if not turnstile.enabled() or is_this_machine(request):
+        return subject
+    remote = request.client.host if request.client else None
+    human = await turnstile.verify(request.headers.get(TURNSTILE_HEADER), remote)
+    if human is None:                 # Cloudflare could not be asked: never a pass
+        raise HTTPException(503, _COULD_NOT_CONFIRM)
+    if not human:
+        raise HTTPException(403, _NOT_A_PERSON)
+    if subject.startswith("dev:") or response is None:
+        return subject
+    device_id, cookie = device.mint()
+    response.set_cookie(device.COOKIE, cookie, max_age=device.MAX_AGE_S,
+                        path="/api/v1", secure=True, httponly=True, samesite="strict")
+    return f"dev:{device_id}"
+
+
 @asynccontextmanager
-async def _quota(request: Request, kind: str, *, deferred: bool = False):
+async def _quota(request: Request, kind: str, *, deferred: bool = False,
+                 response: Response | None = None):
     """Claim a check up front; hand it back only if we never spent anything.
 
     Reserving first is what makes the cap real — checking now and consuming
@@ -130,7 +166,7 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False):
         # reserving and waiting (limits.pause). A cached repeat is still
         # served free — the text route looks for one before it gets here.
         raise HTTPException(503, PAUSED_MESSAGE)
-    subject = subject_of(request)
+    subject = await _person(request, response)
     token = uuid.uuid4().hex
     if deferred:
         # Free but slow work comes first (review R1, 2026-10-15): hold only
@@ -353,7 +389,8 @@ async def _media_job(
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
 async def verify_text(
-    req: VerifyTextRequest, background: BackgroundTasks, request: Request
+    req: VerifyTextRequest, background: BackgroundTasks, request: Request,
+    response: Response,
 ) -> JobAccepted:
     # The length first: it is O(1), and the triage below is not — it walks
     # every character on the event loop (2026-10-15: a 25 MB "message" froze
@@ -381,7 +418,7 @@ async def verify_text(
         background.add_task(_run_check_job, answer.job_id, req.text, _repo, stream,
                             language=req.language, cache_only=True)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
-    async with _quota(request, "text") as spend:
+    async with _quota(request, "text", response=response) as spend:
         answer, stream = await _new_job(req.text)
         background.add_task(_run_check_job, answer.job_id, req.text, _repo, stream,
                             quota=spend, language=req.language)
@@ -390,10 +427,10 @@ async def verify_text(
 
 @router.post("/verify/image", response_model=JobAccepted, status_code=202)
 async def verify_image(
-    background: BackgroundTasks, request: Request, file: UploadFile = File(...),
-    language: str | None = Form(None, max_length=40),
+    background: BackgroundTasks, request: Request, response: Response,
+    file: UploadFile = File(...), language: str | None = Form(None, max_length=40),
 ) -> JobAccepted:
-    async with _quota(request, "image") as spend:
+    async with _quota(request, "image", response=response) as spend:
         if file.content_type not in _ALLOWED_IMAGE_TYPES:
             raise HTTPException(415, _MSG_NOT_AN_IMAGE)
         image_bytes = await file.read()
@@ -426,13 +463,13 @@ async def verify_image(
 
 @router.post("/verify/media", response_model=JobAccepted, status_code=202)
 async def verify_media(
-    background: BackgroundTasks, request: Request, file: UploadFile = File(...),
-    language: str | None = Form(None, max_length=40),
+    background: BackgroundTasks, request: Request, response: Response,
+    file: UploadFile = File(...), language: str | None = Form(None, max_length=40),
 ) -> JobAccepted:
     # `spend.begin()` is never called: since the Sarvam loop moved behind the
     # 202, this route spends nothing before returning, so every rejection here
     # is honestly refundable. `spend` is bound only to carry the day.
-    async with _quota(request, "media", deferred=True) as spend:
+    async with _quota(request, "media", deferred=True, response=response) as spend:
         ctype = (file.content_type or "").lower()
         if not (ctype.startswith(_ALLOWED_MEDIA_PREFIXES) or ctype in _ALLOWED_MEDIA_TYPES):
             raise HTTPException(415, _MSG_NOT_MEDIA)
@@ -610,7 +647,8 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)
 async def verify_link(
-    req: VerifyLinkRequest, background: BackgroundTasks, request: Request
+    req: VerifyLinkRequest, background: BackgroundTasks, request: Request,
+    response: Response,
 ) -> JobAccepted:
     """Paste a public Instagram Reel / YouTube (Shorts) URL.
 
@@ -624,7 +662,7 @@ async def verify_link(
     a background task, and of the two errors, over-counting is the one the
     wallet survives.
     """
-    async with _quota(request, "link", deferred=True) as spend:
+    async with _quota(request, "link", deferred=True, response=response) as spend:
         url = req.url.strip()
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
