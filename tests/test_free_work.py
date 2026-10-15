@@ -91,6 +91,61 @@ def test_a_link_takes_its_slot_and_money_once_the_free_part_succeeds(people, mon
     assert limits.used_today() == 1
 
 
+def test_a_link_cancelled_while_its_money_is_reserved_gives_it_all_back(people, monkeypatch):
+    """The cancellation lands while fund() is still in the pool — after the
+    free resolve, before the first paid step (a shutdown, mostly) — so the
+    route never learns which day was charged and cannot give it back itself.
+    The pool must hand back the slot, the money and the person's allowance
+    (limits._rollback_funding), and the route the person's place in line.
+    Unpinned until the reviewer's cancellation script was re-run against the
+    two-phase claim and could no longer reach this path."""
+    import asyncio
+
+    import httpx
+
+    from app.main import app
+
+    monkeypatch.setattr(settings, "daily_budget_usd", 1.0)
+    real, funding = limits.fund, threading.Event()
+
+    def slow_fund(request, subject=None, kind="text", mode="full"):
+        funding.set()
+        time.sleep(0.4)                       # a contended write
+        return real(request, subject, kind, mode)
+
+    monkeypatch.setattr(limits, "fund", slow_fund)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as http:
+            task = asyncio.create_task(http.post(
+                "/api/v1/verify/link", headers={"x-test-person": "ip:a"},
+                json={"url": "https://www.youtube.com/watch?v=ggggggggggg"}))
+            for _ in range(500):                 # bounded: a broken route FAILS here
+                if funding.is_set() or task.done():
+                    break
+                await asyncio.sleep(0.01)
+            assert funding.is_set(), f"the link never reached its money: {_ended(task)}"
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+    assert limits.drain(), "the funding never finished in the pool"
+    assert limits.used_today() == 0, "the day's slot was kept"
+    assert DailyBudget().committed(limits.today()) == 0, "the money was kept"
+    assert limits._person_today.get("ip:a", 0) == 0, "the person's allowance was kept"
+    assert limits._in_flight == {}, "the person was left in flight"
+
+
+def _ended(task) -> str:
+    if not task.done():
+        return "still running"
+    if task.exception() is not None:
+        return repr(task.exception())
+    return f"{task.result().status_code} {task.result().text[:200]}"
+
+
 def test_a_refused_link_never_took_a_slot(people, monkeypatch):
     def refused(url):
         raise R.LinkError("not_found", "No public post was found at that link.")
