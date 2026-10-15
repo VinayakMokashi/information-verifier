@@ -380,6 +380,63 @@ def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypat
     assert limits._in_flight == {}
 
 
+@pytest.mark.parametrize("phase", ["claim", "fund"])
+def test_a_cancelled_claims_rollback_never_runs_on_the_event_loop(limited, monkeypatch,
+                                                                  phase):
+    """R15's rule — no SQLite write on the event loop — broken a second way,
+    found re-checking R15: when the claim had ALREADY finished in the pool at
+    the instant its caller was cancelled, add_done_callback ran the rollback
+    INLINE, in the cancelled caller's thread — the loop, where the refund's
+    writes wait out any contended write. Deterministic: the loop is held
+    until the pool has finished, and only then is the caller cancelled."""
+    import asyncio
+    import threading
+    import time
+
+    from starlette.requests import Request
+
+    submitted, refunded_in = [], []
+    real_pool, real_refund = limits._pool, limits.refund
+
+    class Recording:
+        def submit(self, fn, *args, **kwargs):
+            future = real_pool.submit(fn, *args, **kwargs)
+            submitted.append(future)
+            return future
+
+    def refund(*args, **kwargs):
+        refunded_in.append(threading.current_thread().name)
+        return real_refund(*args, **kwargs)
+
+    monkeypatch.setattr(limits, "_pool", Recording())
+    monkeypatch.setattr(limits, "refund", refund)
+    request = Request({"type": "http", "client": ("198.51.100.60", 1),
+                       "headers": [(b"host", b"127.0.0.1:8000")]})
+    subject = "ip:198.51.100.60"
+
+    async def scenario():
+        if phase == "claim":
+            call = limits.claim(request, subject, "text", "tok")
+        else:
+            limits.admit(request, subject, "tok")
+            call = limits.fund_async(request, subject, "link")
+        task = asyncio.create_task(call)
+        await asyncio.sleep(0)                    # it submits to the pool, then waits
+        deadline = time.monotonic() + 10
+        while not (submitted and submitted[0].done()):
+            assert time.monotonic() < deadline, "the claim never finished in the pool"
+            time.sleep(0.005)                     # hold the LOOP until the pool is done
+        task.cancel()                             # ...so the loop never saw the result
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    assert limits.drain()
+    assert refunded_in, "the slot was never given back"
+    assert all(name.startswith("quota") for name in refunded_in), refunded_in
+    assert limits.used_today() == 0
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""

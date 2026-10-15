@@ -131,7 +131,7 @@ async def fund_async(request: Request, subject: str,
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
         future.add_done_callback(
-            lambda done: _rollback_funding(request, subject, kind, done))
+            lambda done: _off_the_loop(_rollback_funding, request, subject, kind, done))
         raise
 
 # Claiming a slot is a blocking SQLite WRITE, so it runs off the event loop —
@@ -142,7 +142,24 @@ async def fund_async(request: Request, subject: str,
 # stalled for the full 30 s busy timeout. Two workers is plenty — claims are
 # tiny, and they serialize on `_lock` anyway.
 _POOL_WORKERS = 2
-_pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix="quota")
+_POOL_PREFIX = "quota"
+_pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix=_POOL_PREFIX)
+
+
+def _off_the_loop(rollback, *args) -> None:
+    """Run a cancelled claim's rollback on the pool, never on the event loop.
+
+    The callback normally runs in the worker that finishes the claim, and the
+    rollback runs right there, so drain() still waits for it. But a claim
+    that had ALREADY finished when its caller was cancelled makes
+    add_done_callback run the callback INLINE, in the cancelled caller's
+    thread — the event loop, where the rollback's SQLite writes would wait
+    out any contended write (review R15's rule; reproduced re-checking it).
+    """
+    if threading.current_thread().name.startswith(_POOL_PREFIX):
+        rollback(*args)
+    else:
+        _pool.submit(rollback, *args)
 
 
 def _rollback(request: Request, subject: str, kind: str, token: str | None,
@@ -211,7 +228,7 @@ async def claim(request: Request, subject: str | None = None,
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
         future.add_done_callback(
-            lambda done: _rollback(request, subject, kind, token, done))
+            lambda done: _off_the_loop(_rollback, request, subject, kind, token, done))
         raise
 
 
