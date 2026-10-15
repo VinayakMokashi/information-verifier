@@ -78,13 +78,13 @@ def test_an_ipv6_visitor_is_one_bucket_per_64():
 # -- one check in flight per person -------------------------------------------
 
 def test_one_check_in_flight_per_person(limiting):
-    assert limits.reserve(_bot(1))
+    assert limits.reserve(_bot(1), token="first")
     with pytest.raises(HTTPException) as busy:
         limits.reserve(_bot(1))
     assert busy.value.status_code == 429 and "already" in busy.value.detail
     assert limits.used_today() == 1             # the refusal took no slot
     assert limits.reserve(_bot(2))              # one person never blocks another
-    limits.release("tg:1")
+    limits.release("tg:1", "first")
     assert limits.reserve(_bot(1))              # done -> the next may start
 
 
@@ -100,9 +100,9 @@ def test_a_refunded_attempt_still_counts_toward_the_hour(limiting, monkeypatch):
     monkeypatch.setattr(settings, "max_checks_per_hour", 3)
     r = _req("198.51.100.4")
     for _ in range(3):
-        day = limits.reserve(r)
+        day = limits.reserve(r, token="attempt")
         limits.refund(r, day)
-        limits.release(limits.subject_of(r))
+        limits.release(limits.subject_of(r), "attempt")
     with pytest.raises(HTTPException) as hour:
         limits.reserve(r)
     assert "this hour" in hour.value.detail
@@ -181,6 +181,20 @@ def test_a_check_that_fails_in_the_background_still_frees_its_person(limiting, m
     assert limiting.post("/api/v1/verify/link", json={"url": url}).status_code == 202
 
 
+def test_a_release_must_name_its_claim(limiting):
+    """R11's rule in the signature. Re-checking R11, the old call shape —
+    release(subject), no token — still freed the OLDEST entry: a check past
+    the TTL, ending late, freed the next check's place, and a third ran
+    beside it (the reviewer's scenario, reproduced against the fix). Every
+    caller passed a token, but one that forgot would bring R11 back without
+    a sound; now it cannot be called that way. A None token frees nothing."""
+    with pytest.raises(TypeError):
+        limits.release("tg:1")
+    assert limits.reserve(_bot(1), token="mine")
+    limits.release("tg:1", None)
+    assert limits._in_flight["tg:1"], "a release with no token freed someone's place"
+
+
 def test_the_tables_are_cleared_with_the_rest():
     limits._in_flight["tg:9"] = [1.0]
     limits.reset()
@@ -194,8 +208,8 @@ def test_the_tables_are_cleared_with_the_rest():
 
 def _paid(request):
     """One check that went ahead and was paid for: claimed, then ended."""
-    day = limits.reserve(request)
-    limits.release(limits.subject_of(request))
+    day = limits.reserve(request, token="paid")
+    limits.release(limits.subject_of(request), "paid")
     return day
 
 
@@ -212,9 +226,9 @@ def test_a_telegram_user_gets_five_paid_checks_a_day(limiting):
 def test_a_refused_check_does_not_use_the_persons_allowance(limiting):
     for _ in range(5):
         request = _bot(1)
-        day = limits.reserve(request)
+        day = limits.reserve(request, token="refused")
         limits.refund(request, day)             # refused before any spend
-        limits.release("tg:1")
+        limits.release("tg:1", "refused")
     assert _paid(_bot(1))
 
 
@@ -403,7 +417,7 @@ def test_the_loop_never_waits_on_another_claims_database_write(limiting, monkeyp
         done = threading.Event()
 
         def from_the_loop():
-            limits.release("ip:203.0.113.9")     # someone else's check ends
+            limits.release("ip:203.0.113.9", "theirs")  # someone else's check ends
             limits.admit(_req("198.51.100.41"))  # someone sends a link
             limits.attempt(_req("198.51.100.42"))   # someone repeats a claim
             limits.give_back_person("ip:203.0.113.9", limits.today())  # a free hit

@@ -223,6 +223,7 @@ async def claim(request: Request, subject: str | None = None,
     checks, with no job row to show for it.
     """
     subject = subject or subject_of(request)
+    token = token or uuid.uuid4().hex     # so a rollback releases exactly this claim
     future = _pool.submit(_claim_now, request, subject, kind, token)
     try:
         return await asyncio.wrap_future(future)
@@ -389,20 +390,16 @@ def _admit_locked(client: str, now: float, token: str) -> None:
 
 
 def _unadmit_locked(client: str, token: str | None) -> None:
-    """Remove ONE in-flight entry — this token's, if given, and nothing if
-    it is already gone (pruned past the TTL, or released before); with no
-    token, the oldest. The hourly attempt stays counted. The caller holds
-    _lock."""
+    """Remove this token's in-flight entry, and nothing if it is already
+    gone (pruned past the TTL, or released before) — never another claim's:
+    "the oldest" was review R11's bug, and it survived the fix as the
+    no-token call until re-checked. The hourly attempt stays counted. The
+    caller holds _lock."""
     running = _in_flight.get(client)
-    if not running:
+    mine = [e for e in running or [] if e[1] == token]
+    if not mine:
         return
-    if token is None:
-        running.pop(0)
-    else:
-        mine = [e for e in running if e[1] == token]
-        if not mine:
-            return
-        running.remove(mine[0])
+    running.remove(mine[0])
     if not running:
         del _in_flight[client]
 
@@ -610,11 +607,12 @@ def give_back_person(subject: str | None, day: str | None) -> None:
             _person_today[subject] -= 1
 
 
-def release(subject: str | None, token: str | None = None) -> None:
+def release(subject: str | None, token: str | None) -> None:
     """The person's check has ended — answered, failed, refused or refunded —
-    so their next one may start. With its claim's `token`, exactly that entry
-    goes, and a second release of the same token does nothing (the engine
-    releases early, the job's `finally` again as a backstop). Safe to call
+    so their next one may start. Exactly its claim's `token` entry goes, and
+    a second release of the same token does nothing (the engine releases
+    early, the job's `finally` again as a backstop). The token is REQUIRED:
+    a release that names no claim cannot free one (review R11). Safe to call
     for a subject with nothing running."""
     if not subject:
         return

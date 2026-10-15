@@ -167,12 +167,12 @@ def test_while_others_are_running_a_full_day_says_busy_not_tomorrow(people, monk
         return Request({"type": "http", "client": (peer, 1),
                         "headers": [(b"host", b"127.0.0.1:8000")]})
 
-    assert limits.reserve(req("198.51.100.1"))          # running, holds the $0.20
+    assert limits.reserve(req("198.51.100.1"), token="first")   # running, holds the $0.20
     with pytest.raises(limits.HTTPException) as busy:
         limits.reserve(req("198.51.100.2"))
     assert "busy" in busy.value.detail and "tomorrow" not in busy.value.detail
     limits.settle_budget(limits.today(), "text", 0.20)   # it really cost all of it
-    limits.release("ip:198.51.100.1")
+    limits.release("ip:198.51.100.1", "first")
     with pytest.raises(limits.HTTPException) as spent:
         limits.reserve(req("198.51.100.2"))
     assert "used up" in spent.value.detail
