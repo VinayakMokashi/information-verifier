@@ -366,3 +366,60 @@ def test_free_repeats_still_count_toward_the_hour(limiting, monkeypatch):
     codes = [limiting.post("/api/v1/verify/text", json={"text": "The same forward"}).status_code
              for _ in range(4)]
     assert codes == [202, 202, 429, 429]                # 3 an hour, the first included
+
+
+# -- review R15 (2026-10-15): the limiter's lock guards memory, never the database
+
+@pytest.mark.parametrize("claiming", ["reserve", "fund"])
+def test_the_loop_never_waits_on_another_claims_database_write(limiting, monkeypatch,
+                                                               claiming):
+    """REPRODUCED (review R15, real uvicorn): a claim held limits._lock
+    across its SQLite write, which waits up to the 30 s busy timeout when
+    another writer has the database; release() and admit(), called ON THE
+    EVENT LOOP, take the same lock — so every page, stream and poll froze
+    (/health took ~7 s). Built so the old code FAILS in about a second
+    rather than hanging for the busy timeout. Both claim paths — a text or
+    image claims in one step (reserve), a link or upload funds after its
+    free work (fund) — and every limiter call the routes make on the loop."""
+    import sqlite3
+    import threading
+
+    in_the_write = threading.Event()
+    real_take = limits._daily.take
+
+    def take(day, cap):
+        in_the_write.set()
+        return real_take(day, cap)
+
+    monkeypatch.setattr(limits._daily, "take", take)
+    blocker = sqlite3.connect(settings.db_path, timeout=1)
+    blocker.execute("BEGIN IMMEDIATE")          # another writer holds the database
+    claimed = getattr(limits, claiming)
+    claim = threading.Thread(
+        target=lambda: _swallow(lambda: claimed(_req("198.51.100.40"))))
+    claim.start()
+    try:
+        assert in_the_write.wait(10), "the claim never reached its write"
+        done = threading.Event()
+
+        def from_the_loop():
+            limits.release("ip:203.0.113.9")     # someone else's check ends
+            limits.admit(_req("198.51.100.41"))  # someone sends a link
+            limits.attempt(_req("198.51.100.42"))   # someone repeats a claim
+            limits.give_back_person("ip:203.0.113.9", limits.today())  # a free hit
+            done.set()
+
+        threading.Thread(target=from_the_loop, daemon=True).start()
+        in_time = done.wait(1.0)
+    finally:
+        blocker.rollback()                       # let everything finish, either way
+        blocker.close()
+        claim.join(40)
+    assert in_time, "release()/admit() waited on another claim's database write"
+
+
+def _swallow(call):
+    try:
+        call()
+    except Exception:  # noqa: BLE001 — the claim's outcome is not the point
+        pass

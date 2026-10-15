@@ -63,12 +63,11 @@ the REVIEWER of these fixes (`docs/research/2026-10-15/review-blockers.md`)
 found 15 issues (its file is COMPLETE). FIXED: R1 5f8e7db (free work holds
 nothing), R2+R3 2f4d825 (share links: no port, no line breaks, one
 deadline), R6+R11 05418fa (release by token, before the answer shows),
-R9+R13+R14 (IPv4 may run 3 at once; Telegram sender_chat; free repeats
-count toward the hour) · NEXT: R15 — the limiter's lock must guard memory
-only, never SQLite I/O (a contended write froze the whole server ~7 s
-when release()/admit() ran on the loop); then R4+R5 (root_path; a Host
-allowlist for paid POSTs), R7 (test arithmetic), R8 (the Google key in a
-header). DEFERRED to §11: R10 (authenticate the bot with a secret, not
+R9+R13+R14 2d3b5c8 (IPv4 may run 3 at once; Telegram sender_chat; free
+repeats count toward the hour), R15 (the limiter's lock guards memory only,
+never SQLite I/O — /health under a held write: 7.02 s → 0.02 s, real
+uvicorn) · NEXT: R4+R5 (root_path; a Host allowlist for paid POSTs), R7
+(test arithmetic), R8 (the Google key in a header). DEFERRED to §11: R10 (authenticate the bot with a secret, not
 "looks local"), R12 (bot restart → OPS-07). Then Anthropic's "out of
 credit / spend limit" errors read "back later"; the budget on the
 dashboard; Turnstile + device cookie.

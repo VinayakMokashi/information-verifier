@@ -287,8 +287,9 @@ def _daily_full(day: str) -> bool:
 
 
 def _others_running(client: str, now: float) -> bool:
-    return any(key != client and _running(entries, now)
-               for key, entries in _in_flight.items())
+    with _lock:
+        return any(key != client and _running(entries, now)
+                   for key, entries in _in_flight.items())
 
 
 def _day_is_full(client: str, now: float, what: str) -> HTTPException:
@@ -389,43 +390,59 @@ def _unadmit_locked(client: str, token: str | None) -> None:
         del _in_flight[client]
 
 
-def _fund_locked(client: str, day: str, now: float, kind: str, mode: str) -> None:
+def _fund(client: str, day: str, now: float, kind: str, mode: str) -> None:
     """The day's slot, the person's daily allowance and the money — all of
-    them, or none. The caller holds _lock."""
+    them, or none.
+
+    `_lock` guards ONLY the in-memory allowance, never a database call.
+    REPRODUCED (review R15, real uvicorn): a claim held the lock across its
+    SQLite write, which waits up to the 30 s busy timeout behind another
+    writer, while release() and admit() — called on the EVENT LOOP — took the
+    same lock: every page, stream and poll froze (/health ~7 s). The slot and
+    the money are each one conditional statement, atomic in the database on
+    their own; the allowance is taken tentatively first and given back if
+    either is refused.
+    """
     if _daily_full(day):
         raise _day_is_full(client, now, "slots")
-    if _person_day[0] != day:
-        _person_today.clear()
-        _person_day[0] = day
-    allowance = _person_limit(client)
-    if _person_today.get(client, 0) >= allowance:
-        raise HTTPException(
-            429,
-            f"You've used your {allowance} check{'' if allowance == 1 else 's'} "
-            f"for today. It resets at {_reset_label()} — please come back then.",
-        )
+    with _lock:
+        if _person_day[0] != day:
+            _person_today.clear()
+            _person_day[0] = day
+        allowance = _person_limit(client)
+        if _person_today.get(client, 0) >= allowance:
+            raise HTTPException(
+                429,
+                f"You've used your {allowance} check{'' if allowance == 1 else 's'} "
+                f"for today. It resets at {_reset_label()} — please come back then.",
+            )
+        _person_today[client] = _person_today.get(client, 0) + 1
     try:
-        granted = _daily.take(day, settings.max_checks_per_day)
-    except Exception as exc:  # noqa: BLE001 — fail closed, never open
-        print(f"[limits] daily counter unwritable: {type(exc).__name__}: {exc}")
-        raise HTTPException(503, "The service is busy right now. "
-                                 "Please try again in a minute.") from exc
-    if not granted:
-        raise _day_is_full(client, now, "slots")
-    # The MONEY (2026-10-15: $1 a day): this check's worst case, reserved by
-    # one conditional statement; the database refuses it past the budget.
-    # Settled at the real cost when the check ends.
-    try:
-        funded = _budget.reserve(day, reserve_usd(kind, mode), settings.daily_budget_usd)
-    except Exception as exc:  # noqa: BLE001 — fail closed, never open
-        print(f"[limits] budget unwritable: {type(exc).__name__}: {exc}")
-        _give_back_quietly(day)
-        raise HTTPException(503, "The service is busy right now. "
-                                 "Please try again in a minute.") from exc
-    if not funded:
-        _give_back_quietly(day)
-        raise _day_is_full(client, now, "money")
-    _person_today[client] = _person_today.get(client, 0) + 1
+        try:
+            granted = _daily.take(day, settings.max_checks_per_day)
+        except Exception as exc:  # noqa: BLE001 — fail closed, never open
+            print(f"[limits] daily counter unwritable: {type(exc).__name__}: {exc}")
+            raise HTTPException(503, "The service is busy right now. "
+                                     "Please try again in a minute.") from exc
+        if not granted:
+            raise _day_is_full(client, now, "slots")
+        # The MONEY (2026-10-15: $1 a day): this check's worst case, reserved
+        # by one conditional statement; the database refuses it past the
+        # budget. Settled at the real cost when the check ends.
+        try:
+            funded = _budget.reserve(day, reserve_usd(kind, mode),
+                                     settings.daily_budget_usd)
+        except Exception as exc:  # noqa: BLE001 — fail closed, never open
+            print(f"[limits] budget unwritable: {type(exc).__name__}: {exc}")
+            _give_back_quietly(day)
+            raise HTTPException(503, "The service is busy right now. "
+                                     "Please try again in a minute.") from exc
+        if not funded:
+            _give_back_quietly(day)
+            raise _day_is_full(client, now, "money")
+    except BaseException:
+        give_back_person(client, day)     # the tentative allowance
+        raise
 
 
 def admit(request: Request, subject: str | None = None,
@@ -462,8 +479,7 @@ def fund(request: Request, subject: str | None = None, kind: str = "text",
         return None
     client = subject or subject_of(request)
     day = today()
-    with _lock:
-        _fund_locked(client, day, _now(), kind, mode)
+    _fund(client, day, _now(), kind, mode)
     return day
 
 
@@ -487,18 +503,19 @@ def reserve(request: Request, subject: str | None = None,
         return None
     client = subject or subject_of(request)
     now, day = _now(), today()
+    # A visitor over BOTH limits should hear "try tomorrow", not "try in an
+    # hour". A database read: outside the lock (review R15).
+    if _daily_full(day):
+        raise _day_is_full(client, now, "slots")
+    token = token or uuid.uuid4().hex
     with _lock:
-        # A visitor over BOTH limits should hear "try tomorrow", not "try in
-        # an hour".
-        if _daily_full(day):
-            raise _day_is_full(client, now, "slots")
-        token = token or uuid.uuid4().hex
         _admit_locked(client, now, token)
-        try:
-            _fund_locked(client, day, now, kind, mode)
-        except BaseException:
+    try:
+        _fund(client, day, now, kind, mode)
+    except BaseException:
+        with _lock:
             _unadmit_locked(client, token)
-            raise
+        raise
     return day
 
 
