@@ -207,9 +207,10 @@ limiter are both in-memory.
     code; no stray processes; the real database untouched (its mtime and the
     ledger total); what each interrupted job left on disk ("status: in
     progress" at the top of a research file means its agent died).
-  - Commit messages go through a file written with the Write tool: Windows
+  - Commit messages — and any NEW file — go through the Write tool: Windows
     PowerShell 5.1 splits a `-m` here-string at embedded double quotes, and
-    `Set-Content -Encoding utf8` prefixes a BOM.
+    `Set-Content -Encoding utf8` prefixes a BOM (one reached a commit subject,
+    and one broke a new test file's compile check).
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,

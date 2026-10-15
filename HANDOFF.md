@@ -43,8 +43,16 @@ research is complete and verified (except `whatsapp.md`, complete but
 unverified), and the brief is corrected:
 [docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md).
 
-**Next — building, in the brief's §6 order:** (1) the five reproduced
-blockers, starting with the per-person limit for the bot (it is open to
+**Building (resume here):** blocker 1 DONE 50dcf3b (a 25 MB text post froze
+the server 6–10 s; now refused in 0.6 s) · blocker 2 DONE (other sites'
+pages can no longer submit paid checks — proven in real headless Chrome) ·
+NEXT blocker 3: a check is counted per PERSON, not per connection — the bot
+passes its Telegram user to the API (a header honoured only from this
+machine), one check in flight per person, a refund keeps the attempt
+counted — which also ends the free refunded-link lockout (blocker 5).
+
+**Then — in the brief's §6 order:** (1) the rest of the reproduced
+blockers, incl. the per-person limit for the bot (it is open to
 anyone by decision, and one person can still use the day's whole cap);
 (2) the dollar budget, per-person limits, Turnstile; (3) restarts, ledger,
 monitoring; (4) running 24/7 here — the domain, cloudflared as a service,

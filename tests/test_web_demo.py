@@ -39,7 +39,10 @@ def test_no_cors_grants_are_issued(client):
         json={"text": "5G causes covid"},
         headers={"Origin": "https://evil.example"},
     )
-    assert resp.status_code == 202
+    # Was `== 202`: the check RAN and was paid for — only the browser could
+    # not read the reply. Since 2026-10-15 another site's request is refused
+    # before it costs anything (tests/test_cross_site.py).
+    assert resp.status_code == 403
     assert "access-control-allow-origin" not in resp.headers
 
     preflight = client.options(

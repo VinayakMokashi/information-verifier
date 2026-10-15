@@ -7,6 +7,7 @@ Interactive API docs at http://127.0.0.1:8000/docs
 """
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -104,6 +105,65 @@ class LimitUploadSize:
             await _send_413(send, refusal)
 
 
+_PAID_PREFIX = "/api/v1/verify/"
+_CROSS_SITE_REFUSAL = (b'{"detail":"Checks can only be sent from the Information '
+                       b'Verifier page itself."}')
+
+
+def _cross_site(scope) -> bool:
+    """Did another website's page make this request?
+
+    A browser says so itself: Sec-Fetch-Site on every request (modern
+    browsers, over HTTPS and to localhost), and Origin on every cross-origin
+    POST. A request with neither did not come from a page at all — the
+    Telegram bot, curl — and a cross-site forgery needs a page.
+    """
+    headers = {}
+    for name, value in scope.get("headers") or []:
+        headers.setdefault(name, value.decode("latin-1"))
+    fetch_site = headers.get(b"sec-fetch-site")
+    if fetch_site is not None:
+        # "none": the user typed or bookmarked it; never a page's POST.
+        return fetch_site.strip().lower() not in ("same-origin", "none")
+    origin = headers.get(b"origin")
+    if origin is None:
+        return False
+    try:
+        netloc = urlsplit(origin.strip()).netloc.lower()
+    except ValueError:
+        return True
+    # "null" (a sandboxed frame, a data: URL) has no netloc: refused.
+    return not netloc or netloc != headers.get(b"host", "").strip().lower()
+
+
+class RefuseCrossSite:
+    """No other website can submit a paid check through its visitors.
+
+    REPRODUCED 2026-10-15 in real headless Chrome: a page on another origin
+    made the browser POST /verify/image — multipart/form-data is a
+    CORS-"simple" request, so no preflight ever asked this app — and the
+    server ran the paid vision call and took a daily slot, from the
+    visitor's own IP, past every per-visitor limit. Dropping the CORS
+    wildcard (below) had only ever stopped the JSON routes. Raw ASGI and
+    outermost, so the refusal comes before a byte of the body is read.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] == "http" and scope.get("method") == "POST"
+                and scope.get("path", "").startswith(_PAID_PREFIX)
+                and _cross_site(scope)):
+            await send({"type": "http.response.start", "status": 403,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length",
+                                     str(len(_CROSS_SITE_REFUSAL)).encode())]})
+            await send({"type": "http.response.body", "body": _CROSS_SITE_REFUSAL})
+            return
+        await self.app(scope, receive, send)
+
+
 _HOUSEKEEPING_EVERY_S = 6 * 3600
 
 
@@ -163,8 +223,10 @@ app = FastAPI(
 # No CORS grants, deliberately. The page is served BY this app (same origin),
 # bots are server-side, and every check spends money — the previous wildcard
 # let any website drive checks from its visitors' browsers against a shared
-# link. A future PWA on its own origin adds itself back explicitly.
+# link. A future PWA on its own origin adds itself back explicitly. That
+# stops only the JSON routes: RefuseCrossSite covers the form-post ones.
 app.add_middleware(LimitUploadSize)
+app.add_middleware(RefuseCrossSite)     # added last = outermost = runs first
 
 app.include_router(router)
 app.include_router(stream_router)
