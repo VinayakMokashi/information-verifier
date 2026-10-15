@@ -50,6 +50,12 @@ _BUSY = ("You already have a check running. Wait for its answer, then send "
 _lock = threading.Lock()
 _per_client: dict[str, list[float]] = {}      # subject -> this hour's attempts
 _in_flight: dict[str, list[float]] = {}       # subject -> start of each running check
+# subject -> paid checks today. Holds ONE day at a time: the first claim of a
+# new day clears it, so it never outgrows a day's visitors. A restart resets
+# it — the price of never writing who someone is to disk; the money is
+# guarded by the persisted daily cap, not by this.
+_person_today: dict[str, int] = {}
+_person_day = [""]
 _daily = DailyQuota()
 _now = time.monotonic                         # a seam: tests move the clock
 
@@ -214,6 +220,17 @@ def reserve(request: Request, subject: str | None = None) -> str | None:
             _in_flight[client] = running
             raise HTTPException(429, _BUSY)
 
+        if _person_day[0] != day:
+            _person_today.clear()
+            _person_day[0] = day
+        allowance = _person_limit(client)
+        if _person_today.get(client, 0) >= allowance:
+            raise HTTPException(
+                429,
+                f"You've used your {allowance} check{'' if allowance == 1 else 's'} "
+                f"for today. It resets at {_reset_label()} — please come back then.",
+            )
+
         try:
             granted = _daily.take(day, settings.max_checks_per_day)
         except Exception as exc:  # noqa: BLE001 — fail closed, never open
@@ -225,6 +242,7 @@ def reserve(request: Request, subject: str | None = None) -> str | None:
 
         _per_client[client] = mine + [now]
         _in_flight[client] = running + [now]
+        _person_today[client] = _person_today.get(client, 0) + 1
         if len(_in_flight) > _MAX_TRACKED_CLIENTS:
             # Only checks that hung past the TTL can pile up here.
             for key in [k for k, v in _in_flight.items()
@@ -275,6 +293,22 @@ def refund(request: Request, day: str | None) -> None:
     if not settings.rate_limit_enabled:
         return
     refund_daily(day)
+    give_back_person(subject_of(request), day)
+
+
+def _person_limit(subject: str) -> int:
+    table = settings.person_daily_limits
+    return table.get(subject.split(":", 1)[0], table.get("ip", 20))
+
+
+def give_back_person(subject: str | None, day: str | None) -> None:
+    """A check that cost nothing — refused before any spend, or a free cache
+    hit — gives the person's daily check back, as it gives the day's slot."""
+    if not subject or day is None or not settings.rate_limit_enabled:
+        return
+    with _lock:
+        if _person_day[0] == day and _person_today.get(subject, 0) > 0:
+            _person_today[subject] -= 1
 
 
 def release(subject: str | None) -> None:
@@ -320,3 +354,5 @@ def reset() -> None:
     with _lock:
         _per_client.clear()
         _in_flight.clear()
+        _person_today.clear()
+        _person_day[0] = ""

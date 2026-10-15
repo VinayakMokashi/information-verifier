@@ -48,11 +48,14 @@ the server 6–10 s; now refused in 0.6 s) · blocker 2 DONE (other sites'
 pages can no longer submit paid checks — proven in real headless Chrome) ·
 blockers 3+5 DONE (checks counted per PERSON: the bot names each Telegram
 user, honoured only from this machine; one check in flight per person; a
-refund keeps the attempt — live-checked through real uvicorn) · NEXT: the
-per-person DAILY quotas (web 3, Telegram 5, WhatsApp 5) and the $1/day
-dollar budget that replaces the 5-checks count — that closes blocker 1 (one
-stranger can still use the whole day's cap) — then a reviewer agent over
-the blocker commits.
+refund keeps the attempt — live-checked through real uvicorn) · per-person
+DAILY allowances DONE (Telegram 5, WhatsApp 5, web device 3; by address
+until device cookies: IPv6 /64 5, IPv4 20 — in memory, never on disk) · a
+reviewer agent is checking all of today's fixes → it writes
+`docs/research/2026-10-15/review-blockers.md` as it goes · NEXT: the $1/day
+DOLLAR budget replacing the 5-checks count (reserve worst case, settle at
+actual, get cheaper as it drains, never cache a degraded answer) — that
+closes blocker 1.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

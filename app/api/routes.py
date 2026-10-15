@@ -14,7 +14,8 @@ import httpx
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
-from app.api.limits import claim, give_back, give_back_day, release, subject_of
+from app.api.limits import (claim, give_back, give_back_day, give_back_person,
+                            release, subject_of)
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
@@ -120,7 +121,8 @@ async def _quota(request: Request):
         raise
 
 
-async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
+async def _settle_quota(job_id: str, repo, quota_day: str | None,
+                        subject: str | None = None) -> None:
     """Hand the day's slot back when the check turned out to cost nothing.
 
     With a cap of 2 a day (Vinayak, 2026-09-22), a forward someone sends twice
@@ -137,25 +139,29 @@ async def _settle_quota(job_id: str, repo, quota_day: str | None) -> None:
     if (answer is not None and answer.cached and answer.usage is not None
             and answer.usage.estimated_usd == 0):
         await give_back_day(quota_day)
+        give_back_person(subject, quota_day)      # nor the person's day
 
 
 async def _check(job_id: str, text: str, repo, stream=None, *,
                  derived_text: str | None = None, meter=None,
                  quota_day: str | None = None, kind: str = "text",
-                 language: str | None = None, subject: str | None = None) -> None:
+                 language: str | None = None, subject: str | None = None,
+                 owns_release: bool = True) -> None:
     """run_check, then settle the day's slot. Every route's engine call.
 
-    `subject` is released when this ends, however it ends. Pass it only where
-    this IS the background job (text, image); the media and link jobs call
-    this as their last step and release in their own `finally`, which also
-    covers the failures that never reach here.
+    `subject` is whose check this is: a free cache hit gives that person's
+    daily check back, and — when `owns_release` — the person is released when
+    this ends, however it ends. The media and link jobs call this as their
+    last step with owns_release=False and release in their own `finally`,
+    which also covers the failures that never reach here.
     """
     try:
         await run_check(job_id, text, repo, stream, derived_text=derived_text,
                         meter=meter, kind=kind, language=language)
-        await _settle_quota(job_id, repo, quota_day)
+        await _settle_quota(job_id, repo, quota_day, subject)
     finally:
-        release(subject)
+        if owns_release:
+            release(subject)
 
 
 async def _new_job(input_text: str = ""):
@@ -236,7 +242,7 @@ async def _run_media_job(
     transcription failure, a crash — ends this person's check (release)."""
     try:
         await _media_job(job_id, wav, duration, repo, meter, stream,
-                         quota_day=quota_day, language=language)
+                         quota_day=quota_day, language=language, subject=subject)
     finally:
         release(subject)
 
@@ -244,6 +250,7 @@ async def _run_media_job(
 async def _media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
     quota_day: str | None = None, language: str | None = None,
+    subject: str | None = None,
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> the check.
 
@@ -277,7 +284,8 @@ async def _media_job(
         await fail("No speech could be transcribed from this audio.")
         return
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day, kind="media", language=language)
+                 quota_day=quota_day, kind="media", language=language,
+                 subject=subject, owns_release=False)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -472,14 +480,15 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
     it ends (release)."""
     try:
         await _link_job(job_id, info, repo, stream,
-                        quota_day=quota_day, language=language)
+                        quota_day=quota_day, language=language, subject=subject)
     finally:
         release(subject)
 
 
 async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
                     quota_day: str | None = None,
-                    language: str | None = None) -> None:
+                    language: str | None = None,
+                    subject: str | None = None) -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
@@ -511,7 +520,8 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
         if key and text.strip() != _caption_text(info).strip():
             await safe_cache_call(repo.transcripts.put, key, text)
     await _check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                 quota_day=quota_day, kind="link", language=language)
+                 quota_day=quota_day, kind="link", language=language,
+                 subject=subject, owns_release=False)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)

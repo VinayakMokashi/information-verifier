@@ -177,3 +177,70 @@ def test_the_tables_are_cleared_with_the_rest():
     limits._in_flight["tg:9"] = [1.0]
     limits.reset()
     assert limits._in_flight == {}
+
+
+# -- a daily allowance per person (Vinayak, 2026-10-15) ------------------------
+# 5 paid checks a day per Telegram user (and per WhatsApp number, to come);
+# web visitors by address until device cookies exist: an IPv6 /64 is one
+# phone, an IPv4 address is shared by many under carrier NAT.
+
+def _paid(request):
+    """One check that went ahead and was paid for: claimed, then ended."""
+    day = limits.reserve(request)
+    limits.release(limits.subject_of(request))
+    return day
+
+
+def test_a_telegram_user_gets_five_paid_checks_a_day(limiting):
+    for _ in range(5):
+        assert _paid(_bot(1))
+    with pytest.raises(HTTPException) as today:
+        limits.reserve(_bot(1))
+    assert today.value.status_code == 429 and "today" in today.value.detail
+    assert limits.used_today() == 5             # the refusal took no slot
+    assert _paid(_bot(2))                       # everyone else keeps theirs
+
+
+def test_a_refused_check_does_not_use_the_persons_allowance(limiting):
+    for _ in range(5):
+        request = _bot(1)
+        day = limits.reserve(request)
+        limits.refund(request, day)             # refused before any spend
+        limits.release("tg:1")
+    assert _paid(_bot(1))
+
+
+def test_a_free_cache_hit_gives_the_persons_check_back(limiting):
+    for _ in range(5):
+        day = _paid(_bot(1))
+    limits.give_back_person("tg:1", day)        # the last one cost $0
+    assert _paid(_bot(1))
+
+
+def test_the_allowance_depends_on_who_is_asking(limiting, monkeypatch):
+    monkeypatch.setattr(settings, "max_checks_per_hour", 1000)
+    v4 = _req("198.51.100.4")
+    for _ in range(settings.person_daily_limits["ip"]):
+        assert _paid(v4)
+    with pytest.raises(HTTPException):
+        limits.reserve(v4)
+    v6 = _req("2401:4900:1c2a:5b10::1")
+    for _ in range(settings.person_daily_limits["ip6"]):
+        assert _paid(v6)
+    with pytest.raises(HTTPException):
+        limits.reserve(v6)
+
+
+def test_a_new_day_brings_a_new_allowance(limiting, monkeypatch):
+    for _ in range(5):
+        assert _paid(_bot(1))
+    monkeypatch.setattr(limits, "today", lambda: "2099-01-01")
+    assert _paid(_bot(1))
+    assert set(limits._person_today) == {"tg:1"}    # yesterday is forgotten
+
+
+def test_the_allowances_match_the_decision():
+    """Pinned: these are Vinayak's numbers (2026-10-15), not tuning knobs."""
+    assert settings.person_daily_limits["tg"] == 5
+    assert settings.person_daily_limits["wa"] == 5
+    assert settings.person_daily_limits["dev"] == 3

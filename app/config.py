@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     # whose check hung without ever ending (the longest measured: 295 s).
     max_in_flight_per_person: int = 1
     in_flight_ttl_s: int = 900
+    # Paid checks a day per person, by who is asking (limits.subject_of) —
+    # Vinayak's numbers, 2026-10-15: 5 per Telegram user and WhatsApp number,
+    # 3 per web device (a cookie issued after Turnstile, to come). Until then
+    # web visitors count by address: an IPv6 /64 is one phone; an IPv4
+    # address is shared by many under carrier NAT, so it is only a loose
+    # brake. Kept in memory: who someone is never goes to disk.
+    person_daily_limits: dict[str, int] = {"tg": 5, "tgchat": 5, "wa": 5,
+                                           "dev": 3, "ip6": 5, "ip": 20}
     # DECIDED 2026-09-22 by Vinayak, before the first live use: "lower it for
     # now and do only 2 checks per day, just to be safe. We can increase it
     # later." Across the whole deployment — web page and Telegram bot share
