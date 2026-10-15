@@ -186,6 +186,30 @@ limiter are both in-memory.
   (`scratchpad/fixrev_money/bot_explorer_real*.py`, 2,000 seeds each). A fix
   that addresses the mechanism a finding named, rather than the rule behind
   it, leaves the hole open.
+- **Interruptions must cost nothing that was finished** (Vinayak, 2026-10-15:
+  "if we again reach the session limit, it does not affect us … throughout the
+  project"). That day a usage limit and then a network drop each killed agents
+  mid-run, and everything they had found was lost — it lived only in their
+  context and in session-internal journals. So:
+  - **Persist the moment it exists.** A result, measurement, decision or draft
+    goes into a file in the repo as soon as it exists (research notes in
+    `docs/research/<date>/`), and is committed and pushed at the next step.
+    Session scratch dirs and agent transcripts are not storage: the next
+    session cannot find them.
+  - **Agents write as they go.** Every agent appends each finding to its own
+    output file the moment it has it, never only at the end, so a killed agent
+    leaves its partial work; a re-run starts from that file and from the dead
+    attempt's source trail. One agent per topic: losing one loses nothing else.
+  - **HANDOFF.md §0 is the resume point.** It says what is done (commits),
+    what is in flight (each agent and the file it writes) and the next step,
+    and is updated at every step — a fresh session resumes from it.
+  - **Resuming, verify first:** git clean and pushed; the suite's own exit
+    code; no stray processes; the real database untouched (its mtime and the
+    ledger total); what each interrupted job left on disk ("status: in
+    progress" at the top of a research file means its agent died).
+  - Commit messages go through a file written with the Write tool: Windows
+    PowerShell 5.1 splits a `-m` here-string at embedded double quotes, and
+    `Set-Content -Encoding utf8` prefixes a BOM.
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,

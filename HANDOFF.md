@@ -11,6 +11,43 @@
 
 ---
 
+## 0. Resume point — where the work is RIGHT NOW (updated at every step)
+
+> If a session ended mid-task (usage limit, network drop), start here.
+> Verify first (CLAUDE.md, "Interruptions"), then continue from **Next**.
+
+**Task in hand (2026-10-15):** §11 A–C — lay out the public-launch choices,
+ask Vinayak to decide, then build; tell him early what WhatsApp needs.
+
+**Done, all pushed:** e4a9822 (no key in any `Settings` repr, §11 17) ·
+63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
+Telegram file gets the real reason) · ee49622 (docs; translated Hindi lookups
+measured, 3/12 → 7/12) · ca76538 (Facebook reel and share links resolve in the
+app — they never did) · ad79c00 (the research so far, persisted in
+[docs/research/2026-10-15/](docs/research/2026-10-15/README.md)).
+
+**In flight — each writes its own file as it goes:**
+- WhatsApp research → `docs/research/2026-10-15/whatsapp.md`
+- verifiers → `docs/research/2026-10-15/{cloud-hosting,home-tunnel,limits-budget,policy-legal}.verification.md`
+- in the session's workflow (its results reach only a session journal, so
+  they are copied into the topic files when it finishes): verifiers for
+  `ytdlp-cloud-ips.md` and `audit-ops.md`, then a critic.
+
+A research file whose top says **"status: in progress"** means its agent died:
+re-run that one task, seeded from the file.
+
+**Next:** when those are in — write the decision brief (hosting; daily budget
+and per-person limits; the bot's policy, §11 18; the pre-public fix list from
+the audits; WhatsApp "start today"), ask Vinayak, record his answers in
+PROJECT_PLAN §7/§11, then build in layered commits. Pre-public **blockers**
+already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
+one stranger can use up the day's cap; a 25 MB text post freezes the server
+for 10–19 s; the bot answers anyone, even with no public URL; any website can
+make its visitors submit paid image/voice checks (cross-site); concurrent
+refunded link resolves lock everyone out, free and untraceably.
+
+---
+
 ## 1. The startup prompt — copy everything between the lines
 
 ```
@@ -23,6 +60,8 @@ c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier
 
 FIRST, read these in order:
 1. HANDOFF.md      — the whole project in one file: state, costs, decisions, to-dos.
+                     Its §0 is the resume point: if it lists work in flight,
+                     a session ended mid-task — verify, then resume there.
 2. CLAUDE.md       — how we work here: money rules, the 10 invariants, conventions.
 3. PROJECT_PLAN.md — depth. §0 status, §7 decisions log (newest first: read the
    2026-10-11, 2026-10-10 and 2026-09-29 entries), §8 MEASURED costs,
@@ -30,7 +69,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 858 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 879 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -107,7 +146,7 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **858 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **879 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
