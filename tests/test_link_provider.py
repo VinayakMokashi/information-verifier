@@ -375,3 +375,71 @@ def test_the_probe_reports_what_the_app_itself_would_do(monkeypatch):
 
     monkeypatch.setattr(P, "resolve_link", refuse)
     assert "NO" in P.app_verdict(_FB_SHARE) and "unsupported" in P.app_verdict(_FB_SHARE)
+
+
+# -- review R2/R3 (2026-10-15): ports, line breaks, unparseable hops ------------
+
+@pytest.mark.parametrize("url", [
+    "https://www.facebook.com:1/share/r/17RQxbYP2j/",
+    "https://fb.watch:6379/abc/",
+    "https://www.youtube.com:8443/watch?v=x",
+])
+def test_an_explicit_port_other_than_443_is_refused(url):
+    """REPRODUCED (review R2): the gate read only the host, so the server
+    connected to whatever port the visitor named on Facebook's hosts — and a
+    dropped port was a free ~31 s hold. No pinned extractor even claims a
+    URL with a port."""
+    assert L.allowed_link_host(url) is None
+
+
+def test_the_standard_port_written_out_is_still_fine():
+    assert L.allowed_link_host("https://www.youtube.com:443/watch?v=x") == "www.youtube.com"
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.facebook.com/share/r/17RQxbYP2j/\nKya yeh sach hai?",
+    "https://www.facebook.com/share/r/17RQ\txbYP2j/",
+    "https://www.youtube.com/wa\rtch?v=x",
+    "https://www.youtube.com/watch?v=x y",
+])
+def test_whitespace_or_a_control_character_inside_a_link_is_refused(url):
+    """REPRODUCED (review R3): urlsplit silently drops tab/CR/LF, so the
+    gate passed, and httpx then refused the URL with an InvalidURL that
+    nothing caught — a 500. Fail closed instead (edge whitespace from a
+    paste is still trimmed)."""
+    assert L.allowed_link_host(url) is None
+
+
+@pytest.mark.parametrize("location", [
+    "https:evil.example/x",               # no authority
+    "https://xn--fdkkl/reel/1",           # no such label shape (punycode-ish junk)
+    "https://фейсбук.com/reel/1",         # non-ASCII host
+    "javascript:alert(1)",
+])
+def test_a_hop_nobody_can_parse_is_a_readable_refusal_not_a_crash(location):
+    client = _fake_share_host({_FB_SHARE: (302, location)}, [])
+    with pytest.raises(L.LinkError):
+        L.expand_share_link(_FB_SHARE, client=client)
+
+
+def test_the_whole_expansion_has_one_deadline(monkeypatch):
+    """Per-socket timeouts summed over the hops let one link hold a slot for
+    the better part of a minute; the expansion now has one budget."""
+    import time
+
+    import httpx
+
+    monkeypatch.setattr(L, "_SHARE_DEADLINE_S", 0.3)
+    hops = {"n": 0}
+
+    def slow(request):
+        hops["n"] += 1
+        time.sleep(0.2)
+        return httpx.Response(302, headers={"location": f"/share/r/HOP{hops['n']}/"})
+
+    client = httpx.Client(transport=httpx.MockTransport(slow))
+    with pytest.raises(L.LinkError) as info:
+        L.expand_share_link(_FB_SHARE, client=client)
+    assert info.value.kind == "network"
+    assert hops["n"] <= 2
+

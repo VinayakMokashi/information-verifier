@@ -1864,6 +1864,13 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    check this project lacks, and it gates every remaining cost trade-off:
    effort `low` vs `medium` (Anthropic measured a third to half off for 1–3
    points on research tasks), 2 vs 3 vetted searches, item 21. ~$0.60 a run.
+24. **A QUESTION FOR VINAYAK: "is this true? <link>".** A message with a
+   link plus other words is checked as TEXT (a pinned rule: a long
+   forward's claim is in its words). But for "dekho <reel> sach hai kya" the
+   words are only a question, and checking the reel itself would answer far
+   better. Option: when exactly one checkable link is surrounded by a short
+   question (a few words), check the link. Not done without his say
+   (2026-10-15; it came up fixing review R3).
 23. **Pass 2 can outlast the bot's wait.** 295 s measured against the bot's
    ~270 s poll window: the person is asked for "any message" to collect it.
    Either raise `_POLL_MAX`, or bound pass 2's search work (item 21 may

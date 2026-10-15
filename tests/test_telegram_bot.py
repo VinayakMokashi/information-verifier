@@ -1142,3 +1142,12 @@ def test_the_bot_and_the_api_agree_on_the_header_and_its_shape():
                 {"chat": {"id": -1001234567890}},
                 {"chat": {"id": 7}, "from": {"id": 9_999_999_999}}):
         assert limits._SUBJECT.fullmatch(B.subject_of_message(msg))
+
+
+def test_a_link_with_a_line_break_and_a_question_is_text_not_a_crash():
+    """REPRODUCED (review R3): "link\nKya yeh sach hai?" was filed as a link
+    with the question inside it, crashed the server's URL handling (a 500),
+    and the bot said "try again later" — which could never work. A link
+    with other words around it is text (the existing rule above)."""
+    msg = {"text": "https://www.facebook.com/share/r/17RQxbYP2j/\nKya yeh sach hai?"}
+    assert B.classify_message(msg)[0] == "text"        # the rule of the test above

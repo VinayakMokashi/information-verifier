@@ -467,3 +467,10 @@ def test_a_post_without_an_id_is_not_cached():
     # transcription heard nothing — a rule that changed, so they are retired.
     assert transcript_key(LinkInfo(platform="Instagram", video_id="DbsVyqLpbRa",
                                    **base)) == "v2:instagram:DbsVyqLpbRa"
+
+
+def test_a_link_with_a_line_break_is_a_readable_refusal_not_a_500(client):
+    """REPRODUCED (review R3): the gate passed it and httpx crashed on it."""
+    resp = client.post("/api/v1/verify/link",
+                       json={"url": "https://www.facebook.com/share/r/17RQxbYP2j/\nKya?"})
+    assert resp.status_code == 422

@@ -87,7 +87,9 @@ _FACEBOOK_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com",
                    "web.facebook.com"}
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _SHARE_HOPS = 3
-_SHARE_TIMEOUT_S = 15
+# ONE budget for the whole expansion, not one per socket operation per hop
+# (review R2: summed, they let one link hold a slot for most of a minute).
+_SHARE_DEADLINE_S = 10.0
 
 _RESOLVE_TIMEOUT_S = 30      # per socket op inside yt-dlp
 _DOWNLOAD_WALL_S = 180.0     # a trickling stream must not pin a worker
@@ -165,8 +167,25 @@ def allowed_link_host(url: str) -> str | None:
     separately and had already drifted — and must then be an EXACT allowed
     host: no suffix matching, so youtube.com.evil.com fails.
     """
+    if not isinstance(url, str):
+        return None
+    # Inside the link (a paste's edges are trimmed by strict_host): urlsplit
+    # silently DROPS tab/CR/LF, so "link\nquestion" passed this gate and then
+    # crashed httpx — a 500 (REPRODUCED, review R3). Fail closed.
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url.strip()):
+        return None
     host = strict_host(url, schemes=("https",))   # these platforms are https-only
-    return host if host in ALLOWED_HOSTS else None
+    if host not in ALLOWED_HOSTS:
+        return None
+    # The host alone is not where the server connects: a visitor-chosen port
+    # made it open connections anywhere on Facebook's hosts, and a dropped
+    # port was a free ~31 s hold (REPRODUCED, review R2).
+    try:
+        if urlsplit(url.strip()).port not in (None, 443):
+            return None
+    except ValueError:
+        return None
+    return host
 
 
 _MSG_NOT_OPENABLE = (
@@ -189,7 +208,7 @@ def _share_client() -> httpx.Client:
     """httpx never follows a redirect itself here: every hop is host-checked
     by expand_share_link before it is taken. Its plain default headers got
     the redirect (measured); a made-up browser User-Agent got a 400."""
-    return httpx.Client(timeout=_SHARE_TIMEOUT_S, follow_redirects=False)
+    return httpx.Client(timeout=_SHARE_DEADLINE_S, follow_redirects=False)
 
 
 def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
@@ -205,16 +224,24 @@ def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
         return url
     own = client is None
     client = client or _share_client()
+    deadline = time.monotonic() + _SHARE_DEADLINE_S
     try:
         for _ in range(_SHARE_HOPS):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise LinkError("network", "The platform could not be reached "
+                                           "right now. Try again in a minute.")
             try:
-                resp = client.get(url)
-            except httpx.HTTPError as exc:
+                resp = client.get(url, timeout=left)
+            except Exception as exc:  # noqa: BLE001 — httpx.InvalidURL is not an HTTPError
                 raise _classified(exc) from exc
             location = resp.headers.get("location")
             if resp.status_code not in _REDIRECT_STATUSES or not location:
                 raise LinkError("gated", _MSG_NOT_OPENABLE)
-            target = str(httpx.URL(url).join(location))
+            try:
+                target = str(httpx.URL(url).join(location))
+            except Exception as exc:  # noqa: BLE001 — a Location nobody can parse
+                raise LinkError("other", "That link could not be read.") from exc
             if allowed_link_host(target) is None:
                 raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
             if urlsplit(target).path.startswith("/login"):
