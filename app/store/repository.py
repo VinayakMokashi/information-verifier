@@ -385,6 +385,49 @@ class DailyQuota:
         return [(r["day"], r["used"]) for r in rows]
 
 
+def _micro(usd: float) -> int:
+    return int(round(usd * 1_000_000))
+
+
+class DailyBudget:
+    """The deployment-wide dollars-per-day budget, in SQLite.
+
+    Same discipline as DailyQuota: `reserve` is ONE conditional statement, so
+    the database itself refuses a reservation that would cross the budget,
+    however many claims race. Amounts are integer micro-dollars.
+    """
+
+    def committed(self, day: str) -> float:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT committed_micro FROM daily_budget WHERE day = ?", (day,)
+            ).fetchone()
+        return (row["committed_micro"] if row else 0) / 1_000_000
+
+    def reserve(self, day: str, amount_usd: float, budget_usd: float) -> bool:
+        amount, budget = _micro(amount_usd), _micro(budget_usd)
+        if amount > budget:
+            return False      # the INSERT branch would otherwise grant it
+        with get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO daily_budget (day, committed_micro) VALUES (?, ?) "
+                "ON CONFLICT(day) DO UPDATE SET "
+                "committed_micro = committed_micro + excluded.committed_micro "
+                "WHERE daily_budget.committed_micro + excluded.committed_micro <= ?",
+                (day, amount, budget),
+            )
+            return cur.rowcount == 1
+
+    def settle(self, day: str, reserved: float, actual: float) -> None:
+        """Replace a reservation by what the check really cost."""
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE daily_budget SET committed_micro = "
+                "MAX(0, committed_micro - ? + ?) WHERE day = ?",
+                (_micro(reserved), _micro(actual), day),
+            )
+
+
 class AnswerRepository:
     """Job rows. The payload is opaque JSON, so the Answer model can evolve."""
 

@@ -105,7 +105,18 @@ class Settings(BaseSettings):
     # more if you want"). Measured checks run $0.05–0.26, so a full day is at
     # most ~$1.30. Five, not more: quality testing needs a handful a day, and
     # the cap's job is still to bound a bad day.
-    max_checks_per_day: int = 5
+    # 2026-10-15: the MONEY is now bounded by daily_budget_usd below; this
+    # count stays only as a backstop above it (~15 checks fill $1 at the
+    # measured mix, ~119 if every one were a $0.0084 shortcut).
+    max_checks_per_day: int = 40
+    # DECIDED 2026-10-15 by Vinayak: strangers share "$1 a day". Each check
+    # reserves its kind's worst case before any spend and settles at its real
+    # cost when it ends; the database refuses a reservation past the budget
+    # (limits.reserve). The reservations sit above the MEASURED maxima: text
+    # $0.17 (two passes, 295 s), a reel $0.26, OCR a few cents.
+    daily_budget_usd: float = 1.0
+    budget_reserve_usd: dict[str, float] = {"text": 0.20, "image": 0.25,
+                                            "media": 0.30, "link": 0.30}
     # When "a day" rolls over. IST (UTC+5:30), because the person watching the
     # bill is in India and "2 a day" means his day. A fixed offset rather than
     # a zone name: India has no DST, and zoneinfo needs the tzdata package on

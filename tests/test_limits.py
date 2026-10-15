@@ -106,6 +106,7 @@ def test_visitor_table_does_not_grow_without_bound(limited, monkeypatch):
     from starlette.requests import Request
 
     monkeypatch.setattr(settings, "max_checks_per_day", 10_000)
+    monkeypatch.setattr(settings, "daily_budget_usd", 10_000.0)   # memory, not money
 
     def fake_request(ip):
         return Request({"type": "http", "client": (ip, 1234), "headers": []})
@@ -136,15 +137,18 @@ def test_concurrent_submissions_cannot_all_pass_the_same_empty_counter(limited, 
 
 # -- the 2-a-day decision (Vinayak, 2026-09-22) -------------------------------
 
-def test_the_daily_cap_defaults_to_two():
+def test_the_daily_cap_is_now_a_backstop_under_the_dollar_budget():
     """Pinned because it is a DECISION, not a tuning knob: "lower it for now
     and do only 2 checks per day, just to be safe" (2026-09-22), raised to 5
-    for quality testing on 2026-09-29 ("use 5 or even more if you want").
-    Changing it should be a deliberate edit here AND in config.py, recorded
-    in PROJECT_PLAN §7."""
+    for quality testing on 2026-09-29 ("use 5 or even more if you want"), and
+    replaced on 2026-10-15 by Vinayak's $1-a-day DOLLAR budget for strangers
+    (tests/test_budget.py pins that). The count stays only as a backstop
+    above it. Changing either should be a deliberate edit here AND in
+    config.py, recorded in PROJECT_PLAN §7."""
     from app.config import Settings
 
-    assert Settings.model_fields["max_checks_per_day"].default == 5
+    assert Settings.model_fields["max_checks_per_day"].default == 40
+    assert Settings.model_fields["daily_budget_usd"].default == 1.0
 
 
 def test_the_daily_cap_survives_a_restart(limited, monkeypatch):
@@ -349,9 +353,9 @@ def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypat
 
     real = L.reserve
 
-    def slow_reserve(request, subject=None):
+    def slow_reserve(request, subject=None, kind="text"):
         time.sleep(0.4)                  # a contended write
-        return real(request, subject)
+        return real(request, subject, kind)
 
     monkeypatch.setattr(L, "reserve", slow_reserve)
 

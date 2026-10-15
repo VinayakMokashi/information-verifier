@@ -52,10 +52,14 @@ refund keeps the attempt — live-checked through real uvicorn) · per-person
 DAILY allowances DONE (Telegram 5, WhatsApp 5, web device 3; by address
 until device cookies: IPv6 /64 5, IPv4 20 — in memory, never on disk) · a
 reviewer agent is checking all of today's fixes → it writes
-`docs/research/2026-10-15/review-blockers.md` as it goes · NEXT: the $1/day
-DOLLAR budget replacing the 5-checks count (reserve worst case, settle at
-actual, get cheaper as it drains, never cache a degraded answer) — that
-closes blocker 1.
+`docs/research/2026-10-15/review-blockers.md` as it goes · the $1/day
+DOLLAR budget DONE (each check reserves its kind's worst case — text $0.20,
+image $0.25, reel/voice $0.30 — and settles at its real cost; the database
+refuses past $1; the 5-checks count is now a 40 backstop) — blocker 1
+closed · NEXT: get cheaper as the day drains (below 40% skip the open web,
+below 15% only cached/shortcut answers) and never cache a degraded answer;
+then Anthropic's "out of credit / spend limit" errors read "back later"
+and refund; then the budget on the dashboard (look at it in headless Chrome).
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

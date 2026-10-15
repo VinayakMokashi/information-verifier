@@ -40,6 +40,9 @@ def limiting(client, monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_enabled", True)
     monkeypatch.setattr(settings, "max_checks_per_day", 50)
     monkeypatch.setattr(settings, "max_checks_per_hour", 10)
+    # About PEOPLE, not money: the $1 budget would end these first (five
+    # $0.20 reservations fill it). tests/test_budget.py covers the money.
+    monkeypatch.setattr(settings, "daily_budget_usd", 1000.0)
     limits.reset()
     return client
 

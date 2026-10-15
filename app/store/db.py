@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS daily_checks (
     used         INTEGER NOT NULL
 );
 
+-- The deployment-wide daily DOLLAR budget (Vinayak, 2026-10-15: $1 a day).
+-- What today's finished checks cost plus what the running ones reserved: a
+-- check reserves its worst case before any spend and settles at its real
+-- cost when it ends. Integer micro-dollars, so the conditional reservation
+-- compares exactly. Persisted like daily_checks; no personal data.
+CREATE TABLE IF NOT EXISTS daily_budget (
+    day              TEXT PRIMARY KEY,
+    committed_micro  INTEGER NOT NULL
+);
+
 -- What a pasted link SAID (caption + subtitles or ASR transcript), keyed by
 -- the platform's own video id — known for free at resolve time, before any
 -- download or ASR is bought. One viral reel forwarded by fifty people used to
