@@ -27,11 +27,11 @@ which landed while this review ran).
 | R1 | blocker - FIXED 5f8e7db (re-checked) | 020e26f | The refunded-hold lockout still works with 5 subjects (5 IPv6 /64s from one free /48); at 0951150 three suffice and also force everyone into the no-search shortcut mode |
 | R2 | should-fix - FIXED 2f4d825 (re-checked) | ca76538 | `https://www.facebook.com:<port>/share/...` makes the server connect to any port; Facebook drops them, so each is a free ~31 s hold (and, with a raised cap, pool starvation) |
 | R3 | should-fix - FIXED 2f4d825 (re-checked) | ca76538 | A share link + newline (a normal Telegram message) is an uncaught `httpx.InvalidURL` -> 500 -> "try again later"; it was a 422 before |
-| R4 | nice-to-have | 1080d2d, 50dcf3b | With a root_path (`--root-path` / `UVICORN_ROOT_PATH`) both middlewares stop matching: cross-site POSTs pass again, uploads over 64 KiB are refused |
-| R5 | nice-to-have | 1080d2d | A DNS-rebinding page is "same-origin" and passes; the paid routes never check Host |
+| R4 | nice-to-have - FIXED 456701b (re-checked) | 1080d2d, 50dcf3b | With a root_path (`--root-path` / `UVICORN_ROOT_PATH`) both middlewares stop matching: cross-site POSTs pass again, uploads over 64 KiB are refused |
+| R5 | nice-to-have - FIXED 786c046 (re-checked) | 1080d2d | A DNS-rebinding page is "same-origin" and passes; the paid routes never check Host |
 | R6 | nice-to-have - FIXED 05418fa (re-checked) | 020e26f | The person is released after the bookkeeping, so "poll until COMPLETE, then submit" gets "already running" about half the time |
-| R7 | nice-to-have | 50dcf3b | The pinned body-cap arithmetic is x6 per character; an emoji is x12 |
-| R8 | nice-to-have | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
+| R7 | nice-to-have - FIXED 478a2c1 | 50dcf3b | The pinned body-cap arithmetic is x6 per character; an emoji is x12 |
+| R8 | nice-to-have - FIXED (re-checked) | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
 | R9 | should-fix - FIXED 2d3b5c8 (re-checked) | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
 | R10 | nice-to-have - DEFERRED (PROJECT_PLAN 11.25) | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
 | R11 | nice-to-have - FIXED 05418fa + 2147412 (re-checked) | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |

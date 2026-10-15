@@ -70,8 +70,20 @@ def _parse_and_filter(data: dict) -> tuple[list[Source], list[str]]:
     return sources, dropped
 
 
+_TRANSPORT = None          # a seam: tests hand in an httpx.MockTransport
+
+
+def _headers() -> dict[str, str]:
+    """The key travels in a HEADER, never in the URL. REPRODUCED (review R8):
+    the URL is what an httpx error's text shows, and what httpx's own INFO
+    log line prints on every request — ANTHROPIC_LOG=info, the SDK's debug
+    switch, turns that on app-wide — so the key reached the log on every
+    lookup. scripts/factcheck_probe.py sends it the same way."""
+    return {"X-Goog-Api-Key": settings.google_factcheck_api_key}
+
+
 async def _fetch(query: str) -> dict:
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, transport=_TRANSPORT) as client:
         resp = await client.get(
             _ENDPOINT,
             # No languageCode: the old pipeline always queried in English
@@ -79,11 +91,8 @@ async def _fetch(query: str) -> dict:
             # pivot, so pinning "en" would silently return nothing for a
             # Hindi or Spanish claim. Unset lets Google match any language
             # its ClaimReview index covers.
-            params={
-                "query": query,
-                "key": settings.google_factcheck_api_key,
-                "pageSize": _PAGE_SIZE,
-            },
+            params={"query": query, "pageSize": _PAGE_SIZE},
+            headers=_headers(),
         )
     resp.raise_for_status()
     return resp.json()
@@ -99,7 +108,8 @@ async def search_factcheck(query: str) -> list[Source]:
     trace. Failures are now logged and a dropped connection is retried once.
 
     The log carries the exception TYPE and the HTTP status only: an httpx
-    error's text includes the request URL, and that URL carries the API key.
+    error's text includes the request URL. The key no longer travels in it
+    (_headers), but a URL is still no place to look for a secret.
     """
     if not settings.google_factcheck_api_key:
         return []

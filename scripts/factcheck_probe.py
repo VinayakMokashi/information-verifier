@@ -18,6 +18,7 @@ import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import app.providers.factcheck as FC  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.providers.factcheck import _ENDPOINT, _PAGE_SIZE  # noqa: E402
 from app.trusted_sources import trusted_domain_of  # noqa: E402
@@ -34,17 +35,23 @@ async def main() -> None:
     print(f">> FREE probe — Google Fact Check API only, no Anthropic calls.")
     print(f">> Query: {query}\n")
 
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, transport=FC._TRANSPORT) as client:
         resp = await client.get(
             _ENDPOINT,
-            params={
-                "query": query,
-                "key": settings.google_factcheck_api_key,
-                "languageCode": "en",
-                "pageSize": _PAGE_SIZE,
-            },
+            params={"query": query, "languageCode": "en", "pageSize": _PAGE_SIZE},
+            headers=FC._headers(),     # the key in a header, as the app sends it
         )
-    resp.raise_for_status()
+    if not resp.is_success:
+        # Google's own reason, never the request: raise_for_status() used to
+        # escape here, and its traceback printed the URL with the key in it
+        # (review R8). The key is no longer in the URL; it stays out of here.
+        try:
+            reason = str(resp.json().get("error", {}).get("message", ""))
+        except ValueError:
+            reason = ""
+        reason = reason.replace(settings.google_factcheck_api_key, "<key>")
+        print(f">> Google refused the lookup: HTTP {resp.status_code} {reason}".rstrip())
+        return
 
     kept = dropped = 0
     for claim in resp.json().get("claims", []):

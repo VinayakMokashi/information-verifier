@@ -199,6 +199,70 @@ def test_the_log_never_carries_the_api_key(monkeypatch, capsys):
         assert "SECRET-KEY-123" not in capsys.readouterr().out
 
 
+# -- the key travels in a header, never in a URL (review R8) -------------------
+# REPRODUCED by the review: the URL is what an httpx error's text shows, and
+# what httpx's own INFO log line prints on EVERY request — ANTHROPIC_LOG=info
+# (the SDK's documented debug switch) turns that on app-wide, so the app
+# logged the Google key on every lookup, success included; and
+# scripts/factcheck_probe.py let raise_for_status() escape, printing the URL.
+
+_GOOGLE_403 = {"error": {"code": 403, "status": "PERMISSION_DENIED",
+                         "message": "API key not valid. Please pass a valid API key."}}
+
+
+def _google(monkeypatch, status=200, body=None):
+    """The provider's own requests, answered by a fake Google; -> what it sent."""
+    import httpx
+
+    from app.providers import factcheck as FC
+
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return httpx.Response(status, json=GOOD if body is None else body)
+
+    monkeypatch.setattr(FC, "_TRANSPORT", httpx.MockTransport(handler))
+    monkeypatch.setattr(FC.settings, "google_factcheck_api_key", "SECRET-KEY-123")
+    return FC, sent
+
+
+def test_the_key_travels_in_a_header_never_in_the_url(monkeypatch):
+    import asyncio
+
+    FC, sent = _google(monkeypatch)
+    sources = asyncio.run(FC.search_factcheck("5G spreads covid"))
+    assert [s.publisher for s in sources] == ["BOOM"]
+    (request,) = sent
+    assert "SECRET-KEY-123" not in str(request.url)
+    assert request.headers["x-goog-api-key"] == "SECRET-KEY-123"
+
+
+def test_httpx_own_request_log_never_sees_the_key(monkeypatch, caplog):
+    import asyncio
+    import logging
+
+    FC, _ = _google(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        asyncio.run(FC.search_factcheck("5G spreads covid"))
+    assert "HTTP Request" in caplog.text          # the line the debug switch prints
+    assert "SECRET-KEY-123" not in caplog.text
+
+
+def test_the_probe_reports_a_refusal_without_the_key(monkeypatch, capsys):
+    import asyncio
+    import sys
+
+    import scripts.factcheck_probe as probe
+
+    _google(monkeypatch, status=403, body=_GOOGLE_403)
+    monkeypatch.setattr(sys, "argv", ["factcheck_probe.py", "5G spreads covid"])
+    asyncio.run(probe.main())                      # no traceback, no URL
+    out = capsys.readouterr().out
+    assert "SECRET-KEY-123" not in out
+    assert "403" in out and "API key not valid" in out
+
+
 def test_a_4xx_is_not_retried(monkeypatch):
     """A rejected key or a bad request will not improve on a second try."""
     import httpx
