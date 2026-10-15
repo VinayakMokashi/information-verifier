@@ -1,11 +1,24 @@
 """Shared fixtures: a fully-offline app client with every paid seam faked."""
-import pytest
-from fastapi.testclient import TestClient
+import os
 
-import scripts.fake_stages as F
-from app.api import limits, routes as R
-from app.config import settings
-from app.engine import chat as C
+# No real key in a test, ever — set BEFORE anything imports the app, because
+# some clients read their key once, at import (the Anthropic case, §7).
+# MEASURED 2026-10-16: the suite ran with the real keys from .env loaded,
+# and 8 link and voice tests passed only because a real Sarvam key was
+# there. A dummy keeps those paths open, and a seam nobody faked reaches a
+# provider with a key it refuses instead of one it bills. Environment
+# variables outrank .env (pydantic-settings). tests/test_isolation.py pins it.
+for _key in ("ANTHROPIC_API_KEY", "GOOGLE_FACTCHECK_API_KEY", "SARVAM_API_KEY",
+             "HF_TOKEN", "TELEGRAM_BOT_TOKEN"):
+    os.environ[_key] = "test-not-a-real-key"
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+import scripts.fake_stages as F  # noqa: E402
+from app.api import limits, routes as R  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.engine import chat as C  # noqa: E402
 
 
 @pytest.fixture(autouse=True, scope="session")

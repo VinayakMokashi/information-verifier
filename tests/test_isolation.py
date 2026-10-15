@@ -31,6 +31,22 @@ def test_a_test_that_patches_nothing_is_not_on_the_real_database():
     assert in_use != real
 
 
+_DUMMY_KEY = "test-not-a-real-key"
+_KEY_FIELDS = ("anthropic_api_key", "google_factcheck_api_key", "sarvam_api_key",
+               "hf_token", "telegram_bot_token")
+
+
+def test_the_suite_never_holds_a_real_key():
+    """MEASURED 2026-10-16: the suite ran with the real keys from .env
+    loaded. Eight link and voice tests passed only because a real Sarvam key
+    was there (on a copy without .env they failed), and a seam some test
+    forgot to fake would have reached a provider with a key it bills.
+    tests/conftest.py sets a dummy before the app is imported. Only field
+    NAMES are compared in the assert, never a value."""
+    real = [name for name in _KEY_FIELDS if getattr(settings, name) != _DUMMY_KEY]
+    assert real == []
+
+
 def test_undoing_a_patch_does_not_restore_the_real_database(monkeypatch):
     """Exactly the leak's path: a fixture patches db_path, the test ends,
     the patch is undone, and late work reads what is left."""
