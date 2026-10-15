@@ -27,6 +27,7 @@ import ipaddress
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -49,7 +50,10 @@ _BUSY = ("You already have a check running. Wait for its answer, then send "
 
 _lock = threading.Lock()
 _per_client: dict[str, list[float]] = {}      # subject -> this hour's attempts
-_in_flight: dict[str, list[float]] = {}       # subject -> start of each running check
+# subject -> (start, token) of each running check. The token is the claim's
+# own: a release removes exactly its own entry (review R11 — releasing by
+# position let a check that outlived the TTL free the NEXT check's place).
+_in_flight: dict[str, list[tuple[float, str]]] = {}
 # subject -> paid checks today. Holds ONE day at a time: the first claim of a
 # new day clears it, so it never outgrows a day's visitors. A restart resets
 # it — the price of never writing who someone is to disk; the money is
@@ -106,10 +110,11 @@ def _mode_for(kind: str) -> str:
     return mode
 
 
-def _claim_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
+def _claim_now(request: Request, subject: str, kind: str,
+               token: str | None) -> tuple[str | None, str]:
     """On the pool: decide what the day's money buys, then reserve it."""
     mode = _mode_for(kind)
-    return reserve(request, subject, kind, mode), mode
+    return reserve(request, subject, kind, mode, token), mode
 
 
 def _fund_now(request: Request, subject: str, kind: str) -> tuple[str | None, str]:
@@ -140,7 +145,8 @@ _POOL_WORKERS = 2
 _pool = ThreadPoolExecutor(max_workers=_POOL_WORKERS, thread_name_prefix="quota")
 
 
-def _rollback(request: Request, subject: str, kind: str, future) -> None:
+def _rollback(request: Request, subject: str, kind: str, token: str | None,
+              future) -> None:
     """Hand back a slot whose claimant is already gone. Runs in the pool."""
     try:
         day, mode = future.result()
@@ -149,7 +155,7 @@ def _rollback(request: Request, subject: str, kind: str, future) -> None:
     if day:
         print("[limits] the caller went away before its slot arrived; returning it")
         refund(request, day, kind, mode, subject)
-        release(subject)
+        release(subject, token)
 
 
 def _rollback_funding(request: Request, subject: str, kind: str, future) -> None:
@@ -189,7 +195,7 @@ def subject_of(request: Request) -> str:
 
 
 async def claim(request: Request, subject: str | None = None,
-                kind: str = "text") -> tuple[str | None, str]:
+                kind: str = "text", token: str | None = None) -> tuple[str | None, str]:
     """reserve(), off the loop and out of the shared pool. -> the day charged.
 
     A plain thread future, not run_in_executor, so that a caller cancelled
@@ -200,11 +206,12 @@ async def claim(request: Request, subject: str | None = None,
     checks, with no job row to show for it.
     """
     subject = subject or subject_of(request)
-    future = _pool.submit(_claim_now, request, subject, kind)
+    future = _pool.submit(_claim_now, request, subject, kind, token)
     try:
         return await asyncio.wrap_future(future)
     except asyncio.CancelledError:
-        future.add_done_callback(lambda done: _rollback(request, subject, kind, done))
+        future.add_done_callback(
+            lambda done: _rollback(request, subject, kind, token, done))
         raise
 
 
@@ -260,6 +267,11 @@ def _prune(stamps: list[float], window_s: float, now: float) -> list[float]:
     return [t for t in stamps if now - t < window_s]
 
 
+def _running(entries: list[tuple[float, str]], now: float) -> list[tuple[float, str]]:
+    """The checks still in flight: not released, and not past the TTL."""
+    return [e for e in entries if now - e[0] < settings.in_flight_ttl_s]
+
+
 def _client_of(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -275,8 +287,8 @@ def _daily_full(day: str) -> bool:
 
 
 def _others_running(client: str, now: float) -> bool:
-    return any(key != client and _prune(starts, settings.in_flight_ttl_s, now)
-               for key, starts in _in_flight.items())
+    return any(key != client and _running(entries, now)
+               for key, entries in _in_flight.items())
 
 
 def _day_is_full(client: str, now: float, what: str) -> HTTPException:
@@ -294,9 +306,10 @@ def _day_is_full(client: str, now: float, what: str) -> HTTPException:
     return _daily_refusal()
 
 
-def _admit_locked(client: str, now: float) -> None:
+def _admit_locked(client: str, now: float, token: str) -> None:
     """The person's place in line — this hour's attempts, one check in
-    flight — recorded on success. The caller holds _lock."""
+    flight, under this claim's own token — recorded on success. The caller
+    holds _lock."""
     mine = _prune(_per_client.get(client, []), 3600, now)
     if len(mine) >= settings.max_checks_per_hour:
         _per_client[client] = mine
@@ -305,16 +318,15 @@ def _admit_locked(client: str, now: float) -> None:
             f"You've used {settings.max_checks_per_hour} checks this hour — "
             "that's the limit for this demo. Please try again later.",
         )
-    running = _prune(_in_flight.get(client, []), settings.in_flight_ttl_s, now)
+    running = _running(_in_flight.get(client, []), now)
     if len(running) >= settings.max_in_flight_per_person:
         _in_flight[client] = running
         raise HTTPException(429, _BUSY)
     _per_client[client] = mine + [now]
-    _in_flight[client] = running + [now]
+    _in_flight[client] = running + [(now, token)]
     if len(_in_flight) > _MAX_TRACKED_CLIENTS:
         # Only checks that hung past the TTL can pile up here.
-        for key in [k for k, v in _in_flight.items()
-                    if not _prune(v, settings.in_flight_ttl_s, now)]:
+        for key in [k for k, v in _in_flight.items() if not _running(v, now)]:
             del _in_flight[key]
     if len(_per_client) > _MAX_TRACKED_CLIENTS:
         # Expired visitors first...
@@ -331,14 +343,23 @@ def _admit_locked(client: str, now: float) -> None:
                 del _per_client[ip]
 
 
-def _unadmit_locked(client: str) -> None:
-    """Undo the in-flight half of an admission whose funding failed: no check
-    runs. The hourly attempt stays counted. The caller holds _lock."""
+def _unadmit_locked(client: str, token: str | None) -> None:
+    """Remove ONE in-flight entry — this token's, if given, and nothing if
+    it is already gone (pruned past the TTL, or released before); with no
+    token, the oldest. The hourly attempt stays counted. The caller holds
+    _lock."""
     running = _in_flight.get(client)
-    if running:
-        running.pop()
-        if not running:
-            del _in_flight[client]
+    if not running:
+        return
+    if token is None:
+        running.pop(0)
+    else:
+        mine = [e for e in running if e[1] == token]
+        if not mine:
+            return
+        running.remove(mine[0])
+    if not running:
+        del _in_flight[client]
 
 
 def _fund_locked(client: str, day: str, now: float, kind: str, mode: str) -> None:
@@ -380,7 +401,8 @@ def _fund_locked(client: str, day: str, now: float, kind: str, mode: str) -> Non
     _person_today[client] = _person_today.get(client, 0) + 1
 
 
-def admit(request: Request, subject: str | None = None) -> bool:
+def admit(request: Request, subject: str | None = None,
+          token: str | None = None) -> str | None:
     """Phase 1, before ANY work: the person's place in line, and nothing
     anyone else needs. -> True if recorded (False: rate limiting is off).
 
@@ -391,11 +413,12 @@ def admit(request: Request, subject: str | None = None) -> bool:
     In memory only, so it is safe to call on the event loop.
     """
     if not settings.rate_limit_enabled:
-        return False
+        return None
     client = subject or subject_of(request)
+    token = token or uuid.uuid4().hex
     with _lock:
-        _admit_locked(client, _now())
-    return True
+        _admit_locked(client, _now(), token)
+    return token
 
 
 def fund(request: Request, subject: str | None = None, kind: str = "text",
@@ -418,7 +441,8 @@ def fund(request: Request, subject: str | None = None, kind: str = "text",
 
 
 def reserve(request: Request, subject: str | None = None,
-            kind: str = "text", mode: str = "full") -> str | None:
+            kind: str = "text", mode: str = "full",
+            token: str | None = None) -> str | None:
     """Both phases at once, for checks whose first step is already paid
     (text, image): claim one check, or raise 429. -> the day charged.
 
@@ -441,11 +465,12 @@ def reserve(request: Request, subject: str | None = None,
         # an hour".
         if _daily_full(day):
             raise _day_is_full(client, now, "slots")
-        _admit_locked(client, now)
+        token = token or uuid.uuid4().hex
+        _admit_locked(client, now, token)
         try:
             _fund_locked(client, day, now, kind, mode)
         except BaseException:
-            _unadmit_locked(client)
+            _unadmit_locked(client, token)
             raise
     return day
 
@@ -524,18 +549,16 @@ def give_back_person(subject: str | None, day: str | None) -> None:
             _person_today[subject] -= 1
 
 
-def release(subject: str | None) -> None:
+def release(subject: str | None, token: str | None = None) -> None:
     """The person's check has ended — answered, failed, refused or refunded —
-    so their next one may start. Safe to call for a subject with nothing
-    running (rate limiting off, or already released)."""
+    so their next one may start. With its claim's `token`, exactly that entry
+    goes, and a second release of the same token does nothing (the engine
+    releases early, the job's `finally` again as a backstop). Safe to call
+    for a subject with nothing running."""
     if not subject:
         return
     with _lock:
-        running = _in_flight.get(subject)
-        if running:
-            running.pop(0)
-            if not running:
-                del _in_flight[subject]
+        _unadmit_locked(subject, token)
 
 
 def drain(timeout: float = 10.0) -> bool:

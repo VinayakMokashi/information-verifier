@@ -72,16 +72,23 @@ class _Spend:
     and the engine is told the mode.
     """
 
-    __slots__ = ("started", "day", "subject", "kind", "mode", "_request")
+    __slots__ = ("started", "day", "subject", "kind", "mode", "_request", "token")
 
     def __init__(self, day: str | None = None, subject: str | None = None,
-                 kind: str = "text", mode: str = "full", request=None) -> None:
+                 kind: str = "text", mode: str = "full", request=None,
+                 token: str | None = None) -> None:
         self.started = False
         self.day = day
         self.subject = subject
         self.kind = kind
         self.mode = mode
         self._request = request
+        self.token = token                # this claim's own in-flight entry
+
+    def release(self) -> None:
+        """This person's check is over: exactly this claim's place in line
+        goes (limits.release by token) — safe to call more than once."""
+        release(self.subject, self.token)
 
     async def fund(self) -> None:
         """A deferred claim's money: the day's slot, the person's allowance
@@ -118,14 +125,16 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False):
     this trap now runs behind the 202, where no refund path exists at all.)
     """
     subject = subject_of(request)
+    token = uuid.uuid4().hex
     if deferred:
         # Free but slow work comes first (review R1, 2026-10-15): hold only
         # the person's place in line until the route calls spend.fund().
-        admitted = admit(request, subject)
-        spend = _Spend(None, subject if admitted else None, kind, "full", request)
+        admitted = admit(request, subject, token)
+        spend = _Spend(None, subject if admitted else None, kind, "full",
+                       request, token)
     else:
-        day, mode = await claim(request, subject, kind)
-        spend = _Spend(day, subject if day else None, kind, mode, request)
+        day, mode = await claim(request, subject, kind, token)
+        spend = _Spend(day, subject if day else None, kind, mode, request, token)
     try:
         yield spend
     except BaseException:
@@ -140,7 +149,7 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False):
             await asyncio.shield(give_back(request, spend.day, spend.kind,
                                            spend.mode, spend.subject))
         # No background check exists to release this person later: it ends here.
-        release(spend.subject)
+        spend.release()
         raise
 
 
@@ -156,11 +165,15 @@ async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
     A CLEAN free cache hit also hands back the day's slot and the person's
     daily check: with a cap of 2 a day (2026-09-22) a forward someone sent
     twice spent half the day on an answer served for $0. Deliberately narrow
-    — anything that paid for OCR or a transcript keeps them. Then, always,
-    the person may start their next check.
+    — anything that paid for OCR or a transcript keeps them.
+
+    The person is released FIRST — the engine already did, just before the
+    answer became visible (review R6); this is the backstop for the paths
+    that never reached it, and releasing the same claim twice does nothing.
     """
     if quota is None:
         return
+    quota.release()
     try:
         if quota.day is not None:
             answer = await asyncio.to_thread(repo.get, job_id)
@@ -176,15 +189,22 @@ async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
                 give_back_person(quota.subject, quota.day)
     except Exception as exc:  # noqa: BLE001 — settling must never cost the answer
         print(f"[quota] settling failed: {type(exc).__name__}: {exc}")
-    finally:
-        release(quota.subject)
+
+
+def _engine_kwargs(quota: _Spend | None) -> dict:
+    """What run_check needs from a claim: the budget mode, and the hook that
+    releases the person just before their answer becomes visible."""
+    if quota is None:
+        return {"mode": "full"}
+    return {"mode": quota.mode, "on_finished": quota.release}
 
 
 async def _run_check_job(job_id: str, text: str, repo, stream=None, *,
                          quota: _Spend | None = None, **check) -> None:
     """The background job of /verify/text and /verify/image: the check, then
     its day settled (`_finish`), however the check ended."""
-    check.setdefault("mode", quota.mode if quota is not None else "full")
+    for key, value in _engine_kwargs(quota).items():
+        check.setdefault(key, value)
     try:
         await run_check(job_id, text, repo, stream, **check)
     finally:
@@ -268,14 +288,14 @@ async def _run_media_job(
     transcription failure, a crash — settles its day (`_finish`)."""
     try:
         await _media_job(job_id, wav, duration, repo, meter, stream, language=language,
-                         mode=quota.mode if quota is not None else "full")
+                         **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
-    language: str | None = None, mode: str = "full",
+    language: str | None = None, mode: str = "full", on_finished=None,
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> the check.
 
@@ -309,7 +329,8 @@ async def _media_job(
         await fail("No speech could be transcribed from this audio.")
         return
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                    kind="media", language=language, mode=mode)
+                    kind="media", language=language, mode=mode,
+                    on_finished=on_finished)
 
 
 @router.post("/verify/text", response_model=JobAccepted, status_code=202)
@@ -512,13 +533,14 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
     however it ends."""
     try:
         await _link_job(job_id, info, repo, stream, language=language,
-                        mode=quota.mode if quota is not None else "full")
+                        **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
-                    language: str | None = None, mode: str = "full") -> None:
+                    language: str | None = None, mode: str = "full",
+                    on_finished=None) -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
@@ -550,7 +572,8 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
         if key and text.strip() != _caption_text(info).strip():
             await safe_cache_call(repo.transcripts.put, key, text)
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
-                    kind="link", language=language, mode=mode)
+                    kind="link", language=language, mode=mode,
+                    on_finished=on_finished)
 
 
 @router.post("/verify/link", response_model=JobAccepted, status_code=202)

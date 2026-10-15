@@ -353,9 +353,9 @@ def test_a_submission_cancelled_mid_claim_gives_its_slot_back(limited, monkeypat
 
     real = L.reserve
 
-    def slow_reserve(request, subject=None, kind="text", mode="full"):
+    def slow_reserve(request, subject=None, kind="text", mode="full", token=None):
         time.sleep(0.4)                  # a contended write
-        return real(request, subject, kind, mode)
+        return real(request, subject, kind, mode, token)
 
     monkeypatch.setattr(L, "reserve", slow_reserve)
 

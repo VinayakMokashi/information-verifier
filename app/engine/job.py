@@ -51,17 +51,31 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                     kind: str = "text",
                     language: str | None = None,
                     mode: str = "full",
-                    cache_only: bool = False) -> None:
+                    cache_only: bool = False,
+                    on_finished=None) -> None:
     """Check `text`, stream it, store it. Never raises.
 
     `mode` is what the day's budget still buys (chat.answer). `cache_only`:
     the route served a repeat for free, with no slot and no reservation, on
     the strength of a cache hit — so a miss here (it expired in between)
     must FAIL rather than buy an unbudgeted check.
+
+    `on_finished()` runs right BEFORE the finished answer is saved — so
+    before anyone polling can see it (review R6: the person was released
+    only after the ledger and the settling, and a client that saw COMPLETE
+    and sent its next message was told it "already had a check running").
+    It must be safe to call twice.
     """
     answer = await asyncio.to_thread(repo.get, job_id)
     if answer is None:                      # defensive: the row is made first
         return
+
+    def finished() -> None:
+        if on_finished is not None:
+            try:
+                on_finished()
+            except Exception as exc:  # noqa: BLE001 — never costs the answer
+                print(f"[job] on_finished failed: {type(exc).__name__}: {exc}")
 
     meter = meter or UsageMeter()
 
@@ -94,6 +108,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 answer.status = JobStatus.COMPLETE
                 answer.completed_at = datetime.now(timezone.utc)
                 answer.usage = meter.snapshot()      # honestly $0
+                finished()
                 await asyncio.to_thread(repo.save, answer)
                 for section in answer.sections:
                     await emit("text", {"text": section.markdown,
@@ -148,6 +163,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         # Failures cost money too — the bill is attached either way.
         answer.usage = meter.snapshot()
         answer.completed_at = datetime.now(timezone.utc)
+        finished()
         await asyncio.to_thread(repo.save, answer)
         # The spend ledger outlives the answer (which is deleted after
         # answer_retention_days). A ledger failure must not lose the answer.

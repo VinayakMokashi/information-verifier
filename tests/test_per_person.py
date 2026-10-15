@@ -249,3 +249,83 @@ def test_the_allowances_match_the_decision():
     assert settings.person_daily_limits["tg"] == 5
     assert settings.person_daily_limits["wa"] == 5
     assert settings.person_daily_limits["dev"] == 3
+
+
+# -- review R11, R6 (2026-10-15): release exactly one's own place, and in time --
+
+def test_a_late_release_frees_only_its_own_place(limiting, monkeypatch):
+    """REPRODUCED (review R11): check 1 hung past the TTL, check 2 was
+    granted, and check 1's late release popped check 2's entry — so check 3
+    ran beside check 2, the thing the rule forbids."""
+    clock = [1000.0]
+    monkeypatch.setattr(limits, "_now", lambda: clock[0])
+    assert limits.reserve(_bot(1), token="first")
+    clock[0] += settings.in_flight_ttl_s + 1
+    assert limits.reserve(_bot(1), token="second")    # the first one hung
+    clock[0] += 1
+    limits.release("tg:1", "first")                   # ...and ends late
+    with pytest.raises(HTTPException) as busy:
+        limits.reserve(_bot(1), token="third")
+    assert "already" in busy.value.detail             # the second still runs
+    limits.release("tg:1", "second")
+    assert limits.reserve(_bot(1), token="third")
+
+
+def test_releasing_twice_is_harmless(limiting):
+    assert limits.reserve(_bot(1), token="a")
+    limits.release("tg:1", "a")
+    limits.release("tg:1", "a")                       # the backstop, after the early one
+    assert limits._in_flight == {}
+
+
+def test_a_person_is_released_before_their_answer_becomes_visible():
+    """REPRODUCED (review R6, real headless Chrome): run_check saved the
+    COMPLETE answer, and the person was released only after the ledger and
+    the settling — so a client that polled COMPLETE and sent its next
+    message was told it "already had a check running"."""
+    import asyncio
+
+    import scripts.fake_stages as F
+    from app.engine import chat as C
+    from app.engine.job import run_check
+    from app.models.answer import Answer, JobStatus
+
+    order = []
+
+    class Repo:
+        class cache:
+            @staticmethod
+            def get(key):
+                return None
+
+            @staticmethod
+            def put(*a):
+                return None
+
+        class ledger:
+            @staticmethod
+            def record(*a):
+                return None
+
+        def __init__(self):
+            self.row = Answer(job_id="j", status=JobStatus.QUEUED,
+                              created_at="2026-10-15T00:00:00Z")
+
+        def get(self, job_id):
+            return self.row
+
+        def save(self, answer):
+            order.append(("save", answer.status.value))
+
+    async def go():
+        real = C.answer
+        C.answer = F.fake_answer
+        try:
+            await run_check("j", "5G spreads corona", Repo(),
+                            on_finished=lambda: order.append(("released", None)))
+        finally:
+            C.answer = real
+
+    asyncio.run(go())
+    complete = order.index(("save", "COMPLETE"))
+    assert ("released", None) in order[:complete]
