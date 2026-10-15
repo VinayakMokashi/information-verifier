@@ -21,12 +21,12 @@ here and committed the moment it exists; see CLAUDE.md, "Interruptions".
 | [audit-security.md](audit-security.md) | Code audit — security and abuse once strangers can reach it | verified: 12 verdicts, severities corrected, 4 new findings |
 | [audit-ops.md](audit-ops.md) | Code audit — operations, reliability, privacy, 24/7 for strangers | verified: 28 findings, 3 severities lowered |
 | [ytdlp-cloud-ips.md](ytdlp-cloud-ips.md) | Do reel/Shorts links still resolve from a datacenter IP? | verified: all confirmed, one price corrected |
-| [cloud-hosting.md](cloud-hosting.md) | Cloud hosts for running it 24/7 | pending (verifier killed by the network drop) |
-| [home-tunnel.md](home-tunnel.md) | Staying on the home PC behind a tunnel | pending (verifier killed) |
-| [limits-budget.md](limits-budget.md) | Budget, per-person limits, a bot shield for strangers | pending (verifier killed) |
-| [policy-legal.md](policy-legal.md) | Policy and compliance for a free public service in India | pending (verifier killed) |
+| [cloud-hosting.md](cloud-hosting.md) | Cloud hosts for running it 24/7 | verified ([cloud-hosting.verification.md](cloud-hosting.verification.md)): ranking holds; Lightsail's billing via AWS India unconfirmed; DigitalOcean $6 only on "Bundled" plans |
+| [home-tunnel.md](home-tunnel.md) | Staying on the home PC behind a tunnel | verified ([home-tunnel.verification.md](home-tunnel.verification.md)): tunnel facts hold; Cloudflare Registrar may decline Indian cards (3D Secure) |
+| [limits-budget.md](limits-budget.md) | Budget, per-person limits, a bot shield for strangers | verified ([limits-budget.verification.md](limits-budget.verification.md)): numbers hold; adds credit-exhaustion handling and two cache/budget code gaps |
+| [policy-legal.md](policy-legal.md) | Policy and compliance for a free public service in India | verified ([policy-legal.verification.md](policy-legal.verification.md)): DPDP dates from the gazette; one-year retention duties from May 2027; Anthropic AUP high-risk categories |
 | [pwa-app.md](pwa-app.md) | The cheap "app": installable PWA, Play Store route | verified |
-| whatsapp.md | Starting a WhatsApp bot on Meta's Cloud API | **not yet** — both attempts killed; re-running |
+| [whatsapp.md](whatsapp.md) | Starting a WhatsApp bot on Meta's Cloud API | **in progress** — third attempt writing as it goes; this is a checkpoint |
 
 Each file states its own verification status at the top, and a finding a
 verifier corrected carries the verdict inline. Treat anything unverified as
