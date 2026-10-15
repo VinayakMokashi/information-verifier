@@ -64,13 +64,21 @@ found 15 issues (its file is COMPLETE). FIXED: R1 5f8e7db (free work holds
 nothing), R2+R3 2f4d825 (share links: no port, no line breaks, one
 deadline), R6+R11 05418fa (release by token, before the answer shows),
 R9+R13+R14 2d3b5c8 (IPv4 may run 3 at once; Telegram sender_chat; free
-repeats count toward the hour), R15 (the limiter's lock guards memory only,
-never SQLite I/O — /health under a held write: 7.02 s → 0.02 s, real
-uvicorn) · NEXT: R4+R5 (root_path; a Host allowlist for paid POSTs), R7
-(test arithmetic), R8 (the Google key in a header). DEFERRED to §11: R10 (authenticate the bot with a secret, not
-"looks local"), R12 (bot restart → OPS-07). Then Anthropic's "out of
-credit / spend limit" errors read "back later"; the budget on the
-dashboard; Turnstile + device cookie.
+repeats count toward the hour), R15 3bd7772 (the limiter's lock guards
+memory only, never SQLite I/O — /health under a held write: 7.02 s →
+0.02 s, real uvicorn) · RE-CHECKED with the reviewer's own scripts
+(2026-10-16; the review file's "re-checked" section), which found five
+more, all fixed: dc3ebd4 (the suite held the REAL keys — dummy keys now,
+and it passes with no .env), f4f00b1 (a test for a link cancelled while
+funding), 4f6be5c (a rollback never on the event loop), 2147412 (release
+needs the claim's token — R11 had survived as the no-token call), 56c3990
+(a second cancellation cannot strand a person). PROJECT_PLAN §7 has the
+entry; §11 25–26 hold the DEFERRED R10 (authenticate the bot with a
+secret, not "looks local") and R12 (bot restart → OPS-07) · NEXT: R4+R5
+(root_path; a Host allowlist for paid POSTs), R7 (test arithmetic), R8
+(the Google key in a header). Then Anthropic's "out of credit / spend
+limit" errors read "back later"; the budget on the dashboard (and its
+ledger reads off the event loop); Turnstile + device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to
@@ -114,13 +122,14 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 879 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 986 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
 ~$0.05-0.06 when a fact-checker covered it, ~$0.15-0.17 when it searches the
 wider web, ~$0.08-0.26 for a reel, $0 for a repeat or for "hi". The whole app
-is capped at 5 CHECKS A DAY. DON'T run paid tests without asking me —
+spends at most $1 A DAY (and 5 checks a day per Telegram user). DON'T run
+paid tests without asking me —
 CLAUDE.md has a table of free paths that cover nearly everything.
 
 To run it: double-click start.cmd (the app + the Telegram bot, two windows).
@@ -191,7 +200,7 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **879 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **986 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
@@ -223,10 +232,13 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 instructions, ~5,900 the web-search tool's own. That is why the shortcut,
 which sends no tool, is so cheap.
 
-**Safety settings in force:** 5 checks a day deployment-wide (persisted in
-SQLite, India's day, shared by page and bot, fails closed); messages deleted
-after 30 days with costs kept content-free; the dashboard is refused to
-anything that is not this machine.
+**Safety settings in force:** a $1-a-day dollar budget deployment-wide
+(each check reserves its kind's worst case and settles at its real cost;
+cheaper as the day drains; 40 checks a day at most as a backstop; persisted
+in SQLite, India's day, shared by page and bot, fails closed); per person,
+one check at a time and 5 a day (Telegram, WhatsApp; 20 per IPv4 address);
+messages deleted after 30 days with costs kept content-free; the dashboard
+is refused to anything that is not this machine.
 
 ---
 
@@ -283,14 +295,14 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 842 tests, ~1 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 986 tests, ~1 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
 .\.venv\Scripts\python.exe scripts\telegram_bot.py --check-token
 ```
 
-**Real (spends money — ask first; 5 checks a day):**
+**Real (spends money — ask first; the app's $1-a-day budget):**
 
 **One click: double-click `start.cmd`** in the project folder (or run
 `.\start.ps1` in a terminal). It opens the app in one window, waits until it

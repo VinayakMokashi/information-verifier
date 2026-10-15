@@ -29,16 +29,16 @@ which landed while this review ran).
 | R3 | should-fix - FIXED 2f4d825 (re-checked) | ca76538 | A share link + newline (a normal Telegram message) is an uncaught `httpx.InvalidURL` -> 500 -> "try again later"; it was a 422 before |
 | R4 | nice-to-have | 1080d2d, 50dcf3b | With a root_path (`--root-path` / `UVICORN_ROOT_PATH`) both middlewares stop matching: cross-site POSTs pass again, uploads over 64 KiB are refused |
 | R5 | nice-to-have | 1080d2d | A DNS-rebinding page is "same-origin" and passes; the paid routes never check Host |
-| R6 | nice-to-have | 020e26f | The person is released after the bookkeeping, so "poll until COMPLETE, then submit" gets "already running" about half the time |
+| R6 | nice-to-have - FIXED 05418fa (re-checked) | 020e26f | The person is released after the bookkeeping, so "poll until COMPLETE, then submit" gets "already running" about half the time |
 | R7 | nice-to-have | 50dcf3b | The pinned body-cap arithmetic is x6 per character; an emoji is x12 |
 | R8 | nice-to-have | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
-| R9 | should-fix | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
-| R10 | nice-to-have | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
-| R11 | nice-to-have | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |
-| R12 | nice-to-have | 020e26f x OPS-07 | After a bot restart, "wait for its answer" promises an answer the bot forgot |
-| R13 | nice-to-have | 020e26f | All anonymous group admins (and all "post as channel" senders) are one Telegram person |
-| R14 | should-fix | 0951150 (outside the seven) | Cache-hit repeats skip every limit: unbounded job rows and in-memory streams from one visitor |
-| R15 | should-fix | 020e26f (+5f8e7db) | `release()` (and at HEAD `admit()`) take the limiter lock on the event loop while a claim holds it across a contended SQLite write: /health froze 7 s |
+| R9 | should-fix - FIXED 2d3b5c8 (re-checked) | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
+| R10 | nice-to-have - DEFERRED (PROJECT_PLAN 11.25) | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
+| R11 | nice-to-have - FIXED 05418fa + 2147412 (re-checked) | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |
+| R12 | nice-to-have - DEFERRED (PROJECT_PLAN 11.26, OPS-07) | 020e26f x OPS-07 | After a bot restart, "wait for its answer" promises an answer the bot forgot |
+| R13 | nice-to-have - FIXED 2d3b5c8 (re-checked) | 020e26f | All anonymous group admins (and all "post as channel" senders) are one Telegram person |
+| R14 | should-fix - FIXED 2d3b5c8 (re-checked) | 0951150 (outside the seven) | Cache-hit repeats skip every limit: unbounded job rows and in-memory streams from one visitor |
+| R15 | should-fix - FIXED 3bd7772 + 4f6be5c (re-checked) | 020e26f (+5f8e7db) | `release()` (and at HEAD `admit()`) take the limiter lock on the event loop while a claim holds it across a contended SQLite write: /health froze 7 s |
 
 Sound (details at the end): release exactly once on all 28/29 route paths at
 all three snapshots; cancellation; the hop-by-hop SSRF fence; RefuseCrossSite's
@@ -493,10 +493,66 @@ A test: hold the DB's write lock in another connection, start a claim, call
   In this scratch run the bot's text check then failed only because the
   engine had dummy keys and no network.
 
+## The fixes for R6-R15, re-checked (2026-10-16)
+
+Run by the main session with the reviewer's own scripts and isolation
+(`_rboot.py`): `REVIEW_SNAP=wt` is a copy of the working tree at each fix,
+and `snap-2d3b5c8` the code before R15's fix.
+
+- R15 (3bd7772), `r20_loop_lock.py`: /health while another connection holds
+  the write lock for 8 s - at 2d3b5c8 `control 0.02 s`, `a check ends 7.02 s`,
+  `a link arrives 7.02 s`; at 3bd7772 `0.02 / 0.00 / 0.02 s`.
+- R14 (2d3b5c8), `r18_cache_hit_flood.py`: `600 repeats from ONE visitor in
+  7.6 s: 202 x9, 429 x591 (hourly limit is 10)`, `job rows: 10   streams held
+  in memory: 10` (were 601 and 601).
+- R13 (2d3b5c8), `r14_tg_subjects.py`: each anonymous admin and each "post as
+  channel" sender is its own `tgchat:<sender_chat.id>` (were all
+  `tg:1087968824` / `tg:136817688`).
+- R9 (2d3b5c8), `r12_subject_shapes.py` part G: `person A: granted   person
+  B, same address, meanwhile: granted`.
+- R11 (05418fa): r12's part F cannot show it any more - it calls
+  `release(subject)` with no token, and its IPv4 visitor may run 3 at once
+  since R9. `r12b_ttl_release_token.py` (an IPv6 visitor, one in flight,
+  each claim's own token): the third check is refused while the second
+  runs. **But the same scenario in the old call shape - no token - still
+  granted the third**: the no-token release freed the OLDEST entry, R11
+  surviving its own fix. Fixed in 2147412 (the token is required; a None
+  token frees nothing); both shapes now refuse.
+- R1 still holds after R15 restructured the claim (`r05c_lockout_fixcheck.py`):
+  `during the resolves used_today=0 committed=$0.00 mode=full in_flight=5`,
+  the unrelated visitor 202, afterwards `in_flight=0`.
+- Release on every route exit: `r01b`'s counting stub takes ONE argument, so
+  every row raised inside the stub itself (`TypeError: counting_release()
+  takes 1 positional argument but 2 were given`) and read BAD - a harness
+  that no longer tests anything. `r01c_release_paths_token.py` (the stub
+  takes the token): nothing stuck on any of the 29 paths. Success paths call
+  release() 2-3 times - the engine's early release (R6), then `_finish`'s
+  backstop - and a repeat of the same token does nothing (pinned in
+  tests/test_per_person.py).
+- Cancellation: `r02` was written for 020e26f, when a link claimed BEFORE it
+  resolved. At HEAD its C2 stub (a slow `reserve`) is never called - the
+  link route admits, resolves, then funds - and C3 waits for a refund that
+  a resolve-stage failure no longer makes. `r02b_cancel_paths_token.py` C1:
+  `releases=1 used_today=1 in_flight={}  next check: granted`. The
+  fund-stage cancellation the harness can no longer reach is now a test
+  (f4f00b1), shown failing against two mutants.
+
+Found while re-checking, each reproduced and fixed test-first:
+- 4f6be5c - R15's rule broken a second way: a cancelled claim's rollback
+  ran ON the event loop (`MainThread`) when the claim had already finished
+  in the pool at the instant its caller was cancelled, because
+  `add_done_callback` then runs the callback inline.
+- 56c3990 - the C3 edge under "Checked and found sound": `release()` now
+  sits in a `finally`.
+- dc3ebd4 - the test suite itself ran with the five real keys from .env
+  loaded; 8 link and voice tests passed only because a real Sarvam key was
+  there. Dummy keys are now set before the app is imported; 982 pass on a
+  copy with no .env.
+
 ## Checked and found sound
 
 - 020e26f, release on every route exit (r01_release_paths.py, 28 paths): text/image/media/link success, every 4xx/5xx refusal, a failed `_new_job`, OCR raising, and a background job raising in run_check, `_settle_quota`, ASR, `_check`, `fail_job` or gather - each released exactly once, `_in_flight` empty after. Over-length and small-talk refusals claim nothing and release nothing. Re-run at 55d3de0 (its `owns_release` change): all 28 still exactly once; r02 identical. Re-run at 0951150 (`_finish` replaced `_check`/`_settle_quota`; r01b_release_paths_head.py, 29 paths incl. the new claim-free cache-hit branch and a `settle` that raises): all exactly once.
-- 020e26f, cancellation (r02_cancel_paths.py): a route cancelled during the link resolve releases once and refunds; a claim cancelled while still in the pool is refunded and released once by `_rollback`. One edge, moot in practice: a SECOND cancellation landing on `_quota`'s shielded refund skips `release()` (`C3 ... releases=0 ... next check: 429 You already have a check running`), because the release follows the shielded await instead of sitting in a `finally`. Neither uvicorn nor Starlette cancels a plain JSON handler on disconnect, so only shutdown (asyncio.run's final cancel-all) can do this, and the in-memory table dies with the process. Moving `release` into a `finally` would make it unconditional.
+- 020e26f, cancellation (r02_cancel_paths.py): a route cancelled during the link resolve releases once and refunds; a claim cancelled while still in the pool is refunded and released once by `_rollback`. One edge, moot in practice: a SECOND cancellation landing on `_quota`'s shielded refund skips `release()` (`C3 ... releases=0 ... next check: 429 You already have a check running`), because the release follows the shielded await instead of sitting in a `finally`. Neither uvicorn nor Starlette cancels a plain JSON handler on disconnect, so only shutdown (asyncio.run's final cancel-all) can do this, and the in-memory table dies with the process. Moving `release` into a `finally` would make it unconditional. (Done 2026-10-16, 56c3990, reproduced first.)
 - 020e26f, one subject cannot hold two checks: five concurrent links from one /64 -> 1 runs, 4 x 429 "already running" (r05 part 1).
 - ca76538, the SSRF fence on hops (r04_share_edges.py part A, 19 Locations): protocol-relative, off-allowlist, http downgrade, 127.0.0.1, [::1], userinfo `@`, backslash-userinfo, homoglyph and punycode hosts, javascript:/data: - none was ever requested; uppercase host and relative paths resolve correctly; /login and /login.php land as "gated"; the hop count is bounded at 3.
 - 1080d2d, header handling on real uvicorn (r07_cross_site.py, raw sockets): our page with Sec-Fetch-Site same-origin -> 202; our page with Origin only -> 202; no Origin and no Sec-Fetch-Site (bot/curl) -> 202; cross-site, UPPER-CASE header names, an unknown Sec-Fetch-Site value, `Origin: null`, Origin without a Host header, same host on another port -> 403 with nothing paid; IPv6 `[::1]:8000` Host/Origin match -> 202; `//api/v1/verify/image` cross-site -> 405 (not routed, nothing paid). Duplicate Origin (ours first) passes, but no browser can send two.

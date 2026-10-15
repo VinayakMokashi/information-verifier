@@ -28,11 +28,16 @@ The model said $0.16 and $0.26; reality came in 2–3× cheaper. Sonnet 5 beat
 Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
 (§7, 2026-09-22).
 
-**Safety settings in force** (Vinayak, 2026-09-22):
-- **5 checks a day** (2 until 2026-09-29), deployment-wide — web page and
-  Telegram bot share it.
+**Safety settings in force** (Vinayak, 2026-09-22; the budget 2026-10-15):
+- **$1 a day**, deployment-wide — web page and Telegram bot share it. Each
+  check reserves its kind's worst case and settles at its real cost; the
+  day gets cheaper as it drains; 40 checks a day at most, as a backstop
+  (it was a count: 2 a day, then 5 from 2026-09-29).
   Persisted in SQLite, so a restart cannot refill it; resets at midnight
-  India time; a check served free from cache gives its slot back.
+  India time; a check served free from cache gives everything back.
+- **Per person:** one check at a time; 5 paid checks a day per Telegram
+  user (and WhatsApp number, to come); web visitors by address until
+  device cookies exist (§7, 2026-10-16).
 - Messages are deleted after **30 days**; what they cost is kept, with no
   content, in a spend ledger.
 - A **spending dashboard** at `http://127.0.0.1:8000/dashboard` — this
@@ -80,7 +85,10 @@ one-click launcher, `start.cmd`. **2026-10-11: three cost cuts, measured**
 **$0.0084 in 6.7 s** (was ~$0.05 and 28–51 s); pass 1 says "not covered" in
 one sentence instead of an essay; "hi" costs nothing. **2026-10-15:** no
 credential reaches any printed line (§11 17 closed, and the bot token's own
-leak through error text); translated Hindi lookups measured. **858 tests.**
+leak through error text); translated Hindi lookups measured.
+**2026-10-15/16: the pre-public blockers are fixed** — per-person limits,
+the $1-a-day budget that gets cheaper as it drains, no cross-site paid
+checks, no oversized-post freeze — and reviewed twice (§7). **986 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -422,6 +430,72 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-16 — The pre-public blockers fixed; the fixes reviewed; the review's fixes re-checked
+
+Built in the brief's order, each test-first (the commit messages carry the
+measurements):
+
+- **One 25 MB text post froze the whole server** (50dcf3b): the only body
+  cap was the upload one, the triage walked every character ON the event
+  loop, and the refused post was refunded — free to repeat. Real uvicorn:
+  /health frozen 6.3–9.6 s → at worst 0.6 s. Non-upload routes cap at
+  64 KiB, chosen by PATH (Content-Type is the client's word).
+- **Other websites could submit paid checks through their visitors**
+  (1080d2d): multipart is CORS-"simple", so no preflight ever asked. In
+  real headless Chrome the vision call ran and a slot was taken → nothing
+  paid. `RefuseCrossSite` reads Sec-Fetch-Site / Origin; a request with
+  neither (the bot, curl) is not from a page and passes.
+- **Counted per PERSON, not per connection** (020e26f): every Telegram user
+  was one bucket — the bot, on 127.0.0.1. The bot now names the person
+  (honoured only from this machine, `app/api/local.py`); web visitors are
+  an IPv6 /64 or an IPv4 address. One check in flight per person.
+- **Daily allowances** (55d3de0): Telegram 5, WhatsApp 5, web device 3 (the
+  Turnstile cookie, to come), IPv6 /64 5, IPv4 20 (carrier NAT) — in
+  memory only, so who someone is never reaches the disk.
+- **The $1-a-day budget** (20e882d): each check reserves its kind's worst
+  case (text $0.20, image $0.25, reel/voice $0.30) in ONE conditional
+  statement and settles at its real cost; the 5-a-day count became a
+  40-a-day backstop. Checked on a copy of the real database first.
+- **Cheaper as the day drains; repeats free** (0951150): under 40% left, no
+  open-web pass; under 15%, text only — a published fact-check or an honest
+  "budget used up", never cached (measured: without that rule it WAS).
+
+**A reviewer agent then attacked those fixes** and reproduced 15 issues
+([review-blockers.md](docs/research/2026-10-15/review-blockers.md)). The
+worst, R1: five visitors whose slow links were refused held all five daily
+slots and told everyone "try again tomorrow" — so a claim now has two
+phases, *admit* before any free work (only the person's place in line) and
+*fund* right before the first paid step (5f8e7db; 5 of 5 slots held → 0).
+R15: the limiter held its lock across SQLite writes while the event loop
+took the same lock — under another writer, /health 7.02 s → 0.02 s
+(3bd7772). Fixed: R1–R3, R6, R9, R11, R13–R15. Open: R4, R5, R7, R8.
+Deferred: R10, R12 (§11 25–26).
+
+**Re-running the reviewer's own scripts against those fixes found five
+more** — "review the fix", again:
+- **R11 survived its own fix** in the old call shape: `release(subject)`
+  with no token still freed the OLDEST entry. The token is now required
+  (2147412).
+- A cancelled claim's rollback ran **on the event loop** when the claim had
+  already finished — `add_done_callback` then runs inline (4f6be5c).
+- A second cancellation left a person "in flight" for 15 minutes; the
+  reviewer had called it moot (56c3990).
+- A link cancelled while its money was being reserved had no test at all
+  (f4f00b1).
+- **The "free" suite held all five REAL keys** (dc3ebd4): 8 link and voice
+  tests passed only because .env had a real Sarvam key, and any seam a test
+  forgot to fake would have reached a provider with a key it bills. Dummy
+  keys now come before the app is imported; 982 pass on a copy with no .env.
+
+**Lesson: a harness written for one version silently stops testing the
+next.** Three of the reviewer's scripts raised inside their own stubs (a
+one-argument `release`) and printed BAD on every row, and the cancellation
+script could no longer reach the path it was named for. Read what a re-run
+printed before trusting either verdict, and when the code moved, adapt a
+copy of the harness rather than the conclusion. And prove a new test
+against a mutant while watching for a hang: f4f00b1's first draft spun
+forever when the request ended before reaching the code under test.
 
 ### 2026-10-15 (later) — How it goes public: Vinayak's four decisions
 
@@ -1830,11 +1904,11 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    Same day, same rule (63f8049): the **bot token** leaked through httpx
    error text (every Bot API URL carries it) whenever Telegram refused a
    file over 20 MB — `TelegramClient._check` now raises without the URL.
-18. **The bot answers anyone.** @Information_Verifier_bot has no allow-list:
-   whoever finds the username can send checks, and every one comes out of
-   the same 5 a day. The cap bounds the money, not who uses it. An
-   owner-only mode (an allow-list of Telegram user ids in `.env`, polite
-   refusal for others, checked before any submit) is small and free.
+18. ~~**The bot answers anyone.**~~ **DECIDED 2026-10-15: it should** —
+   Vinayak chose "anyone, 5 a day each" over an owner-only allow-list
+   (§7). Built: each Telegram user is counted as themselves (020e26f; the
+   anonymous-admin and post-as-channel stand-ins, 2d3b5c8), with 5 paid
+   checks a day each (55d3de0), inside the $1-a-day budget (20e882d).
 19. **The bot's own startup check accepts the demo server.** `app_is_up`
    wants `{"status": "ok"}`, which `serve_demo.py` also returns, so a bot
    started by hand next to a running demo would send fake verdicts.
@@ -1875,6 +1949,24 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    ~270 s poll window: the person is asked for "any message" to collect it.
    Either raise `_POLL_MAX`, or bound pass 2's search work (item 21 may
    solve it).
+25. **The bot's right to name a person rests on "this request looks
+   local"** (review R10, deferred 2026-10-16). Behind a local reverse proxy
+   that adds no forwarding header (nginx's default shape), every visitor
+   looks local and could name a fresh person per request, escaping every
+   per-person limit; and if the bot ever runs anywhere but beside the app,
+   its naming is ignored without a word and all of Telegram becomes one
+   person. Neither is today's setup. Fix before either changes: a shared
+   secret in `.env`, sent by the bot as a header and compared with
+   `hmac.compare_digest`, honoured from anywhere; and a 202 that echoes the
+   person it counted, so the bot can complain loudly when it was not.
+26. **After a bot restart, "wait for its answer" promises an answer the bot
+   has forgotten** (review R12, deferred to OPS-07). The bot keeps its
+   pending job ids in memory; restarted while someone's check runs, it
+   relays the one-in-flight refusal about a check whose answer will never
+   arrive. Root fix: persist the pending job ids (OPS-07). Cheaper and
+   complementary: for a BOT-named person only (never an address, where it
+   would hand one NAT neighbour another's job), return the running job's id
+   with the 429, so the bot can resume and deliver it.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

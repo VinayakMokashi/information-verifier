@@ -20,12 +20,14 @@ is how to work here.
   answer carries its own bill in `answer.usage`, and
   **`http://127.0.0.1:8000/dashboard`** (this machine only) shows the total;
   the spend ledger's total is the truth, not anyone's sum.
-- **The deployment is capped at 5 checks a day** (Vinayak, 2026-09-22: 2 a
-  day "just to be safe … we can increase it later"; raised to 5 on
-  2026-09-29 for quality testing). Persisted in SQLite, India's day,
-  shared by the web page and the Telegram bot; a test pins the default.
-  Operator scripts (`smoke_test.py`, `ab_models.py`) do not go through it —
-  they are still paid, so still ask.
+- **The deployment spends at most $1 a day** (Vinayak, 2026-10-15; it
+  replaced a count — 2 a day from 2026-09-22, 5 from 2026-09-29 — kept as
+  a 40-a-day backstop). Each check reserves its kind's worst case and
+  settles at its real cost; per person, one at a time and 5 a day on
+  Telegram (PROJECT_PLAN §7, 2026-10-16). Persisted in SQLite, India's
+  day, shared by the web page and the Telegram bot; tests pin the
+  defaults. Operator scripts (`smoke_test.py`, `ab_models.py`) do not go
+  through it — they are still paid, so still ask.
 - **Prefer the free path, and there is almost always a free path:**
 
   | Command | Cost | Proves |
