@@ -43,7 +43,7 @@ voice note, screenshot or reel link; the bot replies with a verdict and sources.
     2026-05-04.
 
   **Assessment: probably permissible as a single-purpose verification service that offers a
-  human escalation path. It is not risk-free, and only Meta can retire the risk** (W14–W21).
+  human escalation path. It is not risk-free, and only Meta can retire the risk** (W13–W19).
 - **Recommended route: Meta Cloud API directly.** BSPs (Twilio, Gupshup, AiSensy, Interakt,
   WATI) add fees, but they do not add eligibility. They ask for the same documents and are bound
   by the same section 4.7.
@@ -226,7 +226,7 @@ needs a privacy policy anyway.
   buttons) remain free for delivery.
 - Meta Business Agent messages (Meta's own AI) cost USD 2.00 per 1M tokens from 2026-08-01.
   A message is never charged twice.
-- AI Providers are billed under a separate policy (W15).
+- AI Providers are billed under a separate policy (W14).
 - Sending rules are unchanged. Free-form replies are still allowed only inside the 24-hour
   window, which "opens and resets with each user message".
 

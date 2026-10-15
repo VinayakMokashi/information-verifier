@@ -26,7 +26,7 @@ here and committed the moment it exists; see CLAUDE.md, "Interruptions".
 | [limits-budget.md](limits-budget.md) | Budget, per-person limits, a bot shield for strangers | verified ([limits-budget.verification.md](limits-budget.verification.md)): numbers hold; adds credit-exhaustion handling and two cache/budget code gaps |
 | [policy-legal.md](policy-legal.md) | Policy and compliance for a free public service in India | verified ([policy-legal.verification.md](policy-legal.verification.md)): DPDP dates from the gazette; one-year retention duties from May 2027; Anthropic AUP high-risk categories |
 | [pwa-app.md](pwa-app.md) | The cheap "app": installable PWA, Play Store route | verified |
-| [whatsapp.md](whatsapp.md) | Starting a WhatsApp bot on Meta's Cloud API | **in progress** — third attempt writing as it goes; this is a checkpoint |
+| [whatsapp.md](whatsapp.md) | Starting a WhatsApp bot on Meta's Cloud API | complete, **not yet independently verified**; third attempt (the first two were killed) |
 
 Each file states its own verification status at the top, and a finding a
 verifier corrected carries the verdict inline. Treat anything unverified as

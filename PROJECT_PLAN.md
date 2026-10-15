@@ -423,6 +423,44 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-10-15 (later) — How it goes public: Vinayak's four decisions
+
+From the brief ([docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md)),
+itself built from verified research and two reproduced code audits in the
+same folder:
+
+1. **Where: this PC now, behind a Cloudflare NAMED tunnel; a cloud VM
+   (AWS Lightsail Mumbai, ~₹730/month) later**, when uptime starts to matter.
+   cloudflared runs on the VM too, so the move is a copy of the setup. Why
+   the PC first: ~₹115–425/month all-in (domain + electricity) against ~₹730,
+   and reel links keep working — YouTube blocks datacenter IPs at the very
+   first request (verified, `ytdlp-cloud-ips.md`); on the VM they would need
+   link traffic routed home or a residential proxy with its own byte budget.
+2. **Budget: a $1-a-day ceiling** (~₹2,600/month at most; ~15 checks a day
+   at the measured mix, ~8 on a day of fresh rumours), as a DOLLAR budget
+   replacing the 5-checks count: reserve a check's worst case, settle at
+   its real cost, get cheaper as the day drains (skip the open-web pass,
+   then only cached and fact-check-shortcut answers), repeats free even at
+   zero. Per person: 3 a day per web device (a cookie issued only after
+   Cloudflare Turnstile), 5 per Telegram user, 5 per WhatsApp number; one
+   check in flight per person; nobody more than a quarter of the day.
+   Outside the app: a separate Anthropic workspace with a monthly spend
+   limit, prepaid credits with auto-reload off, Sarvam prepaid with 0-day
+   retention.
+3. **The bot: open to anyone, 5 checks a day each** — chosen over the
+   recommended owner-only-until-launch. Until the per-person limit exists,
+   the bot stays as it is (it is not running); building that limit is first.
+4. **Domain: a .com through Cloudflare Registrar.** Its billing requires 3D
+   Secure on Indian cards and lists no RuPay/UPI (verified); if the card is
+   declined, any registrar works with Cloudflare's nameservers.
+
+**Build order** (brief §6), each step test-first, committed, reviewed:
+the five reproduced blockers → the dollar budget, per-person limits and
+Turnstile → restarts, the ledger and monitoring → running 24/7 here (the
+domain, cloudflared as a service, auto-start) → privacy notice, terms, the
+installable-app manifest → then WhatsApp, whose §4.7 AI-provider risk is
+settled before anything is paid for.
+
 ### 2026-10-15 — Before any public URL: no secret in any printed line
 
 Vinayak asked for the website/WhatsApp/to-do plan (§11 A–C), choices laid
@@ -1659,8 +1697,12 @@ Quick reference:
 app/website which anyone can access and also a whatsapp bot. And also work
 on the remaining todo's"):**
 
-A. **A website / app anyone can use.** Today it runs on this PC and the page
-   opens only here. What going public needs — decisions first, then code:
+A. **A website / app anyone can use.** **DECIDED 2026-10-15** (§7): this PC
+   behind a Cloudflare named tunnel now, a Mumbai VM later; a $1/day dollar
+   budget with per-person limits; the bot open to anyone at 5 a day each; a
+   .com via Cloudflare. The research and the reproduced audits behind it are
+   in `docs/research/2026-10-15/`; the brief's §6 is the build order. The
+   original framing, kept for the record — decisions first, then code:
    - **Where it runs, 24/7.** Options: a small cloud host (Render, Railway,
      Fly.io, or a ₹400–800/month VPS) with a persistent disk for SQLite and
      ffmpeg + yt-dlp installed — ONE worker (in-memory stream registry and

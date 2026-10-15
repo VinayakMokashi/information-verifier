@@ -1,10 +1,14 @@
 # Taking it public — the decision brief (2026-10-15)
 
 For Vinayak, to decide before anything is built (PROJECT_PLAN §11 A–C).
-Built from the research files in this folder; figures from the four topics
-whose verifiers were still running when this was written (hosting, tunnel,
-budget, policy) are marked † and will be corrected here if a verifier
-overturns one.
+Built from the research files in this folder. Every topic has since been
+independently verified except `whatsapp.md` (complete, unverified); the
+verifiers' corrections are folded in below.
+
+> **DECIDED by Vinayak, 2026-10-15** (PROJECT_PLAN §7): **this PC now** behind
+> a Cloudflare named tunnel, a cloud VM later · **$1 a day** ceiling ·
+> the bot **open to anyone, 5 checks a day each** · a **.com through
+> Cloudflare**.
 
 ---
 
@@ -12,7 +16,7 @@ overturns one.
 
 | | **Your PC + Cloudflare named tunnel** | **Cloud VM: AWS Lightsail, Mumbai** |
 |---|---|---|
-| Cost a month | ~₹75 for a .com (+ electricity ₹40–350)† | ~₹730 ($7 + 18% GST), billed in rupees — UPI, RuPay† |
+| Cost a month | ~₹115–425 all-in: a .com ~₹75 + electricity ₹40–350 | ~₹730 ($7 + 18% GST); rupee billing via AWS India (UPI, RuPay) is likely but unconfirmed — check the first invoice |
 | Up when | only while the PC is on — Windows Update restarts unattended PCs, power cuts, laptops rarely power back on by themselves | always |
 | Reel / Shorts links | **work** — a home IP, measured working since July | **break**: YouTube blocks datacenter IPs at the very first request; Instagram and Facebook fail intermittently. Fix: link traffic through your PC ($0, needs it on) or a residential proxy (~$5 one-off, lasts months, needs its own byte budget) |
 | WhatsApp webhook | works while the PC is on | always |
@@ -102,15 +106,40 @@ line and an 18+ line are missing (§5).
 
 ## 4. WhatsApp — what to know now
 
-**The big risk first.** Meta's WhatsApp Business terms §4.7 (last modified
-23 Sep 2026) bar providers of LLMs and AI assistants where AI is the
-*primary* function — Meta decides what counts — and India is not among the
-markets where AI providers are let in (Brazil is the only one listed).† A
-fact-check tipline is arguably a specific service rather than an AI
-assistant, but Meta can refuse it. Do not pay for or build WhatsApp until
-that is settled. The full requirements, the pricing change of 1 Oct 2026
-(service replies are now charged), verification documents and a "start
-today" list are in `whatsapp.md` (research still running).
+**The risk first.** Meta's WhatsApp Business terms §4.7 (last modified
+23 Sep 2026, verified) bar providers of LLMs and AI assistants where AI is
+the *primary* function, "as determined by Meta in its sole discretion". AI
+providers are let in only where a law forces Meta: Brazil (paid), the EU and
+Italy (free since May 2026, under appeal). India has no carve-out and no
+CCI case. In the bot's favour: Meta says businesses using AI to serve their
+customers are unaffected, and **The Quint launched an AI fact-check bot on
+WhatsApp in India on 4 May 2026**. The research's reading: probably allowed
+as a single-purpose verification service *with a human escalation path* —
+Meta's Business Policy requires a "prompt, clear, and direct" route to a
+human for automated replies, which this project does not have yet — but only
+Meta can settle it.
+
+**What it costs:** almost nothing. Since 1 Oct 2026 a reply inside the
+24-hour window is ₹0.115, but each number gets **1,000 free service messages
+a month**; at the $1/day ceiling (≲450 checks a month) the Meta bill is ₹0.
+Replies never count against messaging limits. **No company is needed to
+launch**; business verification (optional at first) needs a registered
+business — a free Udyam sole-proprietorship registration works, ~7 business
+days. Go direct to Meta's Cloud API: the Indian resellers add fees, not
+eligibility (same documents, same §4.7).
+
+**Start today, in order** (details in `whatsapp.md`):
+1. A new SIM for the bot — a number that has never been on WhatsApp.
+2. Udyam registration under the name you want Meta to show (free).
+3. The privacy policy page on the site (§5) — Meta needs its URL to go Live.
+4. The Meta chain, INR currency: developer account → app → business
+   portfolio → WhatsApp Business Account; build against the free test
+   number (up to 5 phones).
+5. A card in Meta's Billing Hub (without one, sending stops after the free
+   1,000).
+6. A human escalation path (e.g. "reply HUMAN" → you).
+7. Then: register the real number, switch the app to Live, apply for
+   business verification.
 
 ## 5. Policy, and the cheap "app"
 
@@ -118,8 +147,11 @@ today" list are in `whatsapp.md` (research still running).
   is collected; that messages go to Anthropic, Google, Sarvam and the video
   platforms; 30-day deletion; how to ask for deletion) and Terms (AI answers
   can be wrong, not advice, 18+, best-effort, Indian law). India's DPDP duties
-  start 13 May 2027†; one of them (keep processing logs a year) conflicts
-  with the 30-day deletion and needs a decision before then.
+  start 13 May 2027 (verified from the gazette); two of them (Rules 8(3) and
+  6(1)(e): keep personal data and processing logs a year) collide with the
+  30-day deletion and need a decision before then. Also to read before
+  launch: Anthropic's usage-policy high-risk categories, and Telegram's
+  developer terms on encryption at rest.
 - **The "app" costs $0:** a manifest and icons make the page installable on
   Android and iOS — no service worker needed — and a share target lets a reel
   shared from Instagram or YouTube land in the box. It needs the stable domain
