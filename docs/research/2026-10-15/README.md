@@ -19,8 +19,8 @@ here and committed the moment it exists; see CLAUDE.md, "Interruptions".
 | File | What | Verification |
 |---|---|---|
 | [audit-security.md](audit-security.md) | Code audit — security and abuse once strangers can reach it | verified: 12 verdicts, severities corrected, 4 new findings |
-| [audit-ops.md](audit-ops.md) | Code audit — operations, reliability, privacy, 24/7 for strangers | pending (two verifiers) |
-| [ytdlp-cloud-ips.md](ytdlp-cloud-ips.md) | Do reel/Shorts links still resolve from a datacenter IP? | pending |
+| [audit-ops.md](audit-ops.md) | Code audit — operations, reliability, privacy, 24/7 for strangers | verified: 28 findings, 3 severities lowered |
+| [ytdlp-cloud-ips.md](ytdlp-cloud-ips.md) | Do reel/Shorts links still resolve from a datacenter IP? | verified: all confirmed, one price corrected |
 | [cloud-hosting.md](cloud-hosting.md) | Cloud hosts for running it 24/7 | pending (verifier killed by the network drop) |
 | [home-tunnel.md](home-tunnel.md) | Staying on the home PC behind a tunnel | pending (verifier killed) |
 | [limits-budget.md](limits-budget.md) | Budget, per-person limits, a bot shield for strangers | pending (verifier killed) |

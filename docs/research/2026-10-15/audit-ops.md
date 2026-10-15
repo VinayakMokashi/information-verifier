@@ -1,6 +1,6 @@
 # Code audit: operations, reliability and privacy, running 24/7 for strangers
 
-Audited 2026-10-15 against the repo as it stood then (free reproduction scripts, scratch databases, dummy keys). **Verification: 1 of 2 verifier(s) finished; the rest are still running or died (usage limit / network) - treat the unverified parts as unverified.** Durable copy of the agent's result (the raw journals are session-internal).
+Audited 2026-10-15 against the repo as it stood then (free reproduction scripts, scratch databases, dummy keys). **Verification: independently verified (verdicts inline).** Durable copy of the agent's result (the raw journals are session-internal).
 
 ## Summary
 
@@ -215,6 +215,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** For /verify/text, compute cache_key(text, language) and look up the answer cache BEFORE claiming, and serve a fresh hit without a slot (still under the per-visitor abuse limit). Do the same for links once the transcript key is known after resolve.
 
+**Verifier: confirmed-by-reading.** routes.py verify_text: nothing_to_check() then `async with _quota(request)` claims the slot (limits.claim) BEFORE _new_job/background _check; the cache lookup happens only inside job.py run_check (`key = cache_key(text, language)`; `repo.cache.get`), and the refund is _settle_quota after the fact (cached and estimated_usd == 0 -> give_back_day). So when claim() refuses at the cap, a request whose answer is sitting in the cache gets the 429 just like a paid one. Same order on /verify/link (claim, then resolve, then transcript/answer cache in the background). It is reachable on both shapes and the bot goes through the same routes. Should-fix is right. It is a UX/fairness gap, not a money leak, and the fix must still sit under the per-visitor limit.
+
 ### OPS-16. Any error from the vision call burns the daily slot and returns a bare 500
 *should-fix · applies to: both · `app/api/routes.py:285` · tracked: new*
 
@@ -223,6 +225,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** audit/ops/cap_semantics.py, with ocr_image raising anthropic.BadRequestError: '1. photo the vision API refused -> HTTP 500 body='Internal Server Error' | slots used=1 job rows=0'. routes.py:285-290; the refund at routes.py:111-112 runs only when not spend.started.
 
 **Fix.** Catch anthropic.APIStatusError, APIConnectionError and APITimeoutError around ocr_image. Refund when the API answered with an error status (not billed) and return a readable 422/503. Check the upload's byte size, and ideally its dimensions, before calling, and reject oversize photos with 413 before any spend.
+
+**Verifier: confirmed-by-reading.** routes.py verify_image: spend.begin() runs before `await ocr_image(...)` (vision.py makes a bare async_client.messages.create with no try). Any anthropic exception propagates out of _quota, whose except branch refunds only `if not spend.started`, so the slot is kept. grep finds no exception_handler anywhere in app/, so the client gets Starlette's plain 500 and index.html:581 shows 'Something went wrong on our side'. The most common trigger, which the audit underplays: LimitUploadSize allows 25 MB (max_media_bytes) for images too, and index.html does no client-side resize, but the Messages API rejects images over about 5 MB. So an ordinary phone-camera photo (5-12 MB) uploaded from the web page is refused by the API with a 400 every time and burns a slot on each retry. The Telegram path is mostly safe because msg['photo'] is Telegram's recompressed copy. The fix must refund only on an API error status (4xx, 529), not on a timeout, which may have been billed.
 
 ### OPS-17. No wall-clock bound on a check; the bot gives up at about 270 s and the page at about 8 minutes
 *should-fix · applies to: both · `app/engine/chat.py:60` · tracked: 11.23*
@@ -233,6 +237,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Give each check a deadline (asyncio.timeout around chat.answer that keeps the prose already written and marks it truncated), sized to include the link fetch. Make the bot's and page's windows exceed it, or let the bot deliver late answers by itself.
 
+**Verifier: confirmed-by-reading.** chat.py:60 `_MAX_CONTINUATIONS = 6`, loop at :361, and no asyncio.timeout or deadline anywhere in chat.py or job.py. llm.py builds AsyncAnthropic with the SDK defaults (600 s timeout, 2 retries). telegram_bot.py:36-37 `_POLL_S = 3.0, _POLL_MAX = 90` (about 270 s), then it sends the 'Check abhi bhi chal raha hai ... koi bhi message bhejiye' message. index.html:263 `POLL_MS = 2500, POLL_MAX = 96` is used for both the SSE deadline (:504) and poll() (:451), and :471 throws the Hinglish 'Abhi bhi chal raha hai' on an html lang=en page. One mitigating fact: both surfaces recover without paying again. The bot's next message delivers the stale job (the pending/prompted path), and the page restores from the #job= hash (:479), so the answer is late rather than lost. Should-fix stands because a measured 295 s pass 2 already exceeds the bot's window for real users.
+
 ### OPS-18. /health is a constant: it stays green while the DB is locked, the pool is starved, the keys are missing, or it is the demo server
 *should-fix · applies to: both · `app/main.py:166` · tracked: 11.6, 11.19*
 
@@ -241,6 +247,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** main.py:164-166. serve_demo.py serves the same app object. audit/ops/starve.py: 'GET /health -> 200 in 0.01 s' while 'GET /reports/<finished job> -> 200 in 19.40 s'.
 
 **Fix.** Keep /health as liveness. Add /ready: a DB write+read through the same pool /reports uses, with a short timeout; keys present; ffmpeg/ffprobe found; mode real|demo; version; in-flight checks; today's cap usage as a count. Point the platform health check and the bot's startup check at it, and have the bot refuse demo.
+
+**Verifier: confirmed-by-reading.** main.py:164-166 `@app.get('/health') async def health(): return {'status': 'ok'}`. It touches no database, pool, keys or mode. start.ps1 Test-AppUp and the bot's app_is_up (telegram_bot.py:857-867) accept exactly that. start.ps1 does detect serve_demo.py by process name, so the demo case is partly mitigated on H, but nothing does this on C or for a hand-started demo. Should-fix is right.
 
 ### OPS-19. No monitoring or alerting at all, and on a cloud host the owner cannot even open the dashboard
 *should-fix · applies to: both · `app/api/dashboard.py:48` · tracked: new*
@@ -251,6 +259,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Send owner alerts through the bot that already exists: DM the owner's chat id when the cap reaches 80%, hourly spend exceeds $X, 3 checks fail in a row, the app starts with orphans, or a link probe fails. Point an external uptime monitor at /ready. Put /dashboard and /api/v1/admin/* behind Cloudflare Access or an owner token for remote viewing, keeping the local-only gate as well. Set the Anthropic console's monthly limit and Sarvam balance alerts.
 
+**Verifier: confirmed-by-reading.** dashboard.py _local_only requires a peer in {127.0.0.1, ::1}, none of six proxy headers (cf-connecting-ip and x-forwarded-for included), exactly one Host header and a localhost Host. Behind any cloud proxy (C) the peer is a private proxy IP and the page always 404s, and on H through the tunnel it 404s too (it is intended for the PC itself). grep -il for sentry|smtp|notify|'import logging' over app/ and scripts/ finds nothing, and app/ has 41 bare print() calls. The Anthropic console's own usage page is the only remote spend view, and it does not show the daily cap or failures. Should-fix is right.
+
 ### OPS-20. On a host, print() diagnostics are block-buffered: lines show up hours late and are lost when the process is killed
 *should-fix · applies to: cloud-host · `app/main.py:130` · tracked: new*
 
@@ -259,6 +269,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** audit/ops/logs.py runs the server with stdout piped and then terminates it: the app's '[link] transcript cache hit …' print never appeared. audit/ops/logs_unbuffered.py (same with PYTHONUNBUFFERED=1): it did. uvicorn's own lines (logging, flushed per record) appeared in both runs.
 
 **Fix.** Set PYTHONUNBUFFERED=1 (or python -u) in the deploy recipe. Move the prints to logging with timestamps and levels, with one config for app and bot.
+
+**Verifier: confirmed-by-reading.** All app diagnostics are bare print() (41 in app/, plus the bot's) with no flush and no timestamp. CPython block-buffers stdout when it is not a TTY, while uvicorn's logging StreamHandler flushes per record, which matches the auditor's piped run. Some PaaS buildpacks set PYTHONUNBUFFERED (Heroku's does), but official python Docker images do not. The finding also reaches shape H once OPS-22's fix is applied: a service wrapper (NSSM or Task Scheduler) that redirects stdout to a file makes it a non-TTY, with the same buffering. Should-fix is right because the fix is one environment variable.
 
 ### OPS-21. Config is resolved from the working directory: a different start directory means no keys and a brand-new empty database
 *should-fix · applies to: both · `app/config.py:25` · tracked: new*
@@ -269,6 +281,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Resolve .env and the default DB path from the project root (Path(__file__).resolve().parents[1]), or require an absolute DB_PATH outside development. At startup, print the absolute DB path and which keys are present (yes/no). Fail readiness, or refuse to start in real mode, when ANTHROPIC_API_KEY is empty.
 
+**Verifier: confirmed-by-reading.** config.py `SettingsConfigDict(env_file='.env')`, `db_path: str = './data/verifier.db'`, .env:14 `DB_PATH=./data/verifier.db`, and db.py:105/155 connect and makedirs relative to the CWD. This verification task itself depends on that behaviour. The reachability is narrower than written: `python -m uvicorn app.main:app` from a wrong CWD fails loudly (app is not importable), and the bot from scripts\ prints 'No TELEGRAM_BOT_TOKEN' and exits. The silent case needs --app-dir or PYTHONPATH with another CWD. That is exactly what a service wrapper produces (NSSM's default AppDirectory is the exe's folder, .venv\Scripts), and it is the setup OPS-22 recommends, so it stays should-fix. start.ps1 is safe because it sets -WorkingDirectory $root.
+
 ### OPS-22. Home PC: nothing restarts the app, bot or tunnel after a reboot, crash or sleep
 *should-fix · applies to: home-tunnel · `start.ps1:36` · tracked: new*
 
@@ -277,6 +291,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** start.ps1:36-43 Start-Window launches 'powershell -NoExit' windows; :60 starts uvicorn in one of them; start.cmd ends in 'pause'. No Register-ScheduledTask, NSSM, sc.exe or powercfg anywhere. share_demo.ps1:31 runs 'tunnel --url' (a quick tunnel).
 
 **Fix.** Run the app, the bot and 'cloudflared service install' (named tunnel) as services that start at boot and restart on failure (NSSM, or Task Scheduler 'at startup' with restart settings), with the working directory set explicitly (OPS-21). Disable sleep on AC power (powercfg), set Windows Update active hours, and add the external uptime monitor from OPS-19.
+
+**Verifier: confirmed-by-reading.** start.ps1 Start-Window launches `powershell -NoExit` console windows. uvicorn runs with no service, no restart and no keep-alive option, and start.cmd ends in `pause`. The script's own banner says 'Keep both windows open and the PC awake.' There is no Register-ScheduledTask, NSSM, sc.exe or powercfg in the repo. Closing a window or a Windows Update reboot also discards all logs, which are only console scrollback. Should-fix for shape H is right.
 
 ### OPS-23. Cloud host: no deployment recipe, and system dependencies (ffmpeg) are undeclared; without ffmpeg every reel needing ASR fails after taking a slot
 *should-fix · applies to: cloud-host · `app/providers/media.py:47` · tracked: new*
@@ -287,6 +303,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Write a Dockerfile: python:3.12-slim plus ffmpeg and deno, a non-root user, PYTHONUNBUFFERED=1, DB_PATH=/data/verifier.db on the volume, and CMD 'uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 120 --forwarded-allow-ips <proxy CIDR>'. Make /ready fail when ffmpeg/ffprobe are missing, and check for them before claiming a slot on /verify/link.
 
+**Verifier: confirmed-by-reading.** media.py _run maps FileNotFoundError to MediaError('ffmpeg is not installed on this server.'). On the link path, gather_link_text calls normalize_to_wav behind the 202. _run_link_job's except calls fail_job with _friendly_link_failure (MediaError -> 'The audio in that post could not be read.'), and verify_link's docstring confirms that a background failure keeps the slot. The upload route runs normalize inline inside _quota without begin(), so it refunds, as stated. The repo root has no Dockerfile, Procfile or runtime.txt, and the only launchers are .ps1/.cmd. Applies to C only, and should-fix is right.
+
 ### OPS-24. Unpinned dependencies: a fresh install today pulls an untested major version, anthropic 1.14.0 on httpx2
 *should-fix · applies to: both · `requirements.txt:2` · tracked: new*
 
@@ -295,6 +313,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** pip index versions: anthropic latest 1.14.0 (installed 0.119.0), starlette 1.8.0 (installed 1.3.1), httpx 0.28.1. anthropic-1.14.0 wheel METADATA (audit/ops/dl_anthropic): 'Requires-Dist: httpx2<3,>=2.0.0'. The claude-api skill's sdk-upgrade guide says 1.x 'removed long-deprecated surface … HTTP layer moved from httpx to httpx2'. The stuck_job.py run printed 'StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.' requirements.txt:2 'anthropic>=0.116', :19 'pytest>=8.0'.
 
 **Fix.** Freeze the tested venv into a lock file (pip-tools or uv, with hashes) and deploy from it. Cap majors in the meantime (anthropic>=0.116,<1) and do the 1.x upgrade deliberately. Move pytest to requirements-dev.txt.
+
+**Verifier: reproduced.** requirements.txt has only open lower bounds (`anthropic>=0.116`, `fastapi>=0.115`, `httpx>=0.27`, `yt-dlp>=2026.8.19`, `pytest>=8.0` in the same file) and there is no lock file. Today `pip index versions` returns anthropic (1.14.0) and starlette (1.8.0), while the venv has anthropic 0.119.0 and starlette 1.3.1. The auditor's downloaded anthropic-1.14.0 wheel is present in audit/ops/dl_anthropic. A fresh install therefore crosses a major SDK version that the app monkeypatches (usage.instrument). Should-fix is right.
 
 ### OPS-25. yt-dlp has no update path on a 24/7 server, and with no JavaScript runtime installed it runs YouTube in a deprecated mode whose warning the app throws away
 *should-fix · applies to: both · `app/providers/links.py:137` · tracked: new*
@@ -305,6 +325,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Keep yt-dlp out of the lock file and update it on a schedule (weekly 'pip install -U yt-dlp' plus a restart on H; a scheduled rebuild on C). Install deno on both shapes. Log yt-dlp warnings once per process instead of discarding them. Run the free scripts/link_probe.py daily against 2-3 known public reels and alert the owner when it fails.
 
+**Verifier: confirmed-by-reading.** The tree moved: commit ca76538 (Facebook links) landed during this verification, so the line numbers shifted, but the cited code is unchanged. links.py:145-156 `class _Silent` has `def warning(self, m): pass` and `def error(self, m): pass`, and ydl opts set 'quiet': True, 'no_warnings': True, 'logger': _Silent() (:282-288). The installed yt_dlp/extractor/youtube/_video.py:2998 has the 'YouTube extraction without a JS runtime has been deprecated' warning. `which deno node` finds neither, and yt-dlp-ejs is not installed. Installed yt-dlp 2026.8.19 equals the latest on PyPI today, so it is current now, but the repo has no update mechanism. Should-fix is right.
+
 ### OPS-26. Slow memory growth: bot per-chat locks are never removed, and streams are pruned only when finished and only when a new check starts
 *nice-to-have · applies to: both · `scripts/telegram_bot.py:772` · tracked: new*
 
@@ -313,6 +335,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 **Evidence.** audit/ops/mem.py: 'stream registry: ~162 KiB per finished check (600 deltas), kept 15 min…', 'pruned only inside create(): 200 streams still held with no new job', 'per-IP table: capped at 512 entries (evicts LRU) -> bounded', 'bot Dispatcher.locks: 100000 chats -> 15.7 MiB, never removed (~164 B per chat ever seen)'. telegram_bot.py:648 locks.setdefault(...); stream.py:109 and :119-123.
 
 **Fix.** Drop a chat's lock when it is free and the chat has no pending or in-flight work. Put a TTL on pending and prompted. Prune streams by age in the housekeeping loop as well as in create().
+
+**Verifier: confirmed-by-reading.** telegram_bot.py:648 `locks.setdefault(chat_id, asyncio.Lock())`, Dispatcher.locks at :772, with no removal anywhere. stream.py _prune() is called only from create() and removes only finished streams older than the TTL. In practice streams are created only after a slot is claimed (_new_job is inside _quota), so at 5 checks a day the registry is tiny. Locks grow one per chat that ever messages, including small talk, at about 164 B each. Nice-to-have is right, or lower.
 
 ### OPS-27. uvicorn drops idle keep-alive connections after 5 s while proxies keep them 60-90 s, causing occasional 502s on POSTs
 *nice-to-have · applies to: both · `start.ps1:60` · tracked: new*
@@ -323,6 +347,8 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Start uvicorn with --timeout-keep-alive 120, longer than any proxy's idle timeout.
 
+**Verifier: confirmed-by-reading.** start.ps1 runs `python -m uvicorn app.main:app` with no --timeout-keep-alive, so uvicorn's default of 5 s applies. cloudflared's documented originRequest keepAliveTimeout is 1m30s. The real exposure is a narrow race, not every idle reuse. cloudflared's Go http.Transport watches idle connections and drops one when uvicorn's FIN arrives, so only a request dispatched in the same instant fails, and Go will not retry a POST. That makes the 502s occasional, which is consistent with nice-to-have. The auditor's raw-socket test overstates how often it happens.
+
 ### OPS-28. Every public report includes its own bill, which tells strangers which inputs cost the most
 *nice-to-have · applies to: both · `app/models/answer.py:137` · tracked: new*
 
@@ -332,10 +358,15 @@ How it was checked: every script is free and ran from the scratch folder (so the
 
 **Fix.** Serve a public view without usage (response_model_exclude={'usage'} or a separate DTO), and keep the bill in the DB, the ledger and the dashboard.
 
+**Verifier: confirmed-by-reading.** routes.py:551 `@router.get('/reports/{job_id}', response_model=Answer)`, and answer.py's Answer carries `usage: ReportUsage | None`. A visitor only ever sees reports for job ids they hold (their own checks, or ones shared with them), so this reveals per-input cost patterns, not the owner's total spend. Nice-to-have is right.
+
 ## Verifier: missed (new findings)
 
 - Deleted messages stay on disk: no PRAGMA secure_delete or VACUUM anywhere (db.py sets only journal_mode=WAL and busy_timeout). Answers pruned after 30 days (repository.py:396-411) leave their text in SQLite free pages and in the -wal file until overwritten, and in any file copy or backup of the DB. This weakens invariant 10 ('Messages are forgotten') and compounds OPS-10's backup advice. Suggested severity: should-fix on a host and nice-to-have on (H).
 - A job stuck in QUEUED/PROCESSING is never deleted by the retention prune (repository.py:408-409 deletes only COMPLETE/FAILED rows), so any stuck row from OPS-06 keeps that person's message beyond 30 days until a restart's sweep_orphans flips it. This is a privacy follow-on of OPS-06 that the finding does not mention.
 - FastAPI's default /docs, /redoc and /openapi.json are public on any tunnel or host URL (main.py builds FastAPI() without docs_url=None or openapi_url=None). They advertise every endpoint, including the dashboard path, and its local-only check is then the only gate. Nice-to-have.
 - The misleading comment at telegram_bot.py:718-719 ('if this process dies mid-poll, the job is still recoverable on the next message') claims crash-safety that the in-memory pending dict does not provide (see OPS-07). It should be corrected along with the fix so the next session does not rely on it.
+- Retention gap that compounds OPS-04/OPS-06: AnswerRepository.prune() (repository.py:395-410) deletes only rows with status IN ('COMPLETE','FAILED'), and the only thing that fails QUEUED/PROCESSING rows is sweep_orphans() at startup. A job stuck in PROCESSING (OPS-06's unguarded final save, or a wedged pass) therefore keeps the sender's message in the database for as long as the process stays up, which can be past the 30-day retention promise (invariant 10). On a 24/7 server, a restart is not a schedule. The periodic housekeeping loop should also fail PROCESSING rows older than a hard ceiling, then prune them.
+- The concrete everyday trigger for OPS-16, missing from the audit: LimitUploadSize applies the 25 MB media cap to /verify/image, and static/index.html does no client-side downscale, but the Messages API refuses images over about 5 MB (and over the pixel limits). So a normal phone-camera photo uploaded from the web page gets a 400 from the API, the user sees a bare 500, and the slot is burned on every retry. The fix needs a pre-spend byte and dimension check (413 before begin()), or a server- or client-side downscale. Refunds should go only on API error statuses (4xx or 529), never on a timeout, which may have been billed.
+- On shape H, all operational history lives only in console-window scrollback. There is no log file and no rotation, so closing a window, a reboot or OPS-22's restart loses every '[job] check failed' and '[startup] failed N job(s) orphaned' line. Combined with OPS-19 (no alerting), the owner cannot reconstruct an incident after the fact. A rotating file log (timestamped, without message text, per OPS-11) belongs in the same change as OPS-20.
 

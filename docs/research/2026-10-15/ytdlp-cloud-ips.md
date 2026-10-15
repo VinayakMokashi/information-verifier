@@ -1,6 +1,6 @@
 # Does reel/Shorts link resolution survive a datacenter IP?
 
-Researched 2026-10-15 by a research agent (web sources dated in each finding). **Verification: 0 of 1 verifier(s) finished; the rest are still running or died (usage limit / network) - treat the unverified parts as unverified.** This file is the durable copy of the agent's result (the raw journals are session-internal and not kept).
+Researched 2026-10-15 by a research agent (web sources dated in each finding). **Verification: independently verified (verdicts inline).** This file is the durable copy of the agent's result (the raw journals are session-internal and not kept).
 
 ## Summary
 
@@ -51,6 +51,9 @@ No 2025-2026 provider-specific reports were found for DigitalOcean or Fly. Oracl
 
 Sources: https://github.com/yt-dlp/yt-dlp/issues/3766 · https://github.com/yt-dlp/yt-dlp/issues/10128 · https://github.com/yt-dlp/yt-dlp/issues/16221 · https://github.com/yt-dlp/yt-dlp/issues/15573 · https://github.com/yt-dlp/yt-dlp/issues/16147 · https://github.com/yt-dlp/yt-dlp/issues/17376 · https://dev.to/osovsky/i-was-building-a-cloud-video-service-youtube-turned-me-into-an-ip-trafficker-1l9o
 
+**Verifier: confirmed.** Corrected: YouTube's bot check is applied at the player/metadata request, so the app's metadata-only resolve_link fails before captions or audio are ever requested.
+> Installed yt-dlp 2026.08.19, extractor/youtube/_video.py:4063-4076: a playability reason containing 'sign in' goes to self.raise_no_formats(reason, expected=True). common.py:1265-1272 raises ExtractorError unless ignore_no_formats_error or wait_for_video is set, and the app's _base_opts() sets neither, so extract_info(download=False) raises. #16221 (created 2026-03-12, nightly 2026.03.11, on a VPS while extracting metadata) shows 'android_vr player response playability status: LOGIN_REQUIRED' followed by 'Sign in to confirm you're not a bot'. #15573 (2026-01-15): DTrombett [MEMBER] wrote 'YouTube regularly blocks or restrict datacenter IPs', and ruben1PvP [CONTRIBUTOR] wrote 'This has been a thing for more than a year now'. The issue body contains a '/ip/54.90.116.137/' URL. #16147: DTrombett [MEMBER], 2026-03-06, 'suspicious IP (e.g. a server, VPN, proxy, etc) YouTube is likely to ban you'. Known-issues #3766 was updated 2026-08-27. Under #10128 it says: 'The safer solution is to use a different IP' and a PO token provider 'will not help if your IP is already blocked'. One nuance: #15573 is about a 403 on download with --cookies, not the metadata stage. The metadata-stage evidence is #16221.
+
 ### F2. PO tokens (including the bgutil-ytdlp-pot-provider plugin) do not get a blocked datacenter IP past YouTube's bot check. PO tokens are currently required only for stream (GVS) requests and some subtitle (Subs) requests, never for the metadata request the app depends on.
 *Confidence: high — **decision-critical***
 
@@ -63,6 +66,9 @@ Sources: https://github.com/yt-dlp/yt-dlp/issues/3766 · https://github.com/yt-d
 
 Sources: https://github.com/yt-dlp/yt-dlp/issues/16773 · https://github.com/yt-dlp/yt-dlp/issues/3766 · https://github.com/Brainicism/bgutil-ytdlp-pot-provider · https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide · https://github.com/yt-dlp/yt-dlp/issues/17368
 
+**Verifier: confirmed.** Corrected: PO tokens, including bgutil, do not unblock an IP that is already blocked. Currently only GVS and Subs need PO tokens.
+> #16773 (created 2026-05-21, titled 'All player clients fail on datacenter IP despite bgutil PO Token'): bashonly [MEMBER], 2026-05-21, said 'PO tokens are **not** a solution if your IP is already blocked. They *may* work as a preventative measure.' The bgutil README, line 168, has the exact quote: 'a PO Token does not bypass IP-based login restrictions. If you still get "Sign in to confirm you're not a bot" after a token was generated (common on datacenter IPs), you additionally need to pass cookies; see #37.' It also requires 'yt-dlp 2025.05.22 or above' and 'Node.js (>= 22) or Deno (>= 2.0.0)'. The latest bgutil release is 2.0.2, published 2026-10-07. The PO-Token-Guide wiki (edited Jul 12, 2026) says: 'Currently, only GVS and Subs require PO Tokens for some clients.' #17368: bashonly, 2026-08-05, 'This is an issue with the PO token provider' (bgutil #242). The local _video.py:143-145 has _DEFAULT_CLIENTS=('visionos','web') and _DEFAULT_JSLESS_CLIENTS=('visionos',), and this PC has no deno or node on PATH.
+
 ### F3. Anonymous Instagram access from cloud IPs faces much stricter per-IP limits than from home IPs. Expect intermittent 'redirected to the login page / rate-limit reached or login required' failures rather than a guaranteed block. No 2025-2026 primary measurement from a datacenter was found.
 *Confidence: medium — **decision-critical***
 
@@ -74,6 +80,9 @@ Sources: https://github.com/yt-dlp/yt-dlp/issues/16773 · https://github.com/yt-
 - Inference: shared PaaS outbound IPs (Render, Railway, Fly) pool the anonymous allowance with other tenants.
 
 Sources: https://instaloader.github.io/troubleshooting.html · https://github.com/yt-dlp/yt-dlp/issues/17074 · https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.04 · https://github.com/imputnet/cobalt/issues/1463 · https://github.com/yt-dlp/yt-dlp/issues/16402
+
+**Verifier: confirmed.** Corrected: Anonymous Instagram access from cloud IPs faces stricter per-IP limits than from home IPs, so expect intermittent failures rather than a guaranteed block. The strongest source is long-standing Instaloader documentation, not a 2026 measurement.
+> The Instaloader troubleshooting page (site at v4.15.4; the GitHub release is dated 2026-10-12) says: 'There have been observations that services, that in their nature offer promiscuous IP addresses, such as cloud, VPN and public proxy services, might be subject to significantly stricter limits for anonymous access. However, logged-in accesses do not seem to be affected.' The wording is old ('observations'). The site version is current, but this is not dated 2025-2026 evidence. Local instagram.py:506-510 raises 'redirected to the login page. You have exceeded the rate-limit for accessing posts anonymously', and every request is gated on _can_impersonate. #17074: bashonly, 2026-06-28, 'Impersonation is required now for Instagram support w/o cookies', and again on 2026-06-29: 'The site blocks anonymous API requests that do not have a browser fingerprint'. That makes curl_cffi effectively mandatory on any server. curl_cffi is confirmed absent from the venv. Medium confidence is right. I did not re-check cobalt #1463.
 
 ### F4. Logged-in cookies from a throwaway account carry an explicit, documented ban risk on all three platforms, and need ongoing manual upkeep. They are a stopgap, not a reliable fix.
 *Confidence: high — **decision-critical***
@@ -92,6 +101,9 @@ Facebook: bashonly, #16621 (2026-05-03): 'Facebook is perfectly happy to ban you
 A headless server cannot use --cookies-from-browser, so cookies must be re-exported by hand.
 
 Sources: https://github.com/yt-dlp/yt-dlp/wiki/Extractors · https://github.com/yt-dlp/yt-dlp/issues/3766 · https://github.com/yt-dlp/yt-dlp/issues/16147 · https://github.com/yt-dlp/yt-dlp/issues/16212 · https://github.com/yt-dlp/yt-dlp/issues/17074 · https://github.com/yt-dlp/yt-dlp/issues/16621
+
+**Verifier: confirmed.** Corrected: Cookies from throwaway accounts carry an explicit, documented ban risk on YouTube, Instagram and Facebook and need manual upkeep. They are a stopgap only. Correction to the detail: the #16147 user was blocked after about 600 downloads in total, while doing hundreds a day. The issue does not say 600 a day.
+> yt-dlp wiki Extractors.md, line 13: 'By using your account with yt-dlp, you run the risk of it being banned (temporarily or permanently).' Known-issues #3766 (updated 2026-08-27) says passing cookies 'may get your account blocked'. #16147 issue body: 'download hundreds of audio files per day. My download requests were rejected after about 600 downloads… I used the cookies of a newly registered Google account, but the account was quickly banned by Google.' #17074: bashonly, 2026-06-29, 'there is the risk that your account will be flagged or banned'. #16621: bashonly, 2026-05-03, 'Facebook is perfectly happy to ban your account if it detects third party tool usage… abide by their anonymous access rate-limit'. I did not re-check #16212.
 
 ### F5. Residential proxy pay-as-you-go prices on 2026-10-15, with Bright Data now closed to individuals. At the measured ~1 MB per link check, proxying only link traffic costs about $0.001–0.007 per check, i.e. about $0.15–1.10/month at the 5/day cap.
 *Confidence: high — **decision-critical***
@@ -121,6 +133,26 @@ Worst case per check is already bounded by the 25 MB download cap: about $0.03�
 
 Sources: https://decodo.com/proxies/residential-proxies/pricing · https://help.decodo.com/docs/residential-proxy-restricted-targets · https://iproyal.com/pricing/residential-proxies/ · https://dataimpulse.com/ · https://docs.dataimpulse.com/blocked-websites · https://www.webshare.io/residential-proxy · https://brightdata.com/pricing/proxy-network/residential-proxies · https://docs.brightdata.com/products/residential/network-access · C:\Users\VINAYA~1\AppData\Local\Temp\claude\c--Users-Vinayak-Mokashi-Python-Sab-Information-Verifier\4b88200f-d561-4246-b38d-1eac8cf3cade\scratchpad\measure_resolve_bytes.py
 
+**Verifier: corrected.** Corrected: The vendor prices are correct as of 2026-10-15:
+- DataImpulse: $1/GB, an 'Intro' offer of $5 for 5 GB 'For New Users', and 'Traffic never expires'.
+- IPRoyal pay-as-you-go: $7.35/GB at 1 GB, $6.25 at 2 GB, $5.51 at 10 GB; 'Never expiring traffic'; pays by Visa, Mastercard, Amex, Discover, PayPal, Alipay or crypto.
+- Decodo: $4/GB + VAT, bought 1 GB at a time; smallest subscription 3 GB for $11.25 + VAT; 100 MB, 3-day trial that auto-activates a plan. The page does not say whether pay-as-you-go traffic expires.
+- Bright Data: new Residential zones created after July 7, 2026 need KYC; access is for registered companies only; personal-email accounts and 'Personal projects… are not approved'.
+
+The monthly figure is wrong. '$0.15–1.10/month at the 5/day cap' is a bound only for checks that get past resolve. In the current code a failed resolve REFUNDS the daily slot (routes.py _quota, used by verify_link). Every blocked, private or bad link therefore costs ~0.25–0.34 MB of proxy traffic without counting against the cap; only the in-memory per-IP rate limiter bounds it. A server with Deno would also pull YouTube player JS (1–3 MB, unmeasured) on every cold cache. The proxy needs its own byte budget; the 5/day cap does not bound it.
+> Fetched today:
+- dataimpulse.com: '$1 per GB without a subscription', an 'Intro… For New Users' tier of $5 for 5 GB, 'Traffic never expires'.
+- iproyal.com/pricing/residential-proxies: the 1/2/10 GB tiers as above, payment methods listed, 'Your traffic is available until you decide to use it'.
+- decodo.com pricing: '$ 4+ VAT', 'purchase only one GB at a time', 3 GB at $3.75/GB ($11.25 + VAT), 100 MB for 3 days, then the chosen plan 'will activate automatically'.
+- docs.brightdata.com network-access: 'For new Residential zones created after July 7, 2026, KYC approval is required', 'granted only to registered companies', 'Personal projects… are not approved'.
+
+Repo, app/api/routes.py:
+- verify_link runs resolve_link inside `async with _quota(request)`.
+- _quota (lines 81-113) calls give_back() on any exception when nothing was started.
+- verify_link's docstring says a bad link is 'refunded: nothing was spent'.
+
+I did not re-check Webshare.
+
 ### F6. Routing only link traffic through the home PC's residential connection costs $0 and keeps the exact IP class measured working since 2026-07-28 (re-measured 2026-10-15). The one hard rule is that resolve and download must leave through the same IP.
 *Confidence: high — **decision-critical***
 
@@ -132,6 +164,9 @@ Sources: https://decodo.com/proxies/residential-proxies/pricing · https://help.
 - Availability equals PC plus home internet uptime.
 
 Sources: https://tailscale.com/pricing · https://tailscale.com/kb/1112/userspace-networking · https://github.com/yt-dlp/yt-dlp/issues/15573
+
+**Verifier: confirmed.** Corrected: Routing only the link traffic through the home PC costs $0 on Tailscale's free Personal plan. The resolve and the download must leave through the same IP.
+> tailscale.com/pricing (undated, © 2026): Personal is 'Free forever', 'Up to 6 users', 'Unlimited user devices', '50 tagged resources included' (extra ones $1/month each). Tagged resources are defined as 'Resources like exit nodes, etc.'. Same-exit rule: the #15573 issue body contains a googlevideo URL carrying '/ip/54.90.116.137/', so stream URLs are bound to the IP that resolved them. PROJECT_PLAN.md §0a dates the link feature 'BUILT (2026-07-28)' and live-verified from home that day. I did not re-check the userspace-networking page, which only affects PaaS hosts without /dev/net/tun.
 
 ### F7. IPv6 rotation within a /64 is losing effectiveness against YouTube in 2026, and typical PaaS hosts don't give you a /64 to rotate.
 *Confidence: medium*
@@ -274,4 +309,19 @@ Separately, fix the allowlist now, whatever you decide about hosting. Facebook /
 - Instagram oEmbed (Graph API v25.0) access requirements (Meta app or App Review), and whether its response still carries the caption text.
 - How Facebook share/r/ and fb.watch links redirect for logged-out clients today. A safe fix to the allowlist bug depends on this; it was not tested here.
 - Per-check bandwidth with Deno installed on a server: the web client also downloads YouTube's player JS (about 1–3 MB) whenever the cache is cold or the player rotates. This was not measured, since the local venv has no JS runtime.
+
+## Verifier on the recommendation
+
+The recommendation mostly follows from the evidence. Each of its supporting claims holds against primary 2026 sources:\n- Do not fetch anonymously from a cloud IP.\n- PO tokens, updating yt-dlp and IPv6 rotation do not unblock an IP.\n- Cookies carry ban risk.\n- A residential exit is the reliable fix, with the same exit for resolve and download.\n\nFive gaps or overstatements:\n1. The cost line '$0.15–1/month at the 5/day cap, worst case bounded by the 25 MB cap' does not hold for a proxy. Failed resolves refund the daily slot (routes.py _quota), so blocked or bad links send traffic through the proxy without counting against the cap. Before a proxy goes in, it needs its own byte or request budget, enforced before spending, as Invariant 5 requires.\n2. The question only matters for deployment shape C. Shape H (this PC behind the named Cloudflare tunnel, already one of the two options in HANDOFF.md) keeps the residential IP with zero changes. The recommendation should say so plainly: keep link resolution at home, or host at home.\n3. 'Fix the allowlist now' is already done in commit ca76538. What remains:\n   - restart any running server or bot\n   - probe a real /reel/ and share link once, free\n   - update the stale PROJECT_PLAN §0a text\n4. Any proxy must also cover the new expand_share_link httpx requests, not only yt-dlp and subtitle_text.\n5. Bright Data being closed to individuals is confirmed. The Indian-card unknown is partly resolved: IPRoyal accepts PayPal.
+
+## Verifier: missed
+
+- Failed or blocked link resolves REFUND the daily slot (app/api/routes.py _quota and verify_link), so a residential proxy's traffic is not bounded by the 5/day cap. Each refused resolve still moves ~0.25–0.34 MB, bounded only by the in-memory per-IP limiter. The proxy needs its own enforced byte budget before it can be a paid seam.
+- The Facebook allowlist bug was fixed and committed (ca76538, 2026-10-15 21:58 +0530) by another session while this verification ran. A server or Telegram bot process started earlier keeps the old behaviour until restarted. PROJECT_PLAN.md §0a still claims 'fb.watch short links included' and '/reel/ allowlisted but untested'.
+- The new expand_share_link makes its own direct httpx requests to facebook.com and fb.watch. Any proxy or home-exit design must route these too, alongside yt-dlp and subtitle_text, or share links will be expanded from the datacenter IP.
+- Shape H (the home PC behind the named Cloudflare tunnel) avoids the whole problem at $0 with no code change. The report treats home routing only as an add-on to a cloud host.
+- Instagram now effectively needs curl_cffi on any server. bashonly, 2026-06-29: 'The site blocks anonymous API requests that do not have a browser fingerprint.' The home PC's fallback without curl_cffi working is not evidence it will work from a cloud IP.
+- On an ephemeral PaaS disk, yt-dlp's player-JS cache (needed once Deno is installed) is lost on every restart. That adds 1–3 MB of unmeasured, possibly proxied traffic per cold start.
+- Not researched: whether the proxy vendors' acceptable-use terms allow YouTube, Instagram and Facebook targets for a public service, and the platforms' own terms on automated access through residential proxies.
+- Environment discrepancy: Docker Desktop and the Google Cloud SDK are on this PC's PATH, although CLAUDE.md says Docker is not installed. This matters for the 'ship Deno + curl_cffi in an image' step and suggests GCP may be the candidate host.
 
