@@ -158,6 +158,10 @@ def apply_fake_stages() -> None:
     settings.anthropic_api_key = _DUMMY_KEY
     settings.google_factcheck_api_key = _DUMMY_KEY
     settings.sarvam_api_key = _DUMMY_KEY
+    # No Turnstile in the demo: it would reach Cloudflare, and the demo is
+    # offline by design. Empty, not dummy — empty is how it is switched off.
+    settings.turnstile_site_key = ""
+    settings.turnstile_secret_key = ""
 
     # Sarvam and Google read settings at call time, so the lines above cover
     # them. Anthropic does NOT: providers/llm.py builds one client at import,

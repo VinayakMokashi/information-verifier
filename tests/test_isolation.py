@@ -45,6 +45,11 @@ def test_the_suite_never_holds_a_real_key():
     NAMES are compared in the assert, never a value."""
     real = [name for name in _KEY_FIELDS if getattr(settings, name) != _DUMMY_KEY]
     assert real == []
+    # Turnstile stays OFF (empty): configured, it would demand a token for
+    # every paid check and ask Cloudflare. Names only, never a value.
+    loaded = [name for name in ("turnstile_site_key", "turnstile_secret_key")
+              if getattr(settings, name)]
+    assert loaded == []
 
 
 def test_undoing_a_patch_does_not_restore_the_real_database(monkeypatch):

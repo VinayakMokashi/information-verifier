@@ -15,6 +15,8 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-real-key")
     monkeypatch.setattr(settings, "sarvam_api_key", "real-sarvam-key")
     monkeypatch.setattr(settings, "google_factcheck_api_key", "real-google-key")
+    monkeypatch.setattr(settings, "turnstile_site_key", "real-site-key")
+    monkeypatch.setattr(settings, "turnstile_secret_key", "real-turnstile-secret")
 
     # apply_fake_stages assigns module attributes directly, so snapshot them
     # rather than reloading the modules (which would orphan routes' _repo).
@@ -36,6 +38,11 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         for key in (settings.anthropic_api_key, settings.sarvam_api_key,
                     settings.google_factcheck_api_key):
             assert key == "demo-mode-not-a-real-key"
+        # Turnstile is switched OFF (empty), not dummied: the demo is
+        # offline, and a configured Turnstile would ask Cloudflare.
+        from app.providers import turnstile
+
+        assert not turnstile.enabled()
 
         # Assert on the value that actually goes ON THE WIRE. The Anthropic
         # client is built once at import, so blanking `settings` alone left

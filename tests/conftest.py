@@ -15,6 +15,10 @@ for _key in ("ANTHROPIC_API_KEY", "GOOGLE_FACTCHECK_API_KEY", "SARVAM_API_KEY",
 # httpx's "http://test" — are this app's public names here: a paid POST to
 # any other name is refused (review R5). tests/test_cross_site.py sets its own.
 os.environ["PUBLIC_HOSTS"] = "testserver,test"
+# No Turnstile unless a test turns it on: a configured one demands a token
+# for every paid check and asks Cloudflare (tests/test_turnstile.py fakes it).
+os.environ["TURNSTILE_SITE_KEY"] = ""
+os.environ["TURNSTILE_SECRET_KEY"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

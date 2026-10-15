@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     sarvam_api_key: str = _credential()
     hf_token: str = _credential()  # unused since the pivot removed the local embedding model
     telegram_bot_token: str = _credential()  # from @BotFather; used only by scripts/telegram_bot.py
+    # Cloudflare Turnstile (decided 2026-10-15): with both set, a paid check
+    # from a web visitor needs a pass (app/providers/turnstile.py). Unset =
+    # no challenge — this machine and development. The site key is public
+    # (the page shows it); it is hidden here only because its name is a key's.
+    turnstile_site_key: str = _credential()
+    turnstile_secret_key: str = _credential()
 
     # Vision OCR still needs a model of its own (it is not the chat call).
     vision_model: str = "claude-sonnet-5"
