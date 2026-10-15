@@ -11,6 +11,11 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+# The very function Starlette's router matches routes with, so the raw ASGI
+# middlewares below judge the same path the router will route (review R4).
+# A private module: if an upgrade moves it, the import fails loudly at
+# startup, and tests/test_cross_site.py pins the root-path behaviour.
+from starlette._utils import get_route_path
 
 from app.api.dashboard import router as dashboard_router
 from app.api.routes import router
@@ -66,7 +71,10 @@ class LimitUploadSize:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        upload = scope.get("path") in _UPLOAD_PATHS
+        # The ROUTE path: with a root_path, uvicorn puts the prefix in
+        # scope["path"], and every real screenshot was refused as "too long"
+        # (review R4, reproduced on real uvicorn).
+        upload = get_route_path(scope) in _UPLOAD_PATHS
         limit = settings.max_media_bytes if upload else settings.max_json_bytes
         refusal = _TOO_LARGE_UPLOAD if upload else _TOO_LARGE_MESSAGE
         for name, value in scope.get("headers") or []:
@@ -153,7 +161,7 @@ class RefuseCrossSite:
 
     async def __call__(self, scope, receive, send):
         if (scope["type"] == "http" and scope.get("method") == "POST"
-                and scope.get("path", "").startswith(_PAID_PREFIX)
+                and get_route_path(scope).startswith(_PAID_PREFIX)
                 and _cross_site(scope)):
             await send({"type": "http.response.start", "status": 403,
                         "headers": [(b"content-type", b"application/json"),

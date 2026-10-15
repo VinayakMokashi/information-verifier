@@ -13,20 +13,21 @@ cross-origin POST). Requests carrying neither are not from a page — the
 Telegram bot, curl — and CSRF needs a page.
 """
 import pytest
+from fastapi.testclient import TestClient
 
 import scripts.fake_stages as F
 
 _IMAGE = {"file": ("shot.png", b"\x89PNG" + b"0" * 64, "image/png")}
 
 
-def _post(client, route, headers):
+def _post(client, route, headers, prefix=""):
     if route == "image":
-        return client.post("/api/v1/verify/image", files=_IMAGE, headers=headers)
+        return client.post(f"{prefix}/api/v1/verify/image", files=_IMAGE, headers=headers)
     if route == "media":
-        return client.post("/api/v1/verify/media",
+        return client.post(f"{prefix}/api/v1/verify/media",
                            files={"file": ("v.ogg", b"OggS" + b"0" * 64, "audio/ogg")},
                            headers=headers)
-    return client.post("/api/v1/verify/text", json={"text": "5G spreads corona"},
+    return client.post(f"{prefix}/api/v1/verify/text", json={"text": "5G spreads corona"},
                        headers=headers)
 
 
@@ -61,3 +62,29 @@ def test_reading_an_answer_is_never_blocked(client):
     resp = client.get(f"/api/v1/reports/{job}",
                       headers={"sec-fetch-site": "cross-site", "origin": "https://evil.example"})
     assert resp.status_code == 200
+
+
+# -- a root path (review R4) ---------------------------------------------------
+# REPRODUCED on real uvicorn with root_path="/v": uvicorn puts the prefix IN
+# scope["path"]; Starlette routes on the path without it (get_route_path), but
+# both middlewares compared the raw path — so another site's page could submit
+# paid checks again, and every real screenshot over 64 KiB was "too long".
+# Any sub-path deployment (a reverse proxy at /verifier) would hit it on day one.
+
+@pytest.mark.parametrize("route", ["image", "text"])
+def test_a_root_path_does_not_blind_the_cross_site_check(client, route):
+    from app.main import app
+
+    with TestClient(app, root_path="/v") as sub:
+        resp = _post(sub, route, {"sec-fetch-site": "cross-site"}, prefix="/v")
+    assert resp.status_code == 403
+    assert F.CALLS["answer"] == 0
+
+
+def test_a_root_path_keeps_the_upload_allowance(client):
+    from app.main import app
+
+    shot = {"file": ("shot.png", b"\x89PNG" + b"0" * 300_000, "image/png")}
+    with TestClient(app, root_path="/v") as sub:
+        resp = sub.post("/v/api/v1/verify/image", files=shot)
+    assert resp.status_code == 202, resp.text
