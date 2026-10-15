@@ -47,7 +47,11 @@ async def dashboard_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/v1/admin/spend", include_in_schema=False)
-async def spend(request: Request, days: int = 30) -> dict:
+def spend(request: Request, days: int = 30) -> dict:
+    """A plain `def`, so FastAPI runs it on its thread pool: every line below
+    is a SQLite read, and on the event loop a slow one held up every page,
+    poll and live stream (measured: the loop stood still 1.04 s behind a
+    1 s read; R15's rule)."""
     _local_only(request)
     days = max(1, min(days, 366))
     today = operator_day(datetime.now(timezone.utc))
@@ -71,6 +75,14 @@ async def spend(request: Request, days: int = 30) -> dict:
         cap_used = limits.used_today()
     except Exception:  # noqa: BLE001 — the page still shows spend without it
         cap_used = None
+    # The day's MONEY (Vinayak, 2026-10-15: $1 a day, cheaper as it drains):
+    # settled costs plus what running checks hold. The count above is only
+    # a backstop since then.
+    try:
+        committed = round(limits._budget.committed(today), 6)
+        mode = limits.budget_mode(today)
+    except Exception:  # noqa: BLE001 — the page still shows spend without it
+        committed, mode = None, None
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -79,6 +91,10 @@ async def spend(request: Request, days: int = 30) -> dict:
         "cap": {"used": cap_used, "limit": settings.max_checks_per_day,
                 "enforced": settings.rate_limit_enabled,
                 "resets": limits._reset_label()},
+        "budget": {"limit_usd": settings.daily_budget_usd, "committed_usd": committed,
+                   "mode": mode, "paused": limits.paused(),
+                   "enforced": settings.rate_limit_enabled,
+                   "resets": limits._reset_label()},
         "totals": {
             "today": _ledger.totals(today),
             "d7": _ledger.totals(_day_minus(today, 6)),

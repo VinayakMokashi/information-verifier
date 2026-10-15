@@ -87,8 +87,11 @@ spend limit, the tier cap, billing, an empty balance) now pauses checking:
 the reader is told "paused … try again later", the check gives its whole
 reservation back (failed requests aren't charged), new paid checks get 503
 up front for 10 minutes and then one probes, repeats stay free, and the
-console says what to fix. NEXT: the budget on the dashboard (and its ledger
-reads off the event loop); Turnstile + device cookie.
+console says what to fix (f545885; dbd5f08 keeps an answer already
+written) · the dashboard's card shows the day's MONEY — "$0.72 of $1.00",
+what it still buys, "Paused" — with the 40-check count as a backstop
+note, and its reads run off the event loop (looked at in headless Chrome:
+light, dark, paused, phone width). NEXT: Turnstile + a web device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

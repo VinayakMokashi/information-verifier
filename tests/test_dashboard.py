@@ -115,6 +115,68 @@ def test_totals_breakdown_and_cap(local, monkeypatch):
     assert data["cap"]["resets"] == "midnight India time"
 
 
+@pytest.mark.parametrize("committed, mode", [(0.42, "full"), (0.70, "vetted"),
+                                             (0.90, "shortcut")])
+def test_the_days_budget_is_what_the_card_shows(local, monkeypatch, committed, mode):
+    """Since 2026-10-15 the MONEY is the limit ($1 a day, cheaper as it
+    drains); the count of checks is only a backstop. The card showed the
+    count."""
+    from app.api import limits
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    limits._budget.reserve(limits.today(), committed, settings.daily_budget_usd)
+    budget = local.get("/api/v1/admin/spend").json()["budget"]
+    assert budget == {"limit_usd": settings.daily_budget_usd,
+                      "committed_usd": pytest.approx(committed), "mode": mode,
+                      "paused": False, "enforced": True,
+                      "resets": "midnight India time"}
+
+
+def test_the_card_says_when_checking_is_paused(local, monkeypatch):
+    from app.api import limits
+
+    limits.pause()
+    assert local.get("/api/v1/admin/spend").json()["budget"]["paused"] is True
+
+
+def test_reading_the_dashboard_never_holds_up_the_server(client, monkeypatch):
+    """The spend handler read the ledger ON the event loop (review R15's
+    rule, noted when R15 was fixed): a slow read froze every page, poll and
+    live stream until it finished. Measured as the loop's own lag while the
+    read runs — a /health timed in-process only starts once a blocked loop
+    is free again, so its first draft passed against the bug."""
+    import asyncio
+    import time
+
+    import httpx
+
+    from app.api import dashboard
+    from app.main import app
+
+    def slow_by_day(since):
+        time.sleep(1.0)                    # a large ledger, or a busy disk
+        return []
+
+    monkeypatch.setattr(dashboard._ledger, "by_day", slow_by_day)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 50000))
+        async with httpx.AsyncClient(transport=transport,
+                                     base_url="http://127.0.0.1:8000") as http:
+            reading = asyncio.create_task(http.get("/api/v1/admin/spend"))
+            lag = 0.0
+            while not reading.done():
+                tick = time.monotonic()
+                await asyncio.sleep(0.01)
+                lag = max(lag, time.monotonic() - tick - 0.01)
+            assert reading.result().status_code == 200
+        return lag
+
+    lag = asyncio.run(scenario())
+    assert lag < 0.5, f"the event loop stood still {lag:.2f} s behind the dashboard's read"
+
+
 def test_every_day_in_the_range_is_present(local):
     """A day with no checks is a real $0, not a gap in the time axis."""
     data = local.get("/api/v1/admin/spend?days=30").json()

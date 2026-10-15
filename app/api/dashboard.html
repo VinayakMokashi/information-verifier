@@ -76,9 +76,10 @@
   .meter > span { display: block; height: 100%; border-radius: 5px;
                   background: var(--accent); }
   .meter.at-limit > span { background: var(--status-warning); }
-  .status-line { display: flex; align-items: center; gap: 6px;
+  .status-line { display: flex; align-items: flex-start; gap: 6px;
                  font-size: .82rem; color: var(--text-secondary); }
-  .status-line svg { flex: none; }
+  .status-line svg { flex: none; margin-top: 3px; }
+  .value .of { font-size: .9rem; font-weight: 500; color: var(--text-secondary); }
 
   .filters { display: flex; gap: 6px; margin: 8px 0 14px; flex-wrap: wrap; }
   .filters button {
@@ -152,10 +153,11 @@
       <div class="note" id="k-7-note">&nbsp;</div>
     </div>
     <div class="card">
-      <div class="label">Daily limit</div>
+      <div class="label">Today's budget</div>
       <div class="value" id="k-cap">—</div>
       <div class="meter" id="cap-meter"><span style="width:0"></span></div>
       <div class="status-line" id="cap-status"></div>
+      <div class="note" id="cap-note">&nbsp;</div>
     </div>
   </div>
 
@@ -287,30 +289,42 @@ function drawKpis(d) {
   $("k-7").textContent = usd(t.d7.usd);
   $("k-7-note").textContent = `${t.d7.checks} check${t.d7.checks === 1 ? "" : "s"}`;
 
-  const cap = d.cap;
-  const used = cap.used ?? 0;
-  $("k-cap").textContent = `${used} of ${cap.limit}`;
+  // The MONEY is the day's limit since 2026-10-15 ($1 a day, cheaper as it
+  // drains); the count of checks stays only as a backstop, in the note.
+  const b = d.budget, cap = d.cap;
+  const committed = b.committed_usd ?? 0;
+  $("k-cap").replaceChildren(document.createTextNode(usd(committed)),
+                             el("span", { class: "of" }, ` of ${usd(b.limit_usd)}`));
   const meter = $("cap-meter");
-  meter.firstElementChild.style.width = Math.min(100, (used / Math.max(1, cap.limit)) * 100) + "%";
-  const atLimit = cap.enforced && used >= cap.limit;
-  meter.classList.toggle("at-limit", atLimit);
+  meter.firstElementChild.style.width =
+    Math.min(100, (committed / Math.max(1e-9, b.limit_usd)) * 100) + "%";
+  const warn = b.enforced && (b.paused || (b.mode !== null && b.mode !== "full"));
+  meter.classList.toggle("at-limit", warn);
   const status = $("cap-status");
   status.replaceChildren();
-  if (atLimit) {
-    // Status never rides on color alone: icon + label.
-    const icon = svg("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" });
-    icon.appendChild(svg("path", { d: "M7 1.5 13 12.5H1Z", fill: "var(--status-warning)" }));
-    const bang = svg("path", { d: "M7 5.5v3.2M7 10.3v.2", stroke: "#0b0b0b",
-                               "stroke-width": 1.6, "stroke-linecap": "round" });
-    icon.appendChild(bang);
-    status.appendChild(icon);
-    status.appendChild(el("span", {}, `Limit reached — resets at ${cap.resets}`));
-  } else if (!cap.enforced) {
+  if (!b.enforced) {
     status.appendChild(el("span", {}, "Not enforced on this server (rate limiting off)"));
   } else {
-    const left = cap.limit - used;
-    status.appendChild(el("span", {}, `${left} left today · resets at ${cap.resets}`));
+    let text;
+    if (b.paused) text = "Paused — Anthropic is refusing for money; the app window says why";
+    else if (b.mode === "shortcut") text = "Nearly used up — text only, from published fact-checks";
+    else if (b.mode === "vetted") text = "Running low — no open-web search";
+    else text = `${usd(Math.max(0, b.limit_usd - committed))} left`;
+    // Status never rides on color alone: icon + label.
+    if (warn) status.appendChild(warningIcon());
+    status.appendChild(el("span", {}, text));
   }
+  const used = cap.used ?? 0;
+  $("cap-note").textContent = b.enforced
+    ? `Resets at ${b.resets} · ${used} of ${cap.limit} checks (a backstop)` : " ";
+}
+
+function warningIcon() {
+  const icon = svg("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" });
+  icon.appendChild(svg("path", { d: "M7 1.5 13 12.5H1Z", fill: "var(--status-warning)" }));
+  icon.appendChild(svg("path", { d: "M7 5.5v3.2M7 10.3v.2", stroke: "#0b0b0b",
+                                 "stroke-width": 1.6, "stroke-linecap": "round" }));
+  return icon;
 }
 
 // -- spend per day: columns, one series (so no legend box — the title names it) -
