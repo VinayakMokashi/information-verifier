@@ -67,7 +67,12 @@ class Settings(BaseSettings):
     answer_retention_days: int = 30
 
     # Media — audio/video via ffmpeg + Sarvam Saaras
-    max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap
+    max_media_bytes: int = 25 * 1024 * 1024  # 25 MB upload cap — upload routes ONLY
+    # Every other request body. REPRODUCED 2026-10-15: the 25 MB upload cap
+    # was the only cap, so a 25 MB JSON "message" was parsed whole and the
+    # small-talk triage froze the whole server for 10-19 s before any limit.
+    # Fits a max_input_chars message even fully \uXXXX-escaped (a test pins it).
+    max_json_bytes: int = 64 * 1024
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
 

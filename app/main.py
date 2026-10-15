@@ -24,8 +24,17 @@ class _BodyTooLarge(Exception):
     """Raised inside the ASGI receive channel to abort an oversize upload."""
 
 
-async def _send_413(send) -> None:
-    body = b'{"detail":"File too large. Please send a shorter clip."}'
+_TOO_LARGE_UPLOAD = b'{"detail":"File too large. Please send a shorter clip."}'
+_TOO_LARGE_MESSAGE = (b'{"detail":"That message is too long. '
+                      b'Send the part you want checked."}')
+
+# The only routes that take a file. Decided by PATH, which the server owns:
+# Content-Type is the client's word, and a JSON route must never get the
+# upload allowance by claiming to be multipart.
+_UPLOAD_PATHS = frozenset({"/api/v1/verify/image", "/api/v1/verify/media"})
+
+
+async def _send_413(send, body: bytes = _TOO_LARGE_UPLOAD) -> None:
     await send({
         "type": "http.response.start",
         "status": 413,
@@ -56,10 +65,12 @@ class LimitUploadSize:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        limit = settings.max_media_bytes
+        upload = scope.get("path") in _UPLOAD_PATHS
+        limit = settings.max_media_bytes if upload else settings.max_json_bytes
+        refusal = _TOO_LARGE_UPLOAD if upload else _TOO_LARGE_MESSAGE
         for name, value in scope.get("headers") or []:
             if name == b"content-length" and value.isdigit() and int(value) > limit:
-                return await _send_413(send)
+                return await _send_413(send, refusal)
 
         received = 0
         too_large = False
@@ -84,13 +95,13 @@ class LimitUploadSize:
             if too_large:
                 if not answered:      # replace the app's parse error with 413
                     answered = True
-                    await _send_413(send)
+                    await _send_413(send, refusal)
                 return                # and drop whatever else it tries to send
             await send(message)
 
         await self.app(scope, limited_receive, tracking_send)
         if too_large and not answered:
-            await _send_413(send)
+            await _send_413(send, refusal)
 
 
 _HOUSEKEEPING_EVERY_S = 6 * 3600

@@ -90,3 +90,65 @@ def test_chunked_upload_cannot_skip_the_size_cap(client, monkeypatch):
     assert "too large" in resp.json()["detail"]
 
 
+
+
+# -- a stranger's oversized text post (reproduced 2026-10-15) -------------------
+
+def _spy_triage(monkeypatch):
+    import app.api.routes as R
+
+    seen = []
+    monkeypatch.setattr(R, "nothing_to_check", lambda text: seen.append(len(text)) or False)
+    return seen
+
+
+def test_a_huge_text_post_is_refused_before_anything_reads_it(client, monkeypatch):
+    """REPRODUCED 2026-10-15 (docs/research/2026-10-15/audit-security.md, F5):
+    a 25 MB JSON body passed the upload cap — 25 MB, meant for media — was
+    parsed whole, and the small-talk triage ran over it ON the event loop
+    before any limit: 10-19 s with the whole server frozen, then refunded,
+    so free to repeat. Non-upload routes now have a small cap of their own."""
+    seen = _spy_triage(monkeypatch)
+    resp = client.post("/api/v1/verify/text", json={"text": "a" * 2_000_000})
+    assert resp.status_code == 413
+    assert seen == []                       # triage never saw it
+    assert F.CALLS["answer"] == 0
+
+
+def test_the_small_cap_goes_by_path_not_by_what_the_client_claims(client):
+    """Content-Type is the client's word: a huge body labelled multipart must
+    not get the upload allowance on a JSON route."""
+    resp = client.post("/api/v1/verify/text", content=b"x" * 2_000_000,
+                       headers={"content-type": "multipart/form-data; boundary=x"})
+    assert resp.status_code == 413
+
+
+def test_a_long_message_is_refused_before_triage_and_without_a_slot(client, monkeypatch):
+    import app.api.routes as R
+
+    monkeypatch.setattr(settings, "max_input_chars", 100)
+    seen = _spy_triage(monkeypatch)
+    claimed = []
+
+    async def no_claim(request):
+        claimed.append(1)
+        return None
+
+    monkeypatch.setattr(R, "claim", no_claim)
+    resp = client.post("/api/v1/verify/text", json={"text": "x" * 500})
+    assert resp.status_code == 413
+    assert "500 characters" in resp.json()["detail"]
+    assert seen == [] and claimed == []
+
+
+def test_an_image_upload_still_gets_the_upload_allowance(client):
+    """The guard on the other side: the small cap must not reach uploads."""
+    resp = client.post("/api/v1/verify/image",
+                       files={"file": ("shot.png", b"\x89PNG" + b"0" * 300_000, "image/png")})
+    assert resp.status_code == 202
+
+
+def test_the_small_cap_always_fits_a_maximum_length_message():
+    """A message at max_input_chars, JSON-escaped (\\uXXXX = 6 bytes a
+    character) plus the language field, must never meet the body cap."""
+    assert settings.max_json_bytes >= settings.max_input_chars * 6 + 1024

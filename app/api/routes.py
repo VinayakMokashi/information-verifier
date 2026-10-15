@@ -254,17 +254,20 @@ async def _run_media_job(
 async def verify_text(
     req: VerifyTextRequest, background: BackgroundTasks, request: Request
 ) -> JobAccepted:
+    # The length first: it is O(1), and the triage below is not — it walks
+    # every character on the event loop (2026-10-15: a 25 MB "message" froze
+    # the server; the body cap in main.py now bounds what reaches here).
+    if len(req.text) > settings.max_input_chars:
+        raise HTTPException(
+            413,
+            f"That message is {len(req.text)} characters; the limit is "
+            f"{settings.max_input_chars}. Send the part you want checked.",
+        )
     # Before the slot is even claimed: "hi" used to buy a full check and use
     # up one of the day's capped slots (measured 2026-10-10).
     if nothing_to_check(req.text):
         raise HTTPException(422, _MSG_NOTHING_TO_CHECK)
     async with _quota(request) as spend:
-        if len(req.text) > settings.max_input_chars:
-            raise HTTPException(
-                413,
-                f"That message is {len(req.text)} characters; the limit is "
-                f"{settings.max_input_chars}. Send the part you want checked.",
-            )
         answer, stream = await _new_job(req.text)
         background.add_task(_check, answer.job_id, req.text, _repo, stream,
                             quota_day=spend.day, language=req.language)
