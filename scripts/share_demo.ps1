@@ -15,6 +15,13 @@ if (-not $cloudflared) {
     else { Write-Error "cloudflared not found. Install: winget install -e --id Cloudflare.cloudflared"; exit 1 }
 }
 
+# Visitors arrive through the tunnel under its random *.trycloudflare.com
+# name, and the app refuses paid checks addressed to a name it does not know
+# (a DNS-rebinding page sends its own). Set for the server started here only;
+# the console gets its old value back at the end.
+$previousHosts = $env:PUBLIC_HOSTS
+$env:PUBLIC_HOSTS = (@($env:PUBLIC_HOSTS, ".trycloudflare.com") | Where-Object { $_ }) -join ","
+
 if ($DemoMode) {
     Write-Host ">> FREE demo mode (simulated verdicts, `$0)." -ForegroundColor Green
     $server = Start-Process -PassThru -NoNewWindow ".\.venv\Scripts\python.exe" "scripts\serve_demo.py"
@@ -31,4 +38,5 @@ try {
     & $cloudflared tunnel --url http://127.0.0.1:8000
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    $env:PUBLIC_HOSTS = $previousHosts
 }

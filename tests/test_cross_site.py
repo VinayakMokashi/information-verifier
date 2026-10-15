@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import scripts.fake_stages as F
+from app.config import settings
 
 _IMAGE = {"file": ("shot.png", b"\x89PNG" + b"0" * 64, "image/png")}
 
@@ -60,7 +61,8 @@ def test_reading_an_answer_is_never_blocked(client):
     reads must not depend on headers a privacy extension might strip."""
     job = _post(client, "text", {}).json()["job_id"]
     resp = client.get(f"/api/v1/reports/{job}",
-                      headers={"sec-fetch-site": "cross-site", "origin": "https://evil.example"})
+                      headers={"sec-fetch-site": "cross-site", "origin": "https://evil.example",
+                               "host": "evil.example"})
     assert resp.status_code == 200
 
 
@@ -88,3 +90,68 @@ def test_a_root_path_keeps_the_upload_allowance(client):
     with TestClient(app, root_path="/v") as sub:
         resp = sub.post("/v/api/v1/verify/image", files=shot)
     assert resp.status_code == 202, resp.text
+
+
+# -- whose name the request is addressed to (review R5) ------------------------
+# REPRODUCED on real uvicorn: a page re-resolves ITS OWN name to 127.0.0.1,
+# and the owner's browser — same-origin to that name — posts a paid check
+# here: 202, PAID, and being same-origin it can read the answer. The browser
+# still sends the attacker's name as Host: the one thing such a page cannot
+# choose. The dashboard already refused it; the paid routes did not look.
+
+@pytest.mark.parametrize("headers", [
+    {"host": "evil.example:8000", "sec-fetch-site": "same-origin"},
+    {"host": "evil.example:8000", "origin": "http://evil.example:8000"},  # older browser
+    {"host": "evil.example:8000"},
+])
+@pytest.mark.parametrize("route", ["image", "text"])
+def test_a_rebound_name_cannot_submit_a_paid_check(client, route, headers):
+    resp = _post(client, route, headers)
+    assert resp.status_code == 403
+    assert F.CALLS["answer"] == 0
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:8000", "localhost:8000", "[::1]:8000",
+                                  "LOCALHOST", "127.0.0.1"])
+def test_this_machines_own_names_get_through(client, host):
+    assert _post(client, "image", {"host": host}).status_code == 202
+
+
+@pytest.mark.parametrize("host, status", [
+    ("verifier.example.com", 202),
+    ("VERIFIER.example.com:443", 202),
+    ("verifier.example.com.", 202),              # the fully-qualified form
+    ("evil.example.", 403),
+    ("abc-def-1.trycloudflare.com", 202),        # share_demo.ps1's quick tunnel
+    ("trycloudflare.com", 403),                  # ".x" means a subdomain of x
+    ("trycloudflare.com.evil.example", 403),
+    ("verifier.example.com.evil.example", 403),
+    ("evilverifier.example.com", 403),
+    ("verifier.example.com:8000:1", 403),
+    ("", 403),
+])
+def test_the_public_names_get_through_and_nothing_like_them(client, monkeypatch,
+                                                            host, status):
+    monkeypatch.setattr(settings, "public_hosts", " verifier.example.com , .trycloudflare.com ")
+    assert _post(client, "image", {"host": host}).status_code == status
+
+
+def test_two_host_headers_are_refused():
+    """No browser sends two, but the rule must not depend on which one a
+    parser hands over (the dashboard's rule, app/api/local.py)."""
+    from app.main import _our_host
+
+    assert not _our_host({"headers": [(b"host", b"127.0.0.1:8000"),
+                                      (b"host", b"evil.example")]})
+
+
+def test_the_owner_hears_once_about_a_refused_name(client, monkeypatch, capsys):
+    """Going live, every visitor arrives under the public name: forgetting
+    PUBLIC_HOSTS would refuse them all without a word on the server."""
+    import app.main as M
+
+    monkeypatch.setattr(M, "_REFUSED_HOSTS", set())
+    for _ in range(3):
+        _post(client, "text", {"host": "my-new-domain.example"})
+    out = capsys.readouterr().out
+    assert out.count("my-new-domain.example") == 1 and "PUBLIC_HOSTS" in out

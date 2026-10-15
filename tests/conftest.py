@@ -11,6 +11,10 @@ import os
 for _key in ("ANTHROPIC_API_KEY", "GOOGLE_FACTCHECK_API_KEY", "SARVAM_API_KEY",
              "HF_TOKEN", "TELEGRAM_BOT_TOKEN"):
     os.environ[_key] = "test-not-a-real-key"
+# The names the test clients send as Host — TestClient's "testserver",
+# httpx's "http://test" — are this app's public names here: a paid POST to
+# any other name is refused (review R5). tests/test_cross_site.py sets its own.
+os.environ["PUBLIC_HOSTS"] = "testserver,test"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

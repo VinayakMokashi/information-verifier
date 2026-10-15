@@ -38,10 +38,16 @@ _LOCAL_HOST_HEADER = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})
                                 re.IGNORECASE)
 
 
+def names_this_machine(host: str) -> bool:
+    """One Host header's value names this machine (the paid routes' Host
+    allowlist starts here too — app/main.py, review R5)."""
+    return bool(_LOCAL_HOST_HEADER.fullmatch(host))
+
+
 def is_this_machine(request: Request) -> bool:
     peer = request.client.host if request.client else ""
     hosts = request.headers.getlist("host")
     return (peer in _LOCAL_HOSTS
             and not any(h in request.headers for h in _PROXY_HEADERS)
             and len(hosts) == 1
-            and bool(_LOCAL_HOST_HEADER.fullmatch(hosts[0])))
+            and names_this_machine(hosts[0]))

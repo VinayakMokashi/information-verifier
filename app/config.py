@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     # small-talk triage froze the whole server for 10-19 s before any limit.
     # Fits a max_input_chars message even fully \uXXXX-escaped (a test pins it).
     max_json_bytes: int = 64 * 1024
+    # The names a PAID check may be addressed to, beyond this machine's own
+    # (127.0.0.1, localhost, [::1]): the public domain the tunnel serves,
+    # comma-separated; ".example.com" allows any subdomain (share_demo.ps1
+    # sets ".trycloudflare.com" for its quick tunnel). Anything else is
+    # refused: a DNS-rebinding page sends its own name (review R5). Going
+    # live, put the domain here — the server prints any name it refused.
+    public_hosts: str = ""
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
 

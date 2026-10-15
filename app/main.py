@@ -5,6 +5,7 @@ Run locally:
 
 Interactive API docs at http://127.0.0.1:8000/docs
 """
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette._utils import get_route_path
 
 from app.api.dashboard import router as dashboard_router
+from app.api.local import names_this_machine
 from app.api.routes import router
 from app.api.stream import router as stream_router
 from app.config import settings
@@ -144,6 +146,53 @@ def _cross_site(scope) -> bool:
     return not netloc or netloc != headers.get(b"host", "").strip().lower()
 
 
+# A plain DNS name, with an optional port: the only shape a public name can
+# match, and the only shape ever printed (a refused Host is a visitor's text).
+_PUBLIC_NAME = re.compile(r"([a-z0-9.-]+)(?::\d{1,5})?")
+_REFUSED_HOSTS: set[str] = set()
+
+
+def _our_host(scope) -> bool:
+    """Is this request addressed to one of this app's own names?
+
+    REPRODUCED (review R5, real uvicorn): a page re-resolves ITS OWN name to
+    127.0.0.1, and the owner's browser — same-origin to that name, so
+    Sec-Fetch-Site says same-origin and Origin equals Host — posted a paid
+    check here and could read the answer. But the browser still sends the
+    page's name as Host, which a page cannot choose. So a paid check must
+    name this machine (the dashboard's rule, app/api/local.py) or a public
+    name in settings.public_hosts, in exactly one Host header. Checking only
+    requests that carry no proxy header would not do: a same-origin page
+    can add X-Forwarded-For itself.
+    """
+    hosts = [value for name, value in scope.get("headers") or [] if name == b"host"]
+    if len(hosts) != 1:
+        return False
+    host = hosts[0].decode("latin-1").strip().lower()
+    if names_this_machine(host):
+        return True
+    shape = _PUBLIC_NAME.fullmatch(host)
+    if not shape:
+        return False
+    name = shape.group(1)
+    name = name[:-1] if name.endswith(".") else name    # the FQDN form, "x.com."
+    for entry in (e.strip().lower() for e in settings.public_hosts.split(",")):
+        if entry.startswith("."):
+            if name.endswith(entry) and len(name) > len(entry):
+                return True
+        elif entry and name == entry:
+            return True
+    # Going live, every visitor arrives under the public name: a missing
+    # PUBLIC_HOSTS would refuse them all with no word on the server. Once a
+    # name, and a bounded set, so a flood of made-up names prints little.
+    if name not in _REFUSED_HOSTS and len(_REFUSED_HOSTS) < 64:
+        _REFUSED_HOSTS.add(name)
+        print(f"[host] refused paid checks addressed to {name!r}, which is not one "
+              f"of this app's names. If it IS this app's public name, add it to "
+              f"PUBLIC_HOSTS in .env; otherwise ignore this.")
+    return False
+
+
 class RefuseCrossSite:
     """No other website can submit a paid check through its visitors.
 
@@ -153,7 +202,9 @@ class RefuseCrossSite:
     server ran the paid vision call and took a daily slot, from the
     visitor's own IP, past every per-visitor limit. Dropping the CORS
     wildcard (below) had only ever stopped the JSON routes. Raw ASGI and
-    outermost, so the refusal comes before a byte of the body is read.
+    outermost, so the refusal comes before a byte of the body is read. A
+    same-origin page under ANOTHER name — DNS rebinding — is refused by
+    its Host (_our_host).
     """
 
     def __init__(self, app):
@@ -162,7 +213,7 @@ class RefuseCrossSite:
     async def __call__(self, scope, receive, send):
         if (scope["type"] == "http" and scope.get("method") == "POST"
                 and get_route_path(scope).startswith(_PAID_PREFIX)
-                and _cross_site(scope)):
+                and (_cross_site(scope) or not _our_host(scope))):
             await send({"type": "http.response.start", "status": 403,
                         "headers": [(b"content-type", b"application/json"),
                                     (b"content-length",
