@@ -437,6 +437,60 @@ def test_a_cancelled_claims_rollback_never_runs_on_the_event_loop(limited, monke
     assert limits.used_today() == 0
 
 
+def test_a_second_cancellation_cannot_strand_the_person(limited, monkeypatch):
+    """Found by review (2026-10-15, noted as moot in practice): a SECOND
+    cancellation landing on _quota's shielded refund skipped release(), so
+    the person stayed "in flight" for the TTL — 15 minutes of "you already
+    have a check running" — because the release came after the shielded
+    await instead of in a finally. Only shutdown cancels twice today; the
+    rule should not depend on that."""
+    import asyncio
+    import threading
+    import time
+
+    import httpx
+
+    from app.api import routes
+    from app.main import app
+
+    refunding, entered = threading.Event(), []
+    real_refund = limits.refund
+
+    def slow_refund(*args, **kwargs):
+        refunding.set()
+        time.sleep(0.5)                           # a contended write
+        return real_refund(*args, **kwargs)
+
+    async def stuck(*args, **kwargs):
+        entered.append(True)
+        await asyncio.Event().wait()              # the job row's write never returns
+
+    monkeypatch.setattr(limits, "refund", slow_refund)
+    monkeypatch.setattr(routes, "_new_job", stuck)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as http:
+            task = asyncio.create_task(
+                http.post("/api/v1/verify/text", json={"text": "cancelled twice"}))
+            deadline = time.monotonic() + 10
+            while not entered:                    # claimed, and inside the route body
+                assert time.monotonic() < deadline and not task.done(), "never claimed"
+                await asyncio.sleep(0.01)
+            task.cancel()                         # first: _quota starts the shielded refund
+            while not refunding.is_set():
+                assert time.monotonic() < deadline, "the refund never started"
+                await asyncio.sleep(0.01)
+            task.cancel()                         # second: lands on the shielded await
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(scenario())
+    assert limits.drain()
+    assert limits.used_today() == 0, "the shielded refund did not finish"
+    assert limits._in_flight == {}, "a second cancellation stranded the person in flight"
+
+
 def test_an_unwritable_counter_refuses_rather_than_waves_through(limited, monkeypatch):
     """The guard fails CLOSED. A locked or broken database must not become an
     unlimited budget."""

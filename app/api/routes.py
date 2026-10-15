@@ -145,11 +145,16 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False):
         # still lets the refund finish; over-counting is the safe direction
         # if it does not. After paid work (the image route's OCR), the slot
         # and the reservation stay: the real cost is not known here.
-        if not spend.started and spend.day is not None:
-            await asyncio.shield(give_back(request, spend.day, spend.kind,
-                                           spend.mode, spend.subject))
-        # No background check exists to release this person later: it ends here.
-        spend.release()
+        try:
+            if not spend.started and spend.day is not None:
+                await asyncio.shield(give_back(request, spend.day, spend.kind,
+                                               spend.mode, spend.subject))
+        finally:
+            # No background check exists to release this person later: it
+            # ends here. In a finally: a SECOND cancellation landing on the
+            # shielded refund skipped it, and the person was "in flight" for
+            # the TTL (found by review, reproduced 2026-10-16).
+            spend.release()
         raise
 
 
