@@ -690,6 +690,50 @@ class _Scripted:
         self.messages = Messages()
 
 
+def _refused_for_money(status, message, error_type="invalid_request_error",
+                       details=None):
+    """Anthropic's documented "pay first" refusals (app/providers/llm.py)."""
+    import anthropic
+    import httpx
+
+    error = {"type": error_type, "message": message}
+    if details:
+        error["details"] = details
+    body = {"type": "error", "error": error}
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(status, json=body, request=request)
+    kind = {400: anthropic.BadRequestError, 429: anthropic.RateLimitError}.get(
+        status, anthropic.APIStatusError)
+    return kind(f"Error code: {status} - {body}", response=response, body=body)
+
+
+@pytest.mark.parametrize("refusal", [
+    _refused_for_money(400, "You have reached your specified API usage limits. "
+                            "You will regain access on 2026-11-01 at 00:00 UTC."),
+    _refused_for_money(400, "Your credit balance is too low to access the Anthropic "
+                            "API. Please go to Plans & Billing to upgrade or purchase "
+                            "credits."),
+    _refused_for_money(402, "There's an issue with your billing or payment "
+                            "information.", "billing_error"),
+    _refused_for_money(429, "Your organization has reached its monthly spend limit.",
+                       "rate_limit_error",
+                       {"error_code": "enforced_spend_limit_reached"}),
+], ids=["spend-limit-400", "credit-balance-400", "billing-402", "tier-cap-429"])
+def test_a_refusal_for_money_pauses_the_check_and_is_never_retried(no_factcheck,
+                                                                   monkeypatch, refusal):
+    """2026-10-16: a refusal for MONEY fails for every check until someone
+    pays (docs/research/2026-10-15/limits-budget.verification.md). The trusted
+    pass took a spend-limit 400 for a whitelist rejection and retried on the
+    core domains, then the open-web pass tried again — three calls — and the
+    reader was told to try again "in a few minutes"."""
+    client = _Scripted([refusal] * 5, _final("unused"))
+    monkeypatch.setattr(C, "async_client", client)
+    with pytest.raises(C.ServicePaused) as paused:
+        asyncio.run(C.answer("5G spreads corona"))
+    assert len(client.requests) == 1, "retried a refusal that fails until someone pays"
+    assert "paused" in str(paused.value) and "later" in str(paused.value)
+
+
 def test_a_crawler_400_drops_only_the_domains_it_names(no_factcheck, monkeypatch):
     """MEASURED: one blocked domain 400s the whole allowed_domains list. The
     engine used to answer that by falling back to the five core domains —

@@ -15,8 +15,8 @@ from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
 from app.api.limits import (admit, attempt, claim, fund_async, give_back, give_back_day,
-                            give_back_person, release, reserve_usd, settle,
-                            subject_of)
+                            give_back_person, pause, paused, release, reserve_usd,
+                            settle, subject_of)
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
@@ -24,6 +24,7 @@ from app.engine.job import cache_key, run_check
 from app.engine.triage import nothing_to_check
 from app.models.answer import Answer, JobStatus
 from app.providers.asr import get_asr_provider
+from app.providers.llm import PAUSED_MESSAGE, paused_reason, tell_owner_paused
 from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
     download_link_audio, resolve_link, subtitle_text,
@@ -124,6 +125,11 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False):
     honest when nothing was bought. (The media ASR spend that used to share
     this trap now runs behind the 202, where no refund path exists at all.)
     """
+    if paused():
+        # Anthropic is refusing for money: this check would only fail after
+        # reserving and waiting (limits.pause). A cached repeat is still
+        # served free — the text route looks for one before it gets here.
+        raise HTTPException(503, PAUSED_MESSAGE)
     subject = subject_of(request)
     token = uuid.uuid4().hex
     if deferred:
@@ -180,16 +186,23 @@ async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
         return
     quota.release()
     try:
+        answer = await asyncio.to_thread(repo.get, job_id)
+        # Refused for MONEY (chat.ServicePaused): what it cost is exactly what
+        # was recorded — "failed requests aren't charged" — and every check
+        # after it fails the same way until someone pays. Before 2026-10-16
+        # each one kept its reservation, so a handful drained the day's $1.
+        refused = answer is not None and answer.error == PAUSED_MESSAGE
+        if refused:
+            pause()
         if quota.day is not None:
-            answer = await asyncio.to_thread(repo.get, job_id)
             usage = answer.usage if answer is not None else None
             actual = None
             reserved = reserve_usd(quota.kind, quota.mode)
-            if usage is not None and (answer.status is JobStatus.COMPLETE
+            if usage is not None and (answer.status is JobStatus.COMPLETE or refused
                                       or usage.estimated_usd > reserved):
                 actual = usage.estimated_usd
             await settle(quota.day, quota.kind, actual, quota.mode)
-            if answer is not None and answer.cached and actual == 0:
+            if answer is not None and (answer.cached or refused) and actual == 0:
                 await give_back_day(quota.day)
                 give_back_person(quota.subject, quota.day)
     except Exception as exc:  # noqa: BLE001 — settling must never cost the answer
@@ -389,7 +402,18 @@ async def verify_image(
         spend.begin()          # everything past here has been paid for
         meter = UsageMeter()   # starts at the first paid call, so the report's
         with meter.activate():  # the bill includes route-level OCR, not just the check
-            extracted = await ocr_image(image_bytes, file.content_type)
+            try:
+                extracted = await ocr_image(image_bytes, file.content_type)
+            except Exception as exc:
+                reason = paused_reason(exc)
+                if not reason:
+                    raise
+                # Refused for MONEY: nothing was charged after all ("failed
+                # requests aren't charged"), so _quota gives it all back.
+                tell_owner_paused(reason)
+                spend.started = False
+                pause()
+                raise HTTPException(503, PAUSED_MESSAGE) from exc
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
 

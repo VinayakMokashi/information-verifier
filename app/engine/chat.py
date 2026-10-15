@@ -50,7 +50,9 @@ from app.engine.chat_prompts import (
 from app.engine.marker import MarkerFilter
 from app.models.answer import AnswerSection, Source, Tier
 from app.providers.factcheck import search_factcheck
-from app.providers.llm import async_client
+from app.providers.llm import (
+    PAUSED_MESSAGE, async_client, paused_reason, tell_owner_paused,
+)
 from app.providers.usage import error_code_label, note_llm, note_search_error
 from app.trusted_sources import (
     CORE_SEARCH_DOMAINS, SEARCH_DOMAINS, domains_named_in, trusted_domain_of,
@@ -86,6 +88,14 @@ class CheckUnavailable(Exception):
     check had worked and simply found nothing. A check that produced no words
     is a failure and has to say so.
     """
+
+
+class ServicePaused(CheckUnavailable):
+    """Anthropic refused for MONEY (app/providers/llm.paused_reason): a spend
+    limit, the tier's monthly cap, a billing problem, an empty balance. It
+    fails for every check until someone pays, so it is never retried, and it
+    cost nothing ("failed requests aren't charged") — the route gives the
+    whole reservation back and pauses new checks (routes._finish)."""
 
 
 @dataclass
@@ -414,6 +424,14 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                                                     "tier": section_tier})
                 final = await stream.get_final_message()
         except anthropic.APIError as exc:
+            reason = paused_reason(exc)
+            if reason:
+                # It fails for every check until someone pays or the month
+                # turns: no retry on the core domains, no second pass (a
+                # spend-limit 400 was taken for a whitelist rejection and
+                # retried; then the open-web pass tried again).
+                tell_owner_paused(reason)
+                raise ServicePaused(PAUSED_MESSAGE) from exc
             if search and trusted and getattr(exc, "status_code", None) == 400:
                 offered = _offered(core_only, excluded)
                 named = domains_named_in(str(exc), offered)

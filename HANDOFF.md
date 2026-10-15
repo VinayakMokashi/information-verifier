@@ -82,10 +82,13 @@ share_demo.ps1 sets its own) · R7 (the body-cap test builds the costliest
 real message instead of trusting 6 bytes a character) 478a2c1 · R8 (the
 Google key travels in a header — no URL, error or httpx log line carries
 it; Google accepts it, measured live with the free probe). **The review's
-R1–R15 are all closed or deferred.** NEXT: Anthropic's "out of credit /
-spend limit" errors read "back later" and give the reservation back; the
-budget on the dashboard (and its ledger reads off the event loop);
-Turnstile + device cookie.
+R1–R15 are all closed or deferred.** · Anthropic refusing for MONEY (a
+spend limit, the tier cap, billing, an empty balance) now pauses checking:
+the reader is told "paused … try again later", the check gives its whole
+reservation back (failed requests aren't charged), new paid checks get 503
+up front for 10 minutes and then one probes, repeats stay free, and the
+console says what to fix. NEXT: the budget on the dashboard (and its ledger
+reads off the event loop); Turnstile + device cookie.
 
 **Then — in the brief's §6 order:** (1) the rest of the reproduced
 blockers, incl. the per-person limit for the bot (it is open to

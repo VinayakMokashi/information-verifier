@@ -135,6 +135,11 @@ class Settings(BaseSettings):
     # (~$0.008, reserving this much) and only for text; never a search.
     budget_shortcut_below: float = 0.15
     budget_shortcut_reserve_usd: float = 0.02
+    # When Anthropic refuses for MONEY (a spend limit, the tier cap, billing,
+    # an empty balance — app/providers/llm.paused_reason), new paid checks
+    # are refused up front for this long, then one is let through to see if
+    # it has cleared: one free failed attempt per window, not one per visitor.
+    paused_retry_s: int = 600
     # When "a day" rolls over. IST (UTC+5:30), because the person watching the
     # bill is in India and "2 a day" means his day. A fixed offset rather than
     # a zone name: India has no DST, and zoneinfo needs the tzdata package on

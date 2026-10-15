@@ -63,6 +63,22 @@ _person_day = [""]
 _daily = DailyQuota()
 _budget = DailyBudget()
 _now = time.monotonic                         # a seam: tests move the clock
+# Until when paid checks are refused because Anthropic refuses for money
+# (pause(); app/providers/llm.paused_reason). In memory: a restart simply
+# lets one check through to find out.
+_paused_until = [0.0]
+
+
+def pause() -> None:
+    """Anthropic refused a check for MONEY: refuse new paid checks for
+    settings.paused_retry_s, then let one through to see if it has cleared.
+    Each refused one would only have failed after reserving, waiting and
+    giving it all back — and taught the reader nothing."""
+    _paused_until[0] = max(_paused_until[0], _now() + settings.paused_retry_s)
+
+
+def paused() -> bool:
+    return _now() < _paused_until[0]
 
 
 def reserve_usd(kind: str, mode: str = "full") -> float:
@@ -651,3 +667,4 @@ def reset() -> None:
         _in_flight.clear()
         _person_today.clear()
         _person_day[0] = ""
+        _paused_until[0] = 0.0
