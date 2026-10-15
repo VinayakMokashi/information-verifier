@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # were refunded — a free lockout of everyone. The TTL frees a person
     # whose check hung without ever ending (the longest measured: 295 s).
     max_in_flight_per_person: int = 1
+    # ...except where one "person" is really many: an IPv4 address is shared
+    # by everyone behind carrier NAT or office Wi-Fi (review R9, reproduced:
+    # strangers were told "you already have a check running").
+    in_flight_by_kind: dict[str, int] = {"ip": 3}
     in_flight_ttl_s: int = 900
     # Paid checks a day per person, by who is asking (limits.subject_of) —
     # Vinayak's numbers, 2026-10-15: 5 per Telegram user and WhatsApp number,

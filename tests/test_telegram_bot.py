@@ -1151,3 +1151,18 @@ def test_a_link_with_a_line_break_and_a_question_is_text_not_a_crash():
     with other words around it is text (the existing rule above)."""
     msg = {"text": "https://www.facebook.com/share/r/17RQxbYP2j/\nKya yeh sach hai?"}
     assert B.classify_message(msg)[0] == "text"        # the rule of the test above
+
+
+def test_anonymous_admins_and_channel_posts_are_their_chat_not_a_shared_account():
+    """REPRODUCED (review R13): Telegram fills `from` with ONE placeholder for
+    every anonymous group admin (1087968824) and every "post as a channel"
+    sender (136817688), and names the real sender in `sender_chat` — so
+    they all shared one allowance, and one could use it up for the rest."""
+    anon = {"chat": {"id": -100111}, "from": {"id": 1087968824},
+            "sender_chat": {"id": -100111}}
+    as_channel = {"chat": {"id": -100222}, "from": {"id": 136817688},
+                  "sender_chat": {"id": -100999}}
+    assert B.subject_of_message(anon) == "tgchat:-100111"
+    assert B.subject_of_message(as_channel) == "tgchat:-100999"
+    person = {"chat": {"id": 7}, "from": {"id": 4242}}
+    assert B.subject_of_message(person) == "tg:4242"

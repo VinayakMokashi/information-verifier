@@ -146,8 +146,11 @@ def test_slow_refunded_links_cannot_hold_everyones_slots(limiting, monkeypatch):
     for t in threads[1:]:
         t.start()
     # Before the fix all five claim a slot and sit in the resolve; after it,
-    # the other four are refused at once. Measure at whichever comes first.
-    wait_for(lambda: len(codes) == 4 or inside[0] == 5)
+    # all but this address's in-flight allowance (an IPv4 address is shared
+    # under carrier NAT — review R9) are refused at once. Measure at
+    # whichever comes first.
+    running = settings.in_flight_by_kind["ip"]
+    wait_for(lambda: len(codes) == 5 - running or inside[0] == 5)
     held = limits.used_today()
     try:
         victim_got_in = limits.reserve(_req("198.51.100.99")) is not None
@@ -161,7 +164,7 @@ def test_slow_refunded_links_cannot_hold_everyones_slots(limiting, monkeypatch):
     # resolve holds no slot at all — only the person's place in line.
     assert held == 0, f"one visitor's pending resolve held {held} of the day's 5 slots"
     assert victim_got_in, "someone else was locked out while they were held"
-    assert codes.count(429) == 4
+    assert codes.count(429) == 5 - running
     assert all("already" in d for c, d in zip(codes, details) if c == 429)
 
 
@@ -329,3 +332,37 @@ def test_a_person_is_released_before_their_answer_becomes_visible():
     asyncio.run(go())
     complete = order.index(("save", "COMPLETE"))
     assert ("released", None) in order[:complete]
+
+
+# -- review R9, R14 (2026-10-15) ------------------------------------------------
+
+def test_strangers_behind_one_ipv4_address_are_not_one_person(limiting):
+    """REPRODUCED (review R9): under carrier NAT or office Wi-Fi many people
+    share one public IPv4 address, and while one had a check running every
+    other was told "you already have a check running" — false for them."""
+    a, b, c, d = (_req("198.51.100.30") for _ in range(4))
+    assert limits.reserve(a, token="a")
+    assert limits.reserve(b, token="b")                 # someone else, same address
+    assert limits.reserve(c, token="c")
+    with pytest.raises(HTTPException):                  # still a brake
+        limits.reserve(d, token="d")
+
+
+def test_an_ipv6_64_is_still_one_phone(limiting):
+    phone = "2401:4900:1c2a:5b10::1"
+    assert limits.reserve(_req(phone), token="a")
+    with pytest.raises(HTTPException) as busy:
+        limits.reserve(_req(phone), token="b")
+    assert "already" in busy.value.detail
+
+
+def test_free_repeats_still_count_toward_the_hour(limiting, monkeypatch):
+    """REPRODUCED (review R14): a cached answer was served before every
+    per-person bound, so one visitor made 600 job rows and 600 in-memory
+    streams in 44 s. Free of money, not of the abuse guard."""
+    monkeypatch.setattr(settings, "max_checks_per_hour", 3)
+    first = limiting.post("/api/v1/verify/text", json={"text": "The same forward"})
+    assert first.status_code == 202
+    codes = [limiting.post("/api/v1/verify/text", json={"text": "The same forward"}).status_code
+             for _ in range(4)]
+    assert codes == [202, 202, 429, 429]                # 3 an hour, the first included

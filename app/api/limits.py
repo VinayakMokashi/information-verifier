@@ -306,6 +306,32 @@ def _day_is_full(client: str, now: float, what: str) -> HTTPException:
     return _daily_refusal()
 
 
+def _hourly_locked(client: str, now: float) -> None:
+    """This hour's attempt — the abuse guard — counted, or 429. The caller
+    holds _lock."""
+    mine = _prune(_per_client.get(client, []), 3600, now)
+    if len(mine) >= settings.max_checks_per_hour:
+        _per_client[client] = mine
+        raise HTTPException(
+            429,
+            f"You've used {settings.max_checks_per_hour} checks this hour — "
+            "that's the limit for this demo. Please try again later.",
+        )
+    _per_client[client] = mine + [now]
+
+
+def attempt(request: Request, subject: str | None = None) -> None:
+    """A FREE repeat: no money, no slot, no place in line — but still this
+    hour's attempt. REPRODUCED (review R14): a cached answer was served
+    before every per-person bound, and one visitor made 600 job rows and
+    600 in-memory streams in 44 s."""
+    if not settings.rate_limit_enabled:
+        return
+    client = subject or subject_of(request)
+    with _lock:
+        _hourly_locked(client, _now())
+
+
 def _admit_locked(client: str, now: float, token: str) -> None:
     """The person's place in line — this hour's attempts, one check in
     flight, under this claim's own token — recorded on success. The caller
@@ -319,7 +345,8 @@ def _admit_locked(client: str, now: float, token: str) -> None:
             "that's the limit for this demo. Please try again later.",
         )
     running = _running(_in_flight.get(client, []), now)
-    if len(running) >= settings.max_in_flight_per_person:
+    kind = client.split(":", 1)[0]
+    if len(running) >= settings.in_flight_by_kind.get(kind, settings.max_in_flight_per_person):
         _in_flight[client] = running
         raise HTTPException(429, _BUSY)
     _per_client[client] = mine + [now]

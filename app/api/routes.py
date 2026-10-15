@@ -14,7 +14,7 @@ import httpx
 from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      Request, UploadFile)
 
-from app.api.limits import (admit, claim, fund_async, give_back, give_back_day,
+from app.api.limits import (admit, attempt, claim, fund_async, give_back, give_back_day,
                             give_back_person, release, reserve_usd, settle,
                             subject_of)
 from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
@@ -356,6 +356,9 @@ async def verify_text(
     # person's allowance is spent. cache_only makes the job FAIL, not pay, if
     # the entry expires in the instant between here and there.
     if await safe_cache_call(_repo.cache.get, cache_key(req.text, req.language)):
+        # Free of money, not of the abuse guard (review R14): every repeat
+        # makes a job row and a live stream, so it is this hour's attempt.
+        attempt(request, subject_of(request))
         answer, stream = await _new_job(req.text)
         background.add_task(_run_check_job, answer.job_id, req.text, _repo, stream,
                             language=req.language, cache_only=True)

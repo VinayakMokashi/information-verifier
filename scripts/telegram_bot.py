@@ -43,6 +43,13 @@ def subject_of_message(msg: dict) -> str:
     2026-10-15). The sender's user id; a channel post has none, so its chat
     is the person. The API honours this only from this machine.
     """
+    # An anonymous group admin, or someone posting "as a channel", arrives
+    # with `from` set to ONE shared placeholder account (1087968824,
+    # 136817688) and the real sender in `sender_chat` — so `from` made them
+    # all one person, able to use up one allowance for all (review R13).
+    on_behalf_of = (msg.get("sender_chat") or {}).get("id")
+    if on_behalf_of is not None:
+        return f"tgchat:{on_behalf_of}"
     sender = (msg.get("from") or {}).get("id")
     if sender is not None:
         return f"tg:{sender}"
