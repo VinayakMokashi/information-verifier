@@ -35,7 +35,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings  # noqa: E402
-from app.providers.links import ALLOWED_HOSTS, _classified, _pick_subtitle  # noqa: E402
+from app.providers.links import (  # noqa: E402
+    ALLOWED_HOSTS, LinkError, _classified, _pick_subtitle, resolve_link,
+)
 
 # Sarvam bills ~Rs 30/hour by the second (PROJECT_PLAN section 8).
 _ASR_RUPEES_PER_SECOND = 30.0 / 3600.0
@@ -133,6 +135,21 @@ def _diagnose(exc: Exception) -> str:
     return f"[{err.kind}] {_KIND_HINT.get(err.kind, _KIND_HINT['other'])}"
 
 
+def app_verdict(url: str) -> str:
+    """Does the APP resolve this link? Asked of its own resolve_link.
+
+    The probe's own resolve below loads EVERY yt-dlp extractor, because
+    judging a new platform is its other job — so it cannot predict the app.
+    MEASURED 2026-10-15: it said Facebook share links resolve while the app,
+    pinned to three extractors, refused every share and /reel/ link.
+    """
+    try:
+        info = resolve_link(url)
+    except LinkError as exc:
+        return f"NO - [{exc.kind}] {exc}"
+    return f"YES - {info.platform} video {info.video_id or '(no id)'}"
+
+
 def probe(url: str, cookies_from: str | None = None) -> None:
     import yt_dlp
 
@@ -143,6 +160,10 @@ def probe(url: str, cookies_from: str | None = None) -> None:
     if host:
         ok = host in _ALLOWED_HOSTS
         print(f"Host      : {host}   [{'allowlisted' if ok else 'NOT on the allowlist'}]")
+        if ok:
+            print(f"THE APP   : {app_verdict(url)}")
+            print("            (below: every yt-dlp extractor - what the platform "
+                  "allows, not what the app does)")
 
     opts = {
         "quiet": True,

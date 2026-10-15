@@ -26,12 +26,16 @@ independent: `allowed_link_host` fails closed with the same parser discipline
 as trusted_sources.trusted_domain_of; yt-dlp is pinned to the Instagram,
 YouTube and Facebook extractors so its generic extractor (which would fetch
 ANY url) can never run; and noplaylist keeps one link meaning one video.
+Facebook share links, which only generic could follow, are expanded by
+`expand_share_link` instead: one redirect at a time, each target through
+`allowed_link_host` before it is requested.
 """
 import json
 import os
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -64,12 +68,26 @@ SUPPORTED_LINKS_MSG = (
     + f" and {SUPPORTED_PLATFORMS[-1]} links can be checked (https)."
 )
 
-# yt-dlp extractor allowlist. Names are matched as regexes anchored at the
-# start, so "Youtube" also admits YoutubeTab etc. (harmless — still YouTube,
-# and playlist results are rejected after resolve). What matters is that
-# "generic" is NOT here: without it yt-dlp will not fall back to fetching
-# arbitrary pages, which is the SSRF path this list exists to close.
-_ALLOWED_EXTRACTORS = ["Instagram", "Youtube", "Facebook"]
+# yt-dlp extractor allowlist. yt-dlp FULL-matches each name, case-insensitively,
+# against every extractor's IE_NAME — so "Facebook" admits exactly 'facebook',
+# never 'facebook:reel'. This comment used to say "anchored at the start", and
+# on that belief every Facebook /reel/<id> link failed in the app as "not a
+# video" (MEASURED 2026-10-15) while link_probe, which loads every extractor,
+# said it worked. What matters most is that "generic" is NOT here: without it
+# yt-dlp will not fall back to fetching arbitrary pages, which is the SSRF path
+# this list exists to close — share links are expanded by expand_share_link
+# instead, one host-checked hop at a time.
+_ALLOWED_EXTRACTORS = ["Instagram", "Youtube", "Facebook", "facebook:reel"]
+
+# Facebook's Share button produces /share/r/<code>/ (and fb.watch/<code>)
+# links that carry no video id: Facebook answers them with one HTTP redirect
+# to the canonical /reel/<id> (MEASURED 2026-10-15). No pinned extractor
+# claims them; only yt-dlp's generic extractor would follow that redirect.
+_FACEBOOK_HOSTS = {"facebook.com", "www.facebook.com", "m.facebook.com",
+                   "web.facebook.com"}
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_SHARE_HOPS = 3
+_SHARE_TIMEOUT_S = 15
 
 _RESOLVE_TIMEOUT_S = 30      # per socket op inside yt-dlp
 _DOWNLOAD_WALL_S = 180.0     # a trickling stream must not pin a worker
@@ -151,6 +169,65 @@ def allowed_link_host(url: str) -> str | None:
     return host if host in ALLOWED_HOSTS else None
 
 
+_MSG_NOT_OPENABLE = (
+    "That post couldn't be opened — it may have been removed, or be visible "
+    "only to people who are logged in. Only public posts work."
+)
+
+
+def _is_share_link(url: str) -> bool:
+    """A Facebook share link: no video id of its own, only a redirect."""
+    host = allowed_link_host(url)
+    if host == "fb.watch":
+        return True
+    if host in _FACEBOOK_HOSTS:
+        return urlsplit(url.strip()).path.startswith("/share/")
+    return False
+
+
+def _share_client() -> httpx.Client:
+    """httpx never follows a redirect itself here: every hop is host-checked
+    by expand_share_link before it is taken. Its plain default headers got
+    the redirect (measured); a made-up browser User-Agent got a 400."""
+    return httpx.Client(timeout=_SHARE_TIMEOUT_S, follow_redirects=False)
+
+
+def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
+    """A share link -> the canonical URL it redirects to. Anything else is
+    returned untouched, without a request. Raises LinkError.
+
+    One hop at a time, each target through allowed_link_host BEFORE it is
+    requested: this is the redirect yt-dlp's generic extractor would have
+    followed blindly, and keeping generic out is this module's SSRF fence.
+    """
+    url = url.strip()
+    if not _is_share_link(url):
+        return url
+    own = client is None
+    client = client or _share_client()
+    try:
+        for _ in range(_SHARE_HOPS):
+            try:
+                resp = client.get(url)
+            except httpx.HTTPError as exc:
+                raise _classified(exc) from exc
+            location = resp.headers.get("location")
+            if resp.status_code not in _REDIRECT_STATUSES or not location:
+                raise LinkError("gated", _MSG_NOT_OPENABLE)
+            target = str(httpx.URL(url).join(location))
+            if allowed_link_host(target) is None:
+                raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
+            if urlsplit(target).path.startswith("/login"):
+                raise LinkError("gated", _MSG_NOT_OPENABLE)
+            if not _is_share_link(target):
+                return target
+            url = target
+        raise LinkError("other", "That link could not be read.")
+    finally:
+        if own:
+            client.close()
+
+
 def _classified(exc: Exception) -> LinkError:
     """Name the failure; 'it did not work' is not something a user can act on.
 
@@ -175,11 +252,7 @@ def _classified(exc: Exception) -> LinkError:
         # when a post is removed, restricted, or shown only to logged-in
         # users — even on the latest yt-dlp, and whether reached by its
         # share link or its /reel/<id> address. Other public reels resolved.
-        return LinkError(
-            "gated",
-            "That post couldn't be opened — it may have been removed, or be "
-            "visible only to people who are logged in. Only public posts work.",
-        )
+        return LinkError("gated", _MSG_NOT_OPENABLE)
     if "unsupported url" in m:
         return LinkError(
             "unsupported",
@@ -260,6 +333,9 @@ def resolve_link(url: str) -> LinkInfo:
 
     if allowed_link_host(url) is None:
         raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
+    # Before yt-dlp, and kept: the download later starts from LinkInfo.url,
+    # and a share URL there would meet the same dead end.
+    url = expand_share_link(url)
     try:
         with yt_dlp.YoutubeDL(_base_opts()) as ydl:
             info = ydl.extract_info(url, download=False)

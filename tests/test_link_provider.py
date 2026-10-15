@@ -223,3 +223,155 @@ def test_the_probe_predicts_exactly_what_the_app_would_do():
     youtube = {"automatic_captions": {"hi-orig": [{"ext": "json3", "url": "https://x"}],
                                       "en": [{"ext": "json3", "url": "https://y"}]}}
     assert "'hi-orig' captions" in caption_verdict(youtube)
+
+
+# -- Facebook /reel/ and share links, measured 2026-10-15 ----------------------
+
+# The form Facebook's own Share button produces, and where it redirected
+# (one HTTP 302, measured live 2026-10-15).
+_FB_SHARE = "https://www.facebook.com/share/r/17RQxbYP2j/"
+_FB_REEL = ("https://www.facebook.com/reel/848607324236464?rdid=NdXrkNK8Kv9W34Pv"
+            "&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fr%2F17RQxbYP2j%2F")
+
+
+def _loaded_extractors():
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL(L._base_opts()) as ydl:
+        return list(ydl._ies.values())
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.instagram.com/reel/DbsVyqLpbRa/",
+    "https://www.youtube.com/shorts/QBHKZ36_dlo",
+    "https://youtu.be/QBHKZ36_dlo",
+    "https://www.facebook.com/pibfactcheck/videos/287009708974916/",
+    "https://www.facebook.com/watch/?v=287009708974916",
+    "https://www.facebook.com/reel/848607324236464",
+    _FB_REEL,
+])
+def test_every_direct_link_form_reaches_an_extractor_the_app_loads(url):
+    """MEASURED 2026-10-15: yt-dlp FULL-matches allowed_extractors, so
+    "Facebook" admitted only the extractor named exactly 'facebook' — and
+    /reel/<id> belongs to 'facebook:reel'. Every Facebook reel failed in the
+    app as "not a video" while link_probe (all extractors) said it worked."""
+    assert any(ie.suitable(url) for ie in _loaded_extractors())
+
+
+def _fake_share_host(routes, seen):
+    """A Facebook that answers each URL with (status, Location)."""
+    import httpx
+
+    def handler(request):
+        seen.append(str(request.url))
+        status, location = routes.get(str(request.url), (404, None))
+        return httpx.Response(status, headers={"location": location} if location else {})
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_a_share_link_is_expanded_by_one_checked_hop():
+    seen = []
+    client = _fake_share_host({_FB_SHARE: (302, _FB_REEL)}, seen)
+    assert L.expand_share_link(_FB_SHARE, client=client) == _FB_REEL
+    assert seen == [_FB_SHARE]          # the reel page itself is yt-dlp's job
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/shorts/QBHKZ36_dlo",
+    "https://www.instagram.com/reel/DbsVyqLpbRa/",
+    "https://www.facebook.com/reel/848607324236464",
+])
+def test_a_direct_link_is_never_fetched_for_expansion(url):
+    seen = []
+    assert L.expand_share_link(url, client=_fake_share_host({}, seen)) == url
+    assert seen == []
+
+
+@pytest.mark.parametrize("target", [
+    "https://evil.example/reel/1",
+    "http://www.facebook.com/reel/1",              # downgraded to http
+    "https://127.0.0.1/reel/1",
+    "https://www.facebook.com.evil.com/reel/1",
+])
+def test_a_share_redirect_off_the_allowlist_is_refused_before_it_is_fetched(target):
+    """The hop is taken HERE precisely so each target is host-checked; yt-dlp's
+    generic extractor (the only other way) would follow anything."""
+    seen = []
+    with pytest.raises(L.LinkError) as info:
+        L.expand_share_link(_FB_SHARE, client=_fake_share_host({_FB_SHARE: (302, target)}, seen))
+    assert info.value.kind == "unsupported"
+    assert seen == [_FB_SHARE]
+
+
+def test_a_relative_redirect_resolves_against_the_share_host():
+    client = _fake_share_host({_FB_SHARE: (302, "/reel/848607324236464")}, [])
+    assert (L.expand_share_link(_FB_SHARE, client=client)
+            == "https://www.facebook.com/reel/848607324236464")
+
+
+def test_a_share_link_that_does_not_redirect_is_explained():
+    with pytest.raises(L.LinkError) as info:
+        L.expand_share_link(_FB_SHARE, client=_fake_share_host({_FB_SHARE: (200, None)}, []))
+    assert info.value.kind == "gated"
+
+
+def test_a_share_link_that_lands_on_the_login_wall_says_so():
+    client = _fake_share_host(
+        {_FB_SHARE: (302, "https://www.facebook.com/login/?next=%2Freel%2F1")}, [])
+    with pytest.raises(L.LinkError) as info:
+        L.expand_share_link(_FB_SHARE, client=client)
+    assert info.value.kind == "gated"
+
+
+def test_a_redirect_loop_is_cut_off():
+    a = "https://www.facebook.com/share/r/AAAA/"
+    b = "https://www.facebook.com/share/r/BBBB/"
+    seen = []
+    with pytest.raises(L.LinkError):
+        L.expand_share_link(a, client=_fake_share_host({a: (302, b), b: (302, a)}, seen))
+    assert len(seen) <= 3
+
+
+def test_resolve_hands_yt_dlp_the_expanded_url_and_keeps_it(monkeypatch):
+    """The download later runs from LinkInfo.url: a share URL kept there
+    would hit the same dead end at download time."""
+    import yt_dlp
+
+    asked = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download):
+            asked.append(url)
+            return {"extractor": "facebook", "id": "848607324236464", "title": "t",
+                    "formats": [{"url": "x"}], "description": "", "duration": 14.1}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(L, "_share_client",
+                        lambda: _fake_share_host({_FB_SHARE: (302, _FB_REEL)}, []))
+    info = L.resolve_link(_FB_SHARE)
+    assert asked == [_FB_REEL]
+    assert info.url == _FB_REEL
+
+
+def test_the_probe_reports_what_the_app_itself_would_do(monkeypatch):
+    """The probe loads EVERY extractor (it evaluates new platforms), so its own
+    resolve cannot predict the app's: it said share links work while the app
+    refused them. Its verdict on the APP now comes from the app's resolve."""
+    import scripts.link_probe as P
+
+    def refuse(url):
+        raise L.LinkError("unsupported", "That link doesn't point at a video "
+                                         "this service can read.")
+
+    monkeypatch.setattr(P, "resolve_link", refuse)
+    assert "NO" in P.app_verdict(_FB_SHARE) and "unsupported" in P.app_verdict(_FB_SHARE)
