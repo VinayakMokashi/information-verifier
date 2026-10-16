@@ -134,7 +134,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1074 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1145 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -212,7 +212,7 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **1074 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **1145 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
@@ -307,7 +307,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 1074 tests, ~1 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 1145 tests, ~2 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?

@@ -92,7 +92,7 @@ checks, no oversized-post freeze — and reviewed twice (§7). Later on
 2026-10-16: checking pauses at no cost when Anthropic refuses for money,
 the dashboard shows the day's money, and a web visitor's check needs a
 Cloudflare Turnstile pass, which earns the device cookie that carries 3
-checks a day (§7). **1074 tests.**
+checks a day (§7). Step 3 — restarts, the ledger, monitoring — the same evening. **1145 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -434,6 +434,41 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-16 (evening) — Step 3 of the launch: restarts, the ledger, monitoring
+
+The ops audit's findings ([audit-ops.md](docs/research/2026-10-15/audit-ops.md)),
+each reproduced first, fixed test-first, measured:
+- **A check always ends** (OPS-06, b7d4ced): the finishing save is retried,
+  the ledger row written even if it fails, the stream ALWAYS closed with the
+  truth; a 5-minute sweep fails rows stuck mid-flight that no stream here is
+  still on. **A killed check still lands in the ledger** (OPS-04, 2b5a261):
+  its bill so far is checkpointed onto its row (a conditional write that can
+  never overwrite a finished answer), and the sweeps write its ledger row.
+- **One server per database** (OPS-05, 32462f1): an OS lock beside the
+  database, taken before the startup sweep. Two real uvicorn processes on
+  one database: the second printed why and exited 3; the first went on.
+- **A restarted bot delivers what it was waiting for** (OPS-07 + R12,
+  0ba4f62): pending checks persist in `data/bot_pending.json`.
+- **/ready** (OPS-18, d65638f): a database write and read on the /reports
+  pool within 3 s, the key, ffmpeg, real|demo — the bot refuses the demo.
+- **Logs** (OPS-11/08/20, 7f97c0e): no access log (it printed visitor IPs and
+  job ids, and a job id opens that person's message), platform errors
+  scrubbed of URLs and post ids, `--workers 1` explicit, output
+  line-buffered (piped, the startup line had not arrived after 20 s).
+- **Backups** (OPS-10, 2581d1e): daily, of the CONTENT-FREE tables only. The
+  audit suggested full copies kept 30 days — but a full copy holds messages,
+  so a 30-day-old copy would keep one for 60 and break the 30-day promise.
+- **A lock file** (OPS-24, a66cf5e): 29 exact packages, written from the
+  installed metadata — `pip freeze` would have locked torch and the rest of
+  what the pivot dropped, still in this venv. A brand-new venv built from it
+  passed the whole suite. **yt-dlp** (OPS-25, 6c74d76) stays out of the lock;
+  its warnings now reach the log once each; startup says when it is stale.
+- **Owner alerts on Telegram** (OPS-19, d30e27e): paused for money, budget
+  low or spent, 3 failures in a row, a restart or sweep that failed checks.
+
+Owner decisions this raised (HANDOFF §0): update yt-dlp (58 days old);
+install deno for YouTube; set OWNER_CHAT_ID and BACKUP_DIR.
 
 ### 2026-10-16 (later) — Paused for money; the money on the dashboard; Turnstile and the device cookie
 
