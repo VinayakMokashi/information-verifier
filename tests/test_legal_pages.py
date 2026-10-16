@@ -130,6 +130,15 @@ def test_what_settings_say_is_escaped_never_markup(client, monkeypatch):
     assert "&lt;script&gt;" in text
 
 
+def test_a_setting_is_filled_in_once_never_filled_in_again(client, monkeypatch):
+    """One pass over the page: a value that happens to contain a marker is
+    text, not a second template."""
+    monkeypatch.setattr(settings, "operator_name", "{{contact}}")
+    monkeypatch.setattr(settings, "contact_email", "owner@example.com")
+    text = client.get("/privacy").text
+    assert "run by {{contact}} in India" in " ".join(text.split())
+
+
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
 def test_without_a_contact_the_page_says_one_is_coming(client, path):
     """Unset is the state of every machine until the owner decides what to

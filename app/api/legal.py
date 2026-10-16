@@ -11,6 +11,7 @@ The drafting rules are docs/research/2026-10-15/policy-legal.md's
 recommendation as its verification corrected it (PROJECT_PLAN §7, 2026-10-16).
 """
 import html
+import re
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -20,6 +21,7 @@ from app.config import settings
 
 router = APIRouter()
 _HERE = Path(__file__).resolve().parent
+_MARKER = re.compile(r"\{\{(\w+)\}\}")
 
 NO_CONTACT = ("the contact address, which is published here before the service "
               "opens to the public")
@@ -72,9 +74,9 @@ def render(name: str) -> str:
                            settings.answer_cache_ttl_web_h)),
         "transcripts": _count(settings.transcript_cache_ttl_days, "day"),
     }
-    for key, value in values.items():
-        page = page.replace("{{" + key + "}}", value)
-    return page
+    # One pass: a value that happens to contain a marker stays text. A marker
+    # nobody fills is left as it is, and the tests fail on any leftover.
+    return _MARKER.sub(lambda m: values.get(m.group(1), m.group(0)), page)
 
 
 # Plain `def`s: reading the file is blocking I/O, so it belongs on the thread
