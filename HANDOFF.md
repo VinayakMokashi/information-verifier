@@ -42,8 +42,14 @@ installable app (manifest, icons drawn by scripts/make_icons.py, an
 share target that only FILLS the box; no service worker — headless Chrome
 over DevTools: no manifest errors, no installability errors, and a shared
 reel link filled the box with no /verify request).
-Next: PROJECT_PLAN §7/§11 for step 5 (and the DPDP Rule 8(3) decision
-record); then the owner's list below; then WhatsApp.
+69e7d6d (the pages' markers filled in one pass).
+**In flight:** an adversarial review of the whole of step 5 (one agent),
+writing each finding as it goes to
+[docs/research/2026-10-16/review-step5.md](docs/research/2026-10-16/review-step5.md)
+— "status: in progress" at its top means it was interrupted: re-run it,
+seeded from the file. Meanwhile: PROJECT_PLAN §7/§11 for step 5 (and the
+DPDP Rule 8(3) decision record). Then fix what the review finds; then the
+owner's list below; then WhatsApp.
 
 **Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
 63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
