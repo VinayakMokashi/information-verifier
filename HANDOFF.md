@@ -57,8 +57,14 @@ the next app start; backups carry a one-way reference, never a job id; a
 deleted check's stream is not replayed; working files under data/tmp,
 emptied at startup); S5-14 + S5-15 (the notice says "we delete OUR
 copy"; the iOS Install button only where Add to Home Screen exists). ALL
-18 findings are closed. Next: PROJECT_PLAN §7 for the review; then the
-owner's list below; then WhatsApp. Each: failing test
+18 findings are closed (ae85077).
+**In flight:** an adversarial RE-CHECK of those fixes and of step 4's
+never-reviewed runner (serve_forever.py) and runbook (go-live.md) — one
+agent, writing each finding as it goes to
+[docs/research/2026-10-16/review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md).
+"status: in progress" at its top means it was interrupted: re-run it,
+seeded from the file. Meanwhile: PROJECT_PLAN §7/§0 for the review. Then
+fix what the re-check finds; then the owner's list below; then WhatsApp. Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 
