@@ -99,6 +99,15 @@ def test_an_alert_from_a_worker_thread_still_goes(telegram):
     assert sent and sent[0]["text"].endswith("from a thread")
 
 
+def test_an_alert_from_a_plain_script_is_sent_before_it_returns(telegram, monkeypatch):
+    """The unattended runner (scripts/serve_forever.py) is a separate process
+    with no event loop at all: an alert there used to vanish without a word."""
+    sent, _, _ = telegram
+    monkeypatch.setattr(alerts, "_loop", [None])
+    alerts.notify("app-restart", "from a script")
+    assert sent and sent[0]["text"].endswith("from a script")
+
+
 def test_paused_for_money_tells_the_owner(telegram):
     from app.providers.llm import tell_owner_paused
 

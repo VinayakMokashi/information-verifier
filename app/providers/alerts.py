@@ -10,7 +10,8 @@ off; the bot's /id command tells anyone their own chat id). Each kind at most
 once an hour. Fire and forget: an alert never raises, never delays a check,
 and never prints the token — every Bot API URL carries it (63f8049).
 Callable from any thread: the limiter decides the budget mode on its own
-pool, so an alert from there is handed to the app's loop (attach()).
+pool, so an alert from there is handed to the app's loop (attach()); a
+script with no loop at all sends it there and then.
 """
 import asyncio
 import threading
@@ -53,6 +54,11 @@ def notify(kind: str, text: str) -> None:
         task.add_done_callback(_tasks.discard)
     elif _loop[0] is not None and not _loop[0].is_closed():
         asyncio.run_coroutine_threadsafe(_send(text), _loop[0])
+    else:
+        # No event loop anywhere: a plain script, such as the unattended
+        # runner (scripts/serve_forever.py). It used to vanish without a word;
+        # now it is sent before this returns (at most _send's 15 s timeout).
+        asyncio.run(_send(text))
 
 
 async def _send(text: str) -> None:
