@@ -41,6 +41,7 @@ is how to work here.
   | `.venv\Scripts\python.exe scripts\forget.py --job <id>` (or `--text "…" --day …`) | $0 | honours a deletion request; lists first, deletes only with `--yes` |
   | `.venv\Scripts\python.exe scripts\make_icons.py` | $0 | redraws the app icons (headless Chrome) and checks their sizes |
   | `.venv\Scripts\python.exe scripts\bot_explorer.py` | $0 | 2,000 random interleavings of the bot: no double payment or delivery, no lost reply, no leaked chat state |
+  | `.venv\Scripts\python.exe scripts\find_db_copies.py` | $0 | every copy of this project's database in %TEMP% and the repo, found by what it is; deletes nothing |
   | `.venv\Scripts\python.exe scripts\crawl_probe.py` | $0–0.002 | the API accepts every search domain (run after editing the whitelist) |
   | `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg` | ~paise | one real transcription |
   | `.venv\Scripts\python.exe scripts\smoke_test.py "claim"` | ~cents | one real check, with its bill |
@@ -227,7 +228,11 @@ limiter are both in-memory.
   2026-10-16: three full copies found, one from 29 September). Measure on
   a synthetic database where you can. When a real copy is truly needed,
   delete it — with its -wal and -shm — the moment the measurement ends,
-  and say so in the commit.
+  and say so in the commit. A script that makes one takes its destination
+  explicitly (the scratch folder), never `tempfile`'s default. Find copies
+  with `scripts\find_db_copies.py` — by header and table names, never by
+  name or folder: a search by name missed two more (re-check F-1: one in
+  %TEMP% itself, one named `*.before-upgrade`).
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,
