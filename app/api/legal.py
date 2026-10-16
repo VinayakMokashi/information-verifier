@@ -73,6 +73,11 @@ def render(name: str) -> str:
         "cache": _span(max(settings.answer_cache_ttl_trusted_h,
                            settings.answer_cache_ttl_web_h)),
         "transcripts": _count(settings.transcript_cache_ttl_days, "day"),
+        # Only what the owner has confirmed (review S5-4): Sarvam keeps
+        # everything until an owner sets a retention period.
+        "sarvam": ("Our Sarvam account is set to keep none of it."
+                   if settings.sarvam_zero_retention
+                   else "Sarvam may keep it, under its own terms."),
     }
     # One pass: a value that happens to contain a marker stays text. A marker
     # nobody fills is left as it is, and the tests fail on any leftover.

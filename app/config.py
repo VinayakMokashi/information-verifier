@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # warned at startup.
     operator_name: str = ""
     contact_email: str = ""
+    # Set to true ONLY after Sarvam's dashboard has Model APIs data retention
+    # at 0 days (Settings → Workspace → Data retention). Sarvam keeps
+    # everything until an owner sets a period, so the privacy notice says
+    # "keeps none of it" only when this says so (review S5-4).
+    sarvam_zero_retention: bool = False
     # True only in the FREE demo server (scripts/fake_stages.apply_fake_stages):
     # /ready says "demo", and the bot refuses to wire people to it.
     demo_mode: bool = False

@@ -199,11 +199,20 @@ from outside the repo, not a defect).
   other path) leaves the post's words in `transcript_cache` for
   `transcript_cache_ttl_days` (30), which the tool's docstring does not
   mention (the notice does list that cache, as public-post content).
+
+  The same false "gone" comes back when the owner pastes the address in the
+  form the notice tells people to send (`repro_forget_address.py`, scratch):
+
+      --job '830cbd9a27774d30878c97041b16b732' -> 0   (1 check match)
+      --job 'https://verifier.example.com/#job=830cbd9a…' -> 1   No check matches (deleted already, or older than 30 days and so gone anyway?).
+      --job '#job=830cbd9a…' -> 1   (same)
 - Suggested fix: keep the submitted URL in its own field (e.g.
   `Answer.submitted_url`, or leave `input_text` as sent and put the gathered
-  text in `source_text` only) and search it; make the no-match message say
-  "a link, voice note or screenshot is found by the words read from it, or
-  by its #job= address"; have `forget()` also drop the transcript row whose
+  text in `source_text` only) and search it; accept a whole address in
+  `--job` (take what follows `job=`, lower-cased, as the page's own
+  `jobFromHash` does); make the no-match message say "a link, voice note or
+  screenshot is found by the words read from it, or by its #job= address" —
+  never "gone anyway?"; have `forget()` also drop the transcript row whose
   text matches, or say why it stays.
 
 ### S5-8. A repeat served from the cache saves its COMPLETE row twice; a deletion between the two saves is undone
@@ -384,3 +393,57 @@ from outside the repo, not a defect).
 - Suggested fix: "The per-person counts behind the daily limits"; and "...
   and we delete our copy after 30 days (the services keep theirs as
   described below)".
+
+### S5-15. On iOS, "Install app" shows inside in-app browsers other than Instagram's and Facebook's, where "Share → Add to Home Screen" does not exist
+
+- Severity: low
+- Status: PLAUSIBLE (the button's visibility is CONFIRMED in headless
+  Chrome; that those browsers lack Add to Home Screen is from how iOS
+  WKWebView/SFSafariViewController browsers work, not tested on a device)
+- Where: `static/index.html:298` (`IN_APP` knows only
+  `Instagram|FBAN|FBAV|FB_IAB|Line/`), `:801-802`, `:812`
+  (`if (IOS && !INSTALLED && !IN_APP)` un-hides the button).
+- Evidence: headless Chrome `--dump-dom` of the snapshot's page with three
+  iPhone user agents:
+
+      Safari (… Version/17.5 Mobile/15E148 Safari/604.1)  => <button class="install" …>          shown
+      WKWebView in-app (… Mobile/15E148, no "Safari/")     => <button class="install" …>          shown
+      Instagram in-app (… Instagram 300.0.0.0)            => <button class="install hidden" …>   hidden
+
+  The page's links travel by Telegram and WhatsApp; iPhone users who tap one
+  there land in that app's browser, see "Install app", and are told to use a
+  menu item their browser does not have. The comment above the code says
+  the button is never shown "inside Instagram's or Facebook's browser, which
+  cannot install anything" — the rule is "a browser that cannot install",
+  and only two are named.
+- Suggested fix: on iOS show the button only when the UA carries `Safari/`
+  (Safari, Chrome and Firefox for iOS all do; a bare WKWebView does not) and
+  none of the in-app markers; and since an SFSafariViewController in-app
+  browser carries Safari's own UA, end the hint with "No Add to Home Screen?
+  Open this page in Safari first."
+
+### S5-16. After forget.py deletes a check, its answer is still served from memory at /stream/{job_id}
+
+- Severity: low
+- Status: CONFIRMED
+- Where: `app/api/stream.py:169-181` (a registered stream is replayed before
+  the database is consulted), `:106-116` + `:131-137` (`_prune` runs only
+  when a NEW check is created, and keeps a finished stream 15 minutes);
+  `scripts/forget.py:15-16` ("it can run while the app is up").
+- Evidence: `repro_forget_stream2.py` (scratch; TestClient, fake engine) — a
+  finished check, then `repo.forget()` as forget.py does it:
+
+      forget() -> (1, 1)
+      /reports -> 404
+      /stream  -> events still served: {'status': 2, 'text': 87, 'source': 3, 'summary': 1, 'done': 1}
+                 the answer's prose, rebuilt: '**This is false.** 5G radio waves cannot carry ...'
+
+  The prose of an answer usually restates the message it answers. It stays
+  readable by job id until some later check is created at least 15 minutes
+  after this one finished — on a quiet night, hours. A request made by email
+  days later is unaffected; one made at once (the person who just asked,
+  or a /delete the bot later automates) is not honoured while the stream
+  lives.
+- Suggested fix: `forget()` (or forget.py, through a local-only endpoint)
+  drops the job's stream from the registry; or `stream_answer` checks that
+  the row still exists before replaying a finished stream.

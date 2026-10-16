@@ -375,6 +375,12 @@ def _going_live_warnings() -> list[str]:
         warnings.append("[startup] PUBLIC_HOSTS is set but CONTACT_EMAIL is not: the "
                         "privacy notice and the terms give visitors no one to write to. "
                         "Set CONTACT_EMAIL (and OPERATOR_NAME) in .env.")
+    if not settings.sarvam_zero_retention:
+        # Sarvam keeps voice notes until an owner sets a period (review S5-4).
+        warnings.append("[startup] PUBLIC_HOSTS is set but SARVAM_ZERO_RETENTION is "
+                        "not: Sarvam may keep people's voice notes. Set its data "
+                        "retention to 0 days in Sarvam's dashboard, then "
+                        "SARVAM_ZERO_RETENTION=true in .env.")
     return warnings
 
 

@@ -15,8 +15,10 @@ check that fails.
 ## 1. Before the domain (today, free)
 
 1. **Sarvam:** Settings → Workspace → Data retention → Model APIs → **0
-   days**. The privacy notice promises it. It only covers audio sent from
-   now on.
+   days**. It only covers audio sent from then on. THEN put
+   `SARVAM_ZERO_RETENTION=true` in `.env`. Only then does the privacy
+   notice say Sarvam keeps none of it; until then it says Sarvam may keep
+   it.
 2. **Anthropic:** a separate workspace for the public key, with a monthly
    spend limit; put that workspace's key in `.env` as `ANTHROPIC_API_KEY`.
 3. **Telegram:** send `/id` to the bot; put the number in `.env` as
@@ -89,8 +91,9 @@ ingress:
 In `.env`: `PUBLIC_HOSTS=<domain>`. Without it every visitor is refused,
 and the server prints each name it refused.
 
-Start the app with `start.cmd`. Its window must NOT show "PUBLIC_HOSTS is
-set but Turnstile is not" or "… CONTACT_EMAIL is not".
+Start the app with `start.cmd`. Its window must NOT show any "PUBLIC_HOSTS
+is set but …" line: Turnstile, CONTACT_EMAIL and SARVAM_ZERO_RETENTION
+are each warned about until they are set.
 
 Then, in a second window: `cloudflared tunnel run verifier`.
 

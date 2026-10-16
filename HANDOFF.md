@@ -122,10 +122,10 @@ for the .com in the Cloudflare dashboard (without them startup warns, and
 visitors are not challenged); `CONTACT_EMAIL` (and `OPERATOR_NAME`) — what
 the privacy notice and terms publish as the place to write for deletion,
 corrections and complaints; Vinayak decides what to publish (startup warns
-without it). **And outside .env:** Sarvam's data retention set to 0 days
-(Settings → Workspace → Data retention) — the privacy notice says "Our
-Sarvam account is set to keep none of it", which is true only once that is
-done.
+without it); Sarvam's data retention set to 0 days in its dashboard
+(Settings → Workspace → Data retention), THEN `SARVAM_ZERO_RETENTION=true`
+— only then does the privacy notice say Sarvam keeps none of it (review
+S5-4; until then it says Sarvam may keep it, and startup warns).
 
 **Step 4, ready for the owner:** [docs/go-live.md](docs/go-live.md) — every
 owner step in order, each with its check: the settings, the domain, the

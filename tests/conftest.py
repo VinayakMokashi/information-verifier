@@ -26,6 +26,7 @@ os.environ["OWNER_CHAT_ID"] = ""
 # and the legal pages' tests pin what an unset one looks like.
 os.environ["CONTACT_EMAIL"] = ""
 os.environ["OPERATOR_NAME"] = ""
+os.environ["SARVAM_ZERO_RETENTION"] = "false"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

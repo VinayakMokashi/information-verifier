@@ -156,6 +156,29 @@ def test_going_public_without_a_contact_is_warned(monkeypatch):
     assert not any("CONTACT_EMAIL" in w for w in M._going_live_warnings())
 
 
+def test_the_notice_never_claims_a_sarvam_setting_nobody_confirmed(client, monkeypatch):
+    """REPRODUCED by review S5-4: the notice said "Our Sarvam account is set
+    to keep none of it" while HANDOFF still listed setting it as an owner
+    action — and Sarvam keeps everything until an owner sets a period. The
+    sentence now follows a switch the owner throws after doing it."""
+    monkeypatch.setattr(settings, "sarvam_zero_retention", False)
+    text = _read(client, "/privacy")
+    assert "keep none of it" not in text and "under its own terms" in text
+    monkeypatch.setattr(settings, "sarvam_zero_retention", True)
+    text = _read(client, "/privacy")
+    assert "Our Sarvam account is set to keep none of it" in text
+    assert "under its own terms" not in text
+
+
+def test_going_public_before_sarvam_keeps_nothing_is_warned(monkeypatch):
+    monkeypatch.setattr(settings, "public_hosts", "verifier.example.com")
+    monkeypatch.setattr(settings, "contact_email", "owner@example.com")
+    monkeypatch.setattr(settings, "sarvam_zero_retention", False)
+    assert any("SARVAM_ZERO_RETENTION" in w for w in M._going_live_warnings())
+    monkeypatch.setattr(settings, "sarvam_zero_retention", True)
+    assert not any("SARVAM_ZERO_RETENTION" in w for w in M._going_live_warnings())
+
+
 def test_going_public_without_turnstile_is_warned(monkeypatch):
     monkeypatch.setattr(settings, "public_hosts", "verifier.example.com")
     monkeypatch.setattr(settings, "turnstile_site_key", "")
