@@ -71,7 +71,9 @@ delivers them) 0ba4f62; OPS-18 + §11 19 (`/ready`: a database write+read
 on the /reports pool within 3 s, the key, ffmpeg, and real|demo — the bot
 refuses the demo) d65638f; OPS-11/08/20 (no access log — it printed visitor
 IPs and job ids; platform errors logged without URL or post id; `--workers
-1` explicit; output line-buffered and PYTHONUNBUFFERED). NEXT: OPS-19 no
+1` explicit; output line-buffered and PYTHONUNBUFFERED) 7f97c0e; OPS-10 (a
+daily content-free backup of the spend record — never a message — last 14
+kept in data/backups or BACKUP_DIR; a tested restore). NEXT: OPS-19 no
 monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
@@ -91,7 +93,9 @@ Sarvam's data retention to 0 days; a separate Anthropic workspace with a
 monthly spend limit for the public key; buy the .com (if Cloudflare declines
 the card, any registrar + Cloudflare nameservers); once the .com exists, a
 free Turnstile widget for it (Cloudflare dashboard → Turnstile: two keys
-for .env); for WhatsApp, a new SIM and a free Udyam registration. Pre-public **blockers**
+for .env); `BACKUP_DIR=` a OneDrive (or USB) folder in .env, so the daily
+copies of the spend record leave this laptop; for WhatsApp, a new SIM and
+a free Udyam registration. Pre-public **blockers**
 already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
 one stranger can use up the day's cap; a 25 MB text post freezes the server
 for 10–19 s; the bot answers anyone, even with no public URL; any website can

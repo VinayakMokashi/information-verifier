@@ -568,12 +568,17 @@ def housekeeping() -> dict[str, int]:
     forget people's messages. Each step is independent — one failing must
     not stop the others — and the counts are logged by the caller.
     """
+    from app.store import backup
+
     repo = AnswerRepository()
     done: dict[str, int] = {}
     for name, step in (("ledger_backfilled", repo.ledger.backfill_from_answers),
                        ("answers_deleted", repo.prune),
                        ("answer_cache_expired", repo.cache.prune),
-                       ("transcripts_expired", repo.transcripts.prune)):
+                       ("transcripts_expired", repo.transcripts.prune),
+                       # The money record, daily (audit-ops OPS-10).
+                       ("ledger_backed_up", lambda: int(backup.backup_ledger() is not None)),
+                       ("old_backups_deleted", backup.prune_backups)):
         try:
             done[name] = step()
         except Exception as exc:  # noqa: BLE001 — see docstring

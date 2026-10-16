@@ -42,6 +42,10 @@ class Settings(BaseSettings):
 
     # Storage
     db_path: str = "./data/verifier.db"
+    # Where the daily content-free copies of the spend record go (app/store/
+    # backup.py); empty = a "backups" folder beside the database. A synced
+    # folder here (OneDrive, a USB drive) takes them off this machine.
+    backup_dir: str = ""
 
     # Chat engine (the pivot, 2026-09-10) — one Claude call per check,
     # whitelist-first then open web. Sonnet 5 chosen over Opus 5 on cost:
