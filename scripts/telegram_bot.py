@@ -80,6 +80,13 @@ _TIER_BADGE = {
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:[^)\s]+)\)")
 # A Telegram command: "/name", optionally "@ThisBot" (the form a group sends).
 _COMMAND = re.compile(r"/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]{1,64})?")
+_KNOWN_COMMANDS = {"start": "help", "help": "help", "id": "id",
+                   "privacy": "privacy", "delete": "delete"}
+# An unknown command with at most this many words after it is still a
+# command ("/cancel please"); with more, it is a claim that happens to begin
+# with a slash ("/startup India scheme har yuva ko Rs 10 lakh") — review S5-13.
+_COMMAND_WORDS_MAX = 2
+_WORD = re.compile(r"\w+")
 _URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
 
@@ -139,13 +146,29 @@ def delete_text() -> str:
     how = (f"Jaldi delete karwana ho to {_e(email)} par likhiye — message aur din "
            "bata dijiye. Hum 7 din mein jawab dene ki koshish karte hain."
            if email else
-           "Jaldi delete karwane ka email pata service public hone se pehle "
-           "privacy notice mein diya jaayega.")
+           # The bot answers anyone already: "a contact comes before the
+           # service goes public" was untrue here (review S5-9).
+           "Jaldi delete karwane ka koi pata abhi diya nahi gaya hai.")
     return ("🗑 <b>Delete</b>\n"
             "Jawab bhejne ke baad main yeh yaad nahi rakhta ki kaunsa message "
             "aapka tha — isliye khud dhoondh kar delete nahi kar sakta. Aapka "
             f"message aur jawab {settings.answer_retention_days} din mein "
             f"apne-aap delete ho jaate hain.\n{how}")
+
+
+def startup_warnings() -> list[str]:
+    """What a public service must have, said at the bot's start. The bot
+    answers anyone (decided 2026-10-15), so it is public by construction —
+    not only once PUBLIC_HOSTS says the web is (review S5-9: the app's
+    warning was keyed to that, and live bot users had no one to write to)."""
+    warnings = []
+    if not settings.contact_email.strip():
+        warnings.append(">> WARNING: CONTACT_EMAIL is not set in .env: /privacy and "
+                        "/delete give people no one to write to (HANDOFF §0).")
+    if not settings.sarvam_zero_retention:
+        warnings.append(">> WARNING: SARVAM_ZERO_RETENTION is not set: Sarvam may keep "
+                        "the voice notes people send (HANDOFF §0).")
+    return warnings
 
 
 # The Bot API hands a bot files up to 20 MB (getFile); bigger ones are
@@ -163,23 +186,20 @@ def classify_message(msg: dict) -> tuple[str, str]:
     what counts as a checkable link or as nothing to check.
     """
     text = (msg.get("text") or "").strip()
-    if text.startswith(("/start", "/help")):
-        return "help", ""
-    # (A voice note or photo has no text at all: guard the split.)
-    first = text.split(maxsplit=1)[0] if text.startswith("/") else ""
-    command = _COMMAND.fullmatch(first)
+    command = _COMMAND.match(text)
     if command:
         name = command.group(1).lower()
-        if name == "id":
-            # Anyone's own chat id — how the owner finds the OWNER_CHAT_ID
-            # that the app's alerts go to (app/providers/alerts.py).
-            return "id", ""
-        if name in ("privacy", "delete"):
-            return name, ""
-        if first == text:
-            # A bare command this bot does not know ("/stop", "/settings") is
-            # never a claim. MEASURED 2026-10-16: "/privacy" went to the API
-            # as a paid text check, before the bot knew the command.
+        if name in _KNOWN_COMMANDS:
+            # By its token, never a prefix: "/start" once swallowed claims
+            # beginning "/startup…", and "/privacy?" was no command at all
+            # (review S5-13). /id tells anyone their own chat id — how the
+            # owner finds OWNER_CHAT_ID (app/providers/alerts.py).
+            return _KNOWN_COMMANDS[name], ""
+        if len(_WORD.findall(text[command.end():])) <= _COMMAND_WORDS_MAX:
+            # A command this bot does not know — "/stop", "/settings?",
+            # "/cancel please" — is never a claim. MEASURED 2026-10-16:
+            # "/privacy", before the bot knew it, went to the API as a PAID
+            # text check, and "/privacy?" still did after (review S5-13).
             return "help", ""
     if text:
         if allowed_link_host(text) is not None:
@@ -693,11 +713,26 @@ _SMALLTALK_REPLY = ("🙂 Kuch check karwana ho to woh message, link, voice note
 _TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi file "
                   "download nahi kar sakte. Chhota clip (5 minute tak) bhejiye, "
                   "ya video ka link.")
-# Kinds that are never submitted, so never told "this was not checked".
-_NEVER_CHECKED = ("unsupported", "smalltalk", "too_big")
-# Kinds answered at once, before any lock or bound — so never work in flight
-# that would make the chat's next message look sent mid-check.
+# Kinds that are never submitted, so never told "this was not checked". A
+# "poke" is an instant command handing over a waiting answer (review S5-6).
+_NEVER_CHECKED = ("unsupported", "smalltalk", "too_big", "poke")
+# Kinds answered at once, before any lock or bound.
 _INSTANT = ("help", "id", "privacy", "delete")
+# Kinds that can be submitted — the only work in flight that makes the
+# chat's next message look sent mid-check. Counting every kind but /help
+# left "/id" + a claim unchecked; counting all but the commands still did it
+# for "Hi" + a claim, a sticker or a too-big file (review S5-5).
+_SUBMITS = ("text", "link", "media", "image")
+
+
+def _instant_reply(kind: str, chat_id: int) -> str:
+    if kind == "id":
+        return f"Your chat id: {chat_id}"
+    if kind == "privacy":
+        return privacy_text()
+    if kind == "delete":
+        return delete_text()
+    return HELP
 # Said when a wait gives up while the check still runs; the person's next
 # message, whatever it is, collects the answer.
 _STILL_RUNNING = ("⏳ Check abhi bhi chal raha hai. Mujhe koi bhi message bhejiye "
@@ -717,12 +752,16 @@ class PendingStore(dict):
 
     A job id opens the person's message (OPS-11), so nothing is kept longer
     than it could still be delivered: an entry goes on delivery, and any
-    older than a day is dropped on load. Written whole, to a temporary file
-    swapped in, so a crash mid-write leaves the old file, never half of one.
-    The bot uses only get, item assignment, `in` and pop — those write.
+    older than a day goes on every write and on the bot's tidy-up — while it
+    runs, not only on load (review S5-1: a check whose wait gave up, and
+    whose person never wrote again, stayed on disk for weeks). Written whole,
+    to a temporary file swapped in, so a crash mid-write leaves the old
+    file, never half of one. The bot uses only get, item assignment, `in`
+    and pop — those write.
     """
 
     _TTL_S = 24 * 3600
+    _clock = staticmethod(time.time)       # a seam: tests move it
 
     def __init__(self, path: str) -> None:
         super().__init__()
@@ -733,7 +772,7 @@ class PendingStore(dict):
                 saved = json.load(f)
         except (OSError, ValueError):
             saved = {}
-        now = time.time()
+        now = self._clock()
         for chat, entry in (saved.items() if isinstance(saved, dict) else ()):
             try:
                 chat_id, job_id, at = int(chat), str(entry["job"]), float(entry["at"])
@@ -744,9 +783,24 @@ class PendingStore(dict):
                 self._at[chat_id] = at
         self._write()
 
+    def _drop_expired(self) -> list[int]:
+        now = self._clock()
+        old = [chat for chat, at in self._at.items() if now - at >= self._TTL_S]
+        for chat in old:
+            super().pop(chat, None)
+            self._at.pop(chat, None)
+        return old
+
+    def expire(self) -> list[int]:
+        """Drop what is past its day. -> the chats dropped."""
+        old = self._drop_expired()
+        if old:
+            self._write()
+        return old
+
     def __setitem__(self, chat_id, job_id) -> None:
         super().__setitem__(chat_id, job_id)
-        self._at[chat_id] = time.time()
+        self._at[chat_id] = self._clock()
         self._write()
 
     def __delitem__(self, chat_id) -> None:
@@ -763,7 +817,8 @@ class PendingStore(dict):
         return value
 
     def _write(self) -> None:
-        data = {str(chat): {"job": job, "at": self._at.get(chat, time.time())}
+        self._drop_expired()
+        data = {str(chat): {"job": job, "at": self._at.get(chat, self._clock())}
                 for chat, job in self.items()}
         temporary = f"{self._path}.tmp"
         try:
@@ -825,18 +880,15 @@ async def handle_message(
     prompted = prompted if prompted is not None else set()
     kind, payload = classify_message(msg)
 
-    if kind == "help":           # instant — it never waits behind anyone's check
-        await tg.send(chat_id, HELP)
-        return
-    if kind == "id":             # instant too: nothing to check, nothing spent
-        await tg.send(chat_id, f"Your chat id: {chat_id}")
-        return
-    if kind == "privacy":
-        await tg.send(chat_id, privacy_text())
-        return
-    if kind == "delete":
-        await tg.send(chat_id, delete_text())
-        return
+    if kind in _INSTANT:         # it never waits behind anyone's check
+        await tg.send(chat_id, _instant_reply(kind, chat_id))
+        if not (pending.get(chat_id) and chat_id in prompted):
+            return
+        # "Send me any message and I'll show that report": a command is a
+        # message too (review S5-6: "/status" got the help text and the
+        # answer stayed undelivered). It goes on, through the chat's lock, to
+        # hand the report over — and is never itself checked.
+        kind = "poke"
 
     # Lock BEFORE slot: a message queued behind its own chat must not hold
     # one of the bot's slots while it waits (found by review: one chat
@@ -857,13 +909,19 @@ async def handle_message(
             if pending.get(chat_id) != stale_job:
                 if kind not in _NEVER_CHECKED:
                     await tg.send(chat_id, _NOT_CHECKED)
-                return
-            if gone:
+                    return
+                # "hi", a sticker, a too-big file: still its own reply below,
+                # never silence (found by the interleaving explorer).
+            elif gone:
                 # Deleted after the retention period: the old answer is lost,
                 # and this is plainly a new message, not a poke for it.
                 pending.pop(chat_id, None)
                 print(f"[bot] job {stale_job} no longer exists; "
                       "checking the new message instead")
+                if kind == "poke":
+                    await tg.send(chat_id, "😕 Aapka pichla check ab mil nahi raha — "
+                                           "zarurat ho to message dobara bhejiye.")
+                    return
             elif report is None:
                 await tg.send(chat_id, "⏳ Aapka pichla check abhi bhi chal raha hai. "
                                        "Wo pura hone ke baad naya bhejiye — "
@@ -885,6 +943,8 @@ async def handle_message(
             # It still arrived mid-check, so it is not checked automatically.
             await tg.send(chat_id, _NOT_CHECKED)
             return
+        if kind == "poke":
+            return                  # delivered meanwhile: nothing left to do
 
         if kind == "unsupported":
             await tg.send(chat_id, "Yeh message type abhi check nahi kar sakta — "
@@ -967,7 +1027,10 @@ class Dispatcher:
                                         else {})
         self.locks: dict[int, asyncio.Lock] = {}
         self.prompted: set[int] = set()   # chats asked for "any message"
-        self.in_flight: dict[int, int] = {}      # handlers per chat, right now
+        self.in_flight: dict[int, int] = {}      # submitting handlers per chat
+        # Every live handler per chat, of any kind: a chat's lock is dropped
+        # only when none is left that could hold or await it (review S5-2).
+        self.active: dict[int, int] = {}
         self._slots = asyncio.Semaphore(max_in_flight)
         self._tasks: set[asyncio.Task] = set()
 
@@ -981,21 +1044,23 @@ class Dispatcher:
         # alone left the third message of three looking like a fresh start
         # (found by a 2,000-interleaving search, seed 120).
         chat_id = (message.get("chat") or {}).get("id")
-        # FOUND 2026-10-16: every kind but "help" was counted, so "/id" and a
-        # claim arriving together left the claim looking sent mid-check, and
-        # it was never checked.
-        counted = chat_id is not None and classify_message(message)[0] not in _INSTANT
+        # Only a message that can be submitted is work in flight (_SUBMITS;
+        # review S5-5).
+        counted = chat_id is not None and classify_message(message)[0] in _SUBMITS
         busy = chat_id is not None and (chat_id in self.pending
                                         or self.in_flight.get(chat_id, 0) > 0)
         if counted:
             self.in_flight[chat_id] = self.in_flight.get(chat_id, 0) + 1
+        if chat_id is not None:
+            self.active[chat_id] = self.active.get(chat_id, 0) + 1
         task = asyncio.create_task(
-            self._run(message, busy, chat_id if counted else None))
+            self._run(message, busy, chat_id if counted else None, chat_id))
         self._tasks.add(task)                    # keep a reference until done
         task.add_done_callback(self._tasks.discard)
 
     async def _run(self, message: dict, busy: bool = False,
-                   counted_chat: int | None = None) -> None:
+                   counted_chat: int | None = None,
+                   chat_id: int | None = None) -> None:
         try:
             await handle_message(message, self.app, self.tg, self.pending,
                                  self.locks, slots=self._slots,
@@ -1009,6 +1074,31 @@ class Dispatcher:
                     self.in_flight[counted_chat] = left
                 else:
                     self.in_flight.pop(counted_chat, None)
+            if chat_id is not None:
+                self._let_go(chat_id)
+
+    def _let_go(self, chat_id: int) -> None:
+        """One of the chat's handlers ended. With none left, nothing can hold
+        or await its lock, so the chat is forgotten (review S5-2: the table
+        kept every chat id the bot ever saw) — unless an answer still waits
+        to be handed over, which its "prompted" mark is for."""
+        left = self.active.get(chat_id, 1) - 1
+        if left > 0:
+            self.active[chat_id] = left
+            return
+        self.active.pop(chat_id, None)
+        self.locks.pop(chat_id, None)
+        if chat_id not in self.pending:
+            self.prompted.discard(chat_id)
+
+    def tidy(self) -> None:
+        """While the bot runs: drop pending entries past their day, and
+        whatever of those chats nothing still uses (review S5-1, S5-2)."""
+        expire = getattr(self.pending, "expire", None)
+        for chat_id in (expire() if callable(expire) else []):
+            self.prompted.discard(chat_id)
+            if not self.active.get(chat_id):
+                self.locks.pop(chat_id, None)
 
     async def resume(self) -> None:
         """Deliver what a previous run of the bot was waiting for (OPS-07).
@@ -1147,6 +1237,8 @@ async def main() -> None:
         if status == "not ready":
             print(">> WARNING: the app says it is NOT READY (see its /ready: the "
                   "database, its keys or ffmpeg). Checks may fail until that is fixed.")
+        for warning in startup_warnings():
+            print(warning)
 
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0
@@ -1156,6 +1248,7 @@ async def main() -> None:
                   "was waiting for.")
         await dispatcher.resume()
         while True:
+            dispatcher.tidy()       # each poll: what has had its day goes
             try:
                 updates = await tg.get_updates(offset)
             except (httpx.HTTPError, asyncio.TimeoutError) as exc:

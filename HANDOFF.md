@@ -48,13 +48,13 @@ reel link filled the box with no /verify request).
 18 findings (7 medium, 11 low), each reproduced. FIXED so far: S5-3
 2e4562c (midnight), S5-4 ebbe0aa (Sarvam switch), S5-10 300f375 (three
 real-database copies deleted + a CLAUDE.md rule), S5-7/S5-8/S5-18 ed88772
-(forget.py finds reels, pasted addresses; one save; no wholesale deletion).
-NEXT, in this order: the bot (S5-1 pending file past a day, S5-2 chat ids
-kept in memory, S5-5 "Hi" + a claim, S5-6 a command as a poke, S5-9 the
-public bot's missing contact, S5-13 "/privacy?" still paid); then S5-11
-(secure_delete), S5-12 (job ids in the ledger backups), S5-16 (stream
-replay after a deletion), S5-17 (decode temp files); then S5-14 (two
-overstated sentences), S5-15 (iOS in-app browsers). Each: failing test
+(forget.py finds reels, pasted addresses; one save; no wholesale deletion);
+the bot's six (S5-1, S5-2, S5-5, S5-6, S5-9, S5-13) in one commit, checked
+by scripts/bot_explorer.py — now in the repo — over 2,000 interleavings.
+NEXT, in this order: S5-11 (secure_delete), S5-12 (job ids in the ledger
+backups), S5-16 (stream replay after a deletion), S5-17 (decode temp
+files); then S5-14 (two overstated sentences), S5-15 (iOS in-app
+browsers). Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 

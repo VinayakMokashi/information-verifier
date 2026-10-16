@@ -40,6 +40,7 @@ is how to work here.
   | `.venv\Scripts\python.exe scripts\telegram_bot.py --check-token` | $0 | the bot token still works |
   | `.venv\Scripts\python.exe scripts\forget.py --job <id>` (or `--text "…" --day …`) | $0 | honours a deletion request; lists first, deletes only with `--yes` |
   | `.venv\Scripts\python.exe scripts\make_icons.py` | $0 | redraws the app icons (headless Chrome) and checks their sizes |
+  | `.venv\Scripts\python.exe scripts\bot_explorer.py` | $0 | 2,000 random interleavings of the bot: no double payment or delivery, no lost reply, no leaked chat state |
   | `.venv\Scripts\python.exe scripts\crawl_probe.py` | $0–0.002 | the API accepts every search domain (run after editing the whitelist) |
   | `.venv\Scripts\python.exe scripts\asr_probe.py clip.ogg` | ~paise | one real transcription |
   | `.venv\Scripts\python.exe scripts\smoke_test.py "claim"` | ~cents | one real check, with its bill |

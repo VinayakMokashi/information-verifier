@@ -7,6 +7,7 @@ actually accept, prose can never smuggle a link past the sources block, and
 every failure becomes words in the chat.
 """
 import asyncio
+import json
 
 import pytest
 
@@ -1270,10 +1271,12 @@ def test_delete_says_how_and_gives_the_contact(monkeypatch):
     assert app.submissions == [] and pending == {7: "old-job"}
 
 
-def test_delete_without_a_contact_says_one_is_coming():
+def test_delete_without_a_contact_says_there_is_none_yet():
+    """Not "one comes before the service goes public": the bot is public
+    already (review S5-9)."""
     app, tg = StubApp(), StubTG()
     _handle(_msg(7, "/delete"), app, tg)
-    assert "@" not in tg.sent[0][1] and "privacy notice" in tg.sent[0][1]
+    assert "@" not in tg.sent[0][1] and "diya nahi gaya" in tg.sent[0][1]
 
 
 def test_what_settings_say_is_escaped_in_the_chat(monkeypatch):
@@ -1284,22 +1287,129 @@ def test_what_settings_say_is_escaped_in_the_chat(monkeypatch):
     assert "a&lt;b&gt;@example.com" in tg.sent[0][1]
 
 
-@pytest.mark.parametrize("command", ["/help", "/id", "/privacy", "/delete"])
-def test_an_instant_command_never_makes_the_next_message_look_mid_check(command):
+@pytest.mark.parametrize("first", [
+    _msg(7, "/help"), _msg(7, "/id"), _msg(7, "/privacy"), _msg(7, "/delete"),
+    _msg(7, "Hi"),                                              # small talk
+    {"chat": {"id": 7}, "sticker": {"file_id": "s1"}},          # unsupported
+    {"chat": {"id": 7}, "voice": {"file_id": "v1", "file_size": 21 * 1024 * 1024}},
+], ids=["help", "id", "privacy", "delete", "smalltalk", "sticker", "too_big"])
+def test_a_message_never_submitted_never_makes_the_next_look_mid_check(first):
     """FOUND 2026-10-16: the dispatcher counted every message but /help as
     work in flight, so "/id" and a claim arriving together made the claim
-    look sent mid-check — it was never checked, and the person was told
-    so."""
+    look sent mid-check — never checked, and the person told so. bb623ae
+    fixed the commands; REPRODUCED by review S5-5, the rule still failed for
+    "Hi", a sticker or a too-big file: "Hi" then a forward is the most
+    ordinary first exchange there is."""
     async def scenario():
         app, tg = StubApp(), StubTG()
         bot = B.Dispatcher(app, tg)
-        bot.dispatch(_msg(7, command))
+        bot.dispatch(first)
         bot.dispatch(_msg(7, "WHO ne kaha 5G se corona"))
         await bot.drain()
         return app
 
     app = asyncio.run(scenario())
     assert app.submissions == [("text", {"text": "WHO ne kaha 5G se corona"})]
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("/privacy?", "privacy"), ("/privacy.", "privacy"), ("/delete?", "delete"),
+    ("/help me", "help"), ("/start", "help"),
+    ("/stop.", "help"), ("/stop!", "help"), ("/settings?", "help"),
+    ("/cancel please", "help"), ("/stop it", "help"),
+    ("/startup India scheme har yuva ko Rs 10 lakh", "text"),
+    ("/helpline 1930 ab band ho gayi hai", "text"),
+])
+def test_commands_are_read_by_the_token_never_by_a_prefix(text, kind):
+    """REPRODUCED by review S5-13: "/privacy?" and "/stop." were PAID checks
+    (the unknown-command rule wanted an exact bare token), and the old
+    prefix test turned claims beginning "/startup…" or "/helpline…" into
+    the help text, unchecked. A command with at most two words after it is
+    a command; more words make it a claim."""
+    assert B.classify_message({"text": text})[0] == kind
+
+
+def test_a_command_from_a_chat_with_a_waiting_answer_hands_it_over():
+    """REPRODUCED by review S5-6: told "send me any message and I'll show
+    that report", a person sending "/status" got the help text, and the
+    answer stayed undelivered — before bb623ae it was the poke."""
+    app, tg, pending, prompted = StubApp(), StubTG(), {7: "job1"}, {7}
+    _handle(_msg(7, "/status"), app, tg, pending, prompted)
+    assert pending == {} and app.submissions == []
+    assert any("This is false." in text for _, text in tg.sent)
+
+
+def test_small_talk_mid_check_always_gets_its_own_reply():
+    """FOUND by the interleaving explorer (2026-10-16; in 13 of 300 seeds
+    before step 5 too): "hi" sent mid-check, whose answer another of the
+    chat's handlers delivered while "hi" looked, got no reply at all."""
+    pending = {7: "job1"}
+
+    class DeliveredMeanwhile(StubApp):
+        async def wait_for_report(self, job_id, attempts=None):
+            pending.pop(7, None)              # the first handler handed it over
+            return self.report
+
+    app, tg = DeliveredMeanwhile(), StubTG()
+    _handle(_msg(7, "hi"), app, tg, pending)
+    assert tg.sent and tg.sent[-1][1] == B._SMALLTALK_REPLY
+
+
+def test_a_chat_is_forgotten_by_the_bot_once_nothing_is_running():
+    """REPRODUCED by review S5-2: the per-chat lock table kept every chat id
+    the bot ever handled, for the life of the process — the rule 60beff7
+    applied to the limiter, missed here."""
+    async def scenario():
+        app, tg = StubApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(4242, "WHO ne kaha 5G se corona"))
+        await bot.drain()
+        return bot
+
+    bot = asyncio.run(scenario())
+    assert (bot.locks, bot.in_flight, bot.pending, bot.prompted) == ({}, {}, {}, set())
+
+
+def test_a_pending_check_is_forgotten_after_a_day_while_the_bot_runs(tmp_path, monkeypatch):
+    """REPRODUCED by review S5-1: the day's limit was applied only when the
+    file was LOADED, so in a bot that stays up, an undelivered entry — a
+    chat id, and a job id that opens its message — stayed on disk for
+    weeks; the privacy notice says at most a day."""
+    clock = [1_000_000.0]
+    monkeypatch.setattr(B.PendingStore, "_clock", staticmethod(lambda: clock[0]))
+    path = tmp_path / "pending.json"
+    store = B.PendingStore(str(path))
+    store[777] = "job1"                       # its wait gave up; nobody pokes
+    clock[0] += B.PendingStore._TTL_S + 1
+    store[888] = "job2"                       # the next write of anyone's
+    assert 777 not in store and "777" not in json.loads(path.read_text())
+    clock[0] += B.PendingStore._TTL_S + 1
+    assert store.expire() == [888]            # and with no write at all
+    assert json.loads(path.read_text()) == {}
+
+
+def test_the_dispatcher_lets_go_of_a_chat_whose_entry_expired(tmp_path, monkeypatch):
+    clock = [1_000_000.0]
+    monkeypatch.setattr(B.PendingStore, "_clock", staticmethod(lambda: clock[0]))
+    bot = B.Dispatcher(StubApp(), StubTG(), pending_path=str(tmp_path / "p.json"))
+    bot.pending[777] = "job1"
+    bot.prompted.add(777)
+    clock[0] += B.PendingStore._TTL_S + 1
+    bot.tidy()
+    assert 777 not in bot.pending and 777 not in bot.prompted
+
+
+def test_a_public_bot_without_a_contact_says_so(monkeypatch):
+    """REPRODUCED by review S5-9: the bot answers anyone already, but the
+    missing-contact warning was keyed to the web's PUBLIC_HOSTS, and
+    /delete promised a contact "before the service goes public"."""
+    monkeypatch.setattr(settings, "contact_email", "")
+    assert any("CONTACT_EMAIL" in w for w in B.startup_warnings())
+    text = B.delete_text()
+    assert "public hone se pehle" not in text and "diya nahi gaya" in text
+    monkeypatch.setattr(settings, "contact_email", "owner@example.com")
+    monkeypatch.setattr(settings, "sarvam_zero_retention", True)
+    assert B.startup_warnings() == []
 
 
 @pytest.mark.parametrize("text", ["/stop", "/settings", "/cancel@SomeVerifierBot", "/privacyx"])
