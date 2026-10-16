@@ -43,6 +43,29 @@ def cache_key(text: str, language: str | None = None) -> str:
 
 _NO_LONGER_CACHED = ("That answer is no longer available. Please send the "
                      "message again.")
+_NOT_SAVED = ("This check finished but could not be saved. Please send the "
+              "message again.")
+_NOT_STARTED = "This check couldn't be started. Please send the message again."
+_SAVE_RETRY_S = (1.0, 3.0)   # waits between the finishing save's three attempts
+
+
+async def _save_finished(repo, answer) -> bool:
+    """The save that makes a finished check visible, tried three times.
+
+    REPRODUCED (docs/research/2026-10-15/audit-ops.md OPS-06): unguarded, one
+    "database is locked" here — an owner's DB browser holding a lock past the
+    30 s busy timeout, a full disk — lost the answer just paid for, skipped
+    its ledger row, and never ended its stream. -> False if it never took.
+    """
+    for wait in (*_SAVE_RETRY_S, None):
+        try:
+            await asyncio.to_thread(repo.save, answer)
+            return True
+        except Exception as exc:  # noqa: BLE001 — retried, then reported
+            print(f"[job] saving the finished check failed: {type(exc).__name__}: {exc}")
+            if wait is None:
+                return False
+            await asyncio.sleep(wait)
 
 
 async def run_check(job_id: str, text: str, repo, stream=None, *,
@@ -66,8 +89,17 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
     and sent its next message was told it "already had a check running").
     It must be safe to call twice.
     """
-    answer = await asyncio.to_thread(repo.get, job_id)
-    if answer is None:                      # defensive: the row is made first
+    try:
+        answer = await asyncio.to_thread(repo.get, job_id)
+    except Exception as exc:  # noqa: BLE001 — "never raises"
+        print(f"[job] could not read the job: {type(exc).__name__}: {exc}")
+        answer = None
+    if answer is None:
+        # Nothing to check — but the stream must still END, or its reader
+        # waits on heartbeats forever (OPS-06). The row, if any, is failed
+        # later by the stale sweep (repository.sweep_stale).
+        if stream is not None:
+            await stream.publish("error", {"message": _NOT_STARTED})
         return
 
     def finished() -> None:
@@ -109,15 +141,16 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 answer.completed_at = datetime.now(timezone.utc)
                 answer.usage = meter.snapshot()      # honestly $0
                 finished()
-                await asyncio.to_thread(repo.save, answer)
-                for section in answer.sections:
-                    await emit("text", {"text": section.markdown,
-                                        "tier": section.tier})
-                for source in answer.sources:
-                    await emit("source", source.model_dump())
-                if answer.summary:
-                    await emit("summary", {"text": answer.summary})
-                await emit("done", {"cached": True})
+                if await _save_finished(repo, answer):
+                    for section in answer.sections:
+                        await emit("text", {"text": section.markdown,
+                                            "tier": section.tier})
+                    for source in answer.sources:
+                        await emit("source", source.model_dump())
+                    if answer.summary:
+                        await emit("summary", {"text": answer.summary})
+                    await emit("done", {"cached": True})
+                # else: the finally tries once more and tells the reader.
                 return
 
         if cache_only:
@@ -164,11 +197,17 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         answer.usage = meter.snapshot()
         answer.completed_at = datetime.now(timezone.utc)
         finished()
-        await asyncio.to_thread(repo.save, answer)
+        saved = await _save_finished(repo, answer)
         # The spend ledger outlives the answer (which is deleted after
-        # answer_retention_days). A ledger failure must not lose the answer.
+        # answer_retention_days) — and is written even when the answer could
+        # not be: the money was spent either way. A ledger failure must not
+        # lose the answer.
         await safe_cache_call(repo.ledger.record, answer, kind)
-        if answer.status is JobStatus.FAILED:
+        # The stream ALWAYS ends, with the truth: an unsaved answer is not
+        # "done" — the page would re-read it from a row still PROCESSING.
+        if not saved:
+            await emit("error", {"message": _NOT_SAVED})
+        elif answer.status is JobStatus.FAILED:
             await emit("error", {"message": answer.error})
         else:
             await emit("done", {"cached": answer.cached})

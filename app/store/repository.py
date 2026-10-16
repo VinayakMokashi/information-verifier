@@ -497,6 +497,40 @@ class AnswerRepository:
             healed += 1
         return healed
 
+    def sweep_stale(self, older_than_s: float, running) -> int:
+        """Fail jobs stuck mid-flight that nothing in this process is still
+        working on — every few minutes, not only at a restart.
+
+        REPRODUCED (audit-ops OPS-06): one failed final save left a row
+        PROCESSING until the next restart, and while it was, the bot answered
+        every later message from that chat with "your last check is still
+        running". A row qualifies only when it is old AND `running(job_id)`
+        says no job here is on it, so a slow check is never failed under its
+        reader (the caller asks the live stream registry).
+        """
+        from app.models.answer import Answer, JobStatus
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_s)
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT job_id, payload FROM answers "
+                "WHERE status IN ('QUEUED', 'PROCESSING') AND created_at < ?",
+                (cutoff.isoformat(),)).fetchall()
+        healed = 0
+        for row in rows:
+            if running(row["job_id"]):
+                continue
+            try:
+                answer = Answer.model_validate_json(row["payload"])
+            except ValidationError:
+                continue
+            answer.status = JobStatus.FAILED
+            answer.error = "This check didn't finish. Please send the message again."
+            answer.completed_at = datetime.now(timezone.utc)
+            self.save(answer)
+            healed += 1
+        return healed
+
 
 def housekeeping() -> dict[str, int]:
     """Everything that should not grow forever. Safe to run at any time.

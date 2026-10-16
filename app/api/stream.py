@@ -29,6 +29,9 @@ router = APIRouter(prefix="/api/v1")
 _HEARTBEAT_S = 15.0      # a proxy was measured cutting idle connections at ~100 s
 _STREAM_TTL_S = 900.0    # keep a finished stream replayable for 15 minutes
 _MAX_EVENTS = 4000       # bounded by chat_max_tokens in practice
+# Dropped even if it never finished: a job that died without publishing its
+# end (audit-ops OPS-06) would otherwise be held — and heartbeated — forever.
+_MAX_AGE_S = 7200.0
 
 
 @dataclass
@@ -45,6 +48,7 @@ class JobStream:
     events: list[tuple[int, str, dict]] = field(default_factory=list)
     done: bool = False
     finished_at: float | None = None
+    created_at: float = field(default_factory=time.monotonic)
     _waiters: list[asyncio.Future] = field(default_factory=list)
 
     async def publish(self, kind: str, data: dict) -> None:
@@ -116,10 +120,20 @@ def get(job_id: str) -> JobStream | None:
     return _streams.get(job_id)
 
 
+def running(job_id: str) -> bool:
+    """Is a job in THIS process still working on `job_id`? Its stream is
+    registered before the 202 and ends when the job does — the stale sweep
+    (repository.sweep_stale) asks this before failing a row."""
+    stream = _streams.get(job_id)
+    return stream is not None and not stream.done
+
+
 def _prune() -> None:
     now = time.monotonic()
     for job_id, stream in list(_streams.items()):
-        if stream.finished_at is not None and now - stream.finished_at > _STREAM_TTL_S:
+        finished_long_ago = (stream.finished_at is not None
+                             and now - stream.finished_at > _STREAM_TTL_S)
+        if finished_long_ago or now - stream.created_at > _MAX_AGE_S:
             del _streams[job_id]
 
 

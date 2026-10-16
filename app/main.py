@@ -244,6 +244,41 @@ async def _housekeeping_loop() -> None:
             print(f"[housekeeping] {done}")
 
 
+_SWEEP_EVERY_S = 300
+# Longer than any check really runs (the longest measured: a two-pass check
+# at 295 s; a link adds its download and transcription), so a row this old
+# whose job is no longer running here is stuck, not slow.
+_STUCK_AFTER_S = 1800
+
+
+async def _sweep_stale_once() -> int:
+    """Fail jobs stuck mid-flight that no job here is still on (audit-ops
+    OPS-06: one failed final save wedged a row, its page and its bot chat
+    until a restart). A database read and writes: off the event loop."""
+    import asyncio
+
+    from app.api import stream as job_stream
+    from app.store.repository import AnswerRepository
+
+    try:
+        healed = await asyncio.to_thread(AnswerRepository().sweep_stale,
+                                         _STUCK_AFTER_S, job_stream.running)
+    except Exception as exc:  # noqa: BLE001 — the next sweep tries again
+        print(f"[sweep] failed: {type(exc).__name__}: {exc}")
+        return 0
+    if healed:
+        print(f"[sweep] failed {healed} job(s) stuck mid-flight")
+    return healed
+
+
+async def _sweep_loop() -> None:
+    import asyncio
+
+    while True:
+        await asyncio.sleep(_SWEEP_EVERY_S)
+        await _sweep_stale_once()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
@@ -270,13 +305,15 @@ async def lifespan(app: FastAPI):
         print("[startup] PUBLIC_HOSTS is set but Turnstile is not: visitors' paid "
               "checks are not challenged. Set TURNSTILE_SITE_KEY and "
               "TURNSTILE_SECRET_KEY in .env (decided 2026-10-15).")
-    task = asyncio.create_task(_housekeeping_loop())
+    tasks = [asyncio.create_task(_housekeeping_loop()), asyncio.create_task(_sweep_loop())]
     try:
         yield
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(
