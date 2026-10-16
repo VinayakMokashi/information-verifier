@@ -220,6 +220,13 @@ limiter are both in-memory.
     PowerShell 5.1 splits a `-m` here-string at embedded double quotes, and
     `Set-Content -Encoding utf8` prefixes a BOM (one reached a commit subject,
     and one broke a new test file's compile check).
+- **A copy of the real database is people's messages.** Every deletion
+  the privacy notice promises (30 days, `forget.py`) misses a copy in a
+  scratch folder, and nothing ever empties %TEMP% (review S5-10,
+  2026-10-16: three full copies found, one from 29 September). Measure on
+  a synthetic database where you can. When a real copy is truly needed,
+  delete it — with its -wal and -shm — the moment the measurement ends,
+  and say so in the commit.
 - **Some things only reality shows.** The server could not start on the one
   real database; two whitelisted sites blocked the crawler; the search tool
   made English claims come back in Hinglish. Free probes (`crawl_probe.py`,

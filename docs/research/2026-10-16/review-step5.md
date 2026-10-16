@@ -447,3 +447,22 @@ from outside the repo, not a defect).
 - Suggested fix: `forget()` (or forget.py, through a local-only endpoint)
   drops the job's stream from the registry; or `stream_answer` checks that
   the row still exists before replaying a finished stream.
+
+### S5-17. A voice note being decoded when the app is killed stays in %TEMP% indefinitely — a copy of a message the notice never mentions
+
+- Severity: low
+- Status: PLAUSIBLE (traced; not reproduced with a real kill)
+- Where: `app/providers/media.py:87-122` (`normalize_to_wav` writes the
+  upload — the person's own voice note or video — to
+  `TemporaryDirectory()/src.<ext>` and runs ffmpeg on it; the directory is
+  removed only when the `with` block exits); `app/providers/links.py:496-530`
+  (the same for a downloaded reel's audio, which is public content).
+- Evidence: by trace. A hard stop — closing start.ps1's window (its own
+  documented way to stop), a reboot, a job-object kill — runs no `__exit__`,
+  so a decode in progress leaves `%TEMP%\tmpXXXX\src.ogg` and `out.wav`
+  behind, and nothing in the app ever looks there again. The window is only
+  the seconds ffmpeg runs, so it is rare; the notice's 30 days do not
+  cover it at all.
+- Suggested fix: decode in a fixed folder under the data directory (e.g.
+  `data/tmp/`) that startup empties, so whatever a killed process left is
+  removed at the next start.
