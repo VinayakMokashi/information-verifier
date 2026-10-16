@@ -1,6 +1,6 @@
 # Review of step 5 of the launch (privacy, terms, bot, deletion, app)
 
-status: in progress
+status: complete
 
 Adversarial review of `git diff 4b56628..69e7d6d` (2026-10-16): the privacy
 notice and terms, the limiter's forgetting, the bot's /privacy, /delete and
@@ -466,3 +466,88 @@ from outside the repo, not a defect).
 - Suggested fix: decode in a fixed folder under the data directory (e.g.
   `data/tmp/`) that startup empties, so whatever a killed process left is
   removed at the next start.
+
+### S5-18. On a viral forward, `--text … --day …` cannot single out the person who asked: the listing shows no time, and `--yes` deletes everyone's check of it
+
+- Severity: low
+- Status: CONFIRMED
+- Where: `scripts/forget.py:64-67` (each line: id, day, status, snippet — no
+  time), `:73-77` (`--yes` deletes every finished match);
+  `app/store/repository.py:474-495` (`find`).
+- Evidence: `repro_forget_viral.py` (scratch) — one message checked by three
+  people at 09:30, 14:30 and 20:30 India time on one day:
+
+      3 checks match:
+        4ddcf3f0…  2026-10-16  COMPLETE    Kal se 2000 ke note band, RBI ne kaha - sabko forward karo
+        f824e47c…  2026-10-16  COMPLETE    Kal se 2000 ke note band, RBI ne kaha - sabko forward karo
+        1233efe9…  2026-10-16  COMPLETE    Kal se 2000 ke note band, RBI ne kaha - sabko forward karo
+      ...
+      Deleted 3 checks and 0 cached copies.
+      left of the three people's checks: 0
+
+  The service exists for viral forwards, so this is the common case, not an
+  edge. Two strangers' answers vanish without a request (their #job= pages
+  go blank; a bot reply still waiting for a poke is lost — JobGone). The
+  owner cannot pick the right line: the person would say "around 2:30 pm",
+  and the listing does not show a time.
+- Suggested fix: print each match's time (HH:MM, India time) and the kind;
+  tell the owner to delete one with `--job` when several match; make
+  `--text --yes` refuse when more than one check matches unless `--all` is
+  given.
+
+## Summary
+
+18 findings: **0 high, 7 medium, 11 low**. 16 CONFIRMED by a reproduction
+(scripts in the review's scratch folder, `review-step5\repro_*.py`, run
+against a `git archive 69e7d6d` snapshot with dummy keys and scratch
+databases only), 2 PLAUSIBLE (S5-15 partly confirmed, S5-17 traced).
+
+- Medium: S5-1 (bot keeps chat id → job id on disk past "a day"), S5-4
+  (Sarvam "keeps none of it" not yet true), S5-5 ("Hi" + a claim: the claim
+  is never checked), S5-7 (a reel check cannot be found to delete; the tool
+  says "gone anyway?"), S5-9 (the public bot has no contact and no warning),
+  S5-10 (three copies of the real database in scratch folders), S5-13
+  ("/privacy?" is still a paid check).
+- Low: S5-2, S5-3, S5-6, S5-8, S5-11, S5-12, S5-14, S5-15, S5-16, S5-17,
+  S5-18.
+- Fixes that addressed the named mechanism but not the rule (area 6):
+  S5-2 (forget-after-the-day, not applied to the bot), S5-3 (forget_idle's
+  "no decision changes"), S5-5 (the /id dispatcher fix), S5-9 (the
+  missing-contact warning), S5-13 (the unknown-command rule).
+
+Checked and found sound:
+- Google gets only `text[:250]`, once per check (`chat.py:654`).
+- OCR goes to Anthropic as an inline image (no Files API); audio only to
+  Sarvam.
+- One cookie (`vd`: random id + MAC, /api/v1, Secure, HttpOnly, SameSite
+  Strict) and one localStorage key (`iv.lang`); no other storage, analytics
+  or third-party load besides Turnstile.
+- No IP address, device id or Telegram id in any print, alert, table,
+  ledger row or backup; alerts and stored errors are fixed strings; both
+  launchers run uvicorn with `--no-access-log`.
+- answers (30 days; stuck rows are failed first), answer_cache (the longer
+  TTL, which is what the notice prints) and transcript_cache (30 days) are
+  pruned as stated, from the same settings legal.py prints.
+- forget_idle's hourly and in-flight steps drop only what `_prune` and
+  `_running` already ignore; a check still running past its TTL releases by
+  token, so no count is lost (only S5-3's day rollover changes a decision).
+- The `_INSTANT` change cannot cause a double payment: instant kinds return
+  before the lock and never submit; the lock and `busy_on_arrival` are
+  unchanged for kinds that submit.
+- Nothing model- or user-controlled reaches the bot's new HTML unescaped
+  (URL and e-mail go through `_e`; AI_TAG and HELP are static); the AI line
+  survives the length budget.
+- `forget()` finds cached copies for text, image, voice and link checks
+  alike (the cached payload's `input_text` is the very text the key was
+  made from); a listing without `--yes` only reads; a missing DB_PATH is
+  never created; a running check is left alone.
+- The page: `takeShared()` only fills a textarea (no markup, no submit,
+  click or fetch); the install code writes no HTML; test_page.py and
+  test_app_manifest.py pass.
+- The one-pass marker fill: values escaped, a value that looks like a marker
+  stays text, any leftover marker fails a test.
+- Already tracked after this range, so not counted: Telegram's
+  encryption-at-rest duty (PROJECT_PLAN §11 29, f3a7fe6).
+
+The review's own scratch folder holds only synthetic databases; it never
+opened `data/verifier.db` or any copy of it.
