@@ -30,7 +30,7 @@ from app.providers.asr import get_asr_provider
 from app.providers.llm import PAUSED_MESSAGE, paused_reason, tell_owner_paused
 from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
-    download_link_audio, resolve_link, subtitle_text,
+    download_link_audio, log_safe, resolve_link, subtitle_text,
 )
 from app.providers import turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
@@ -619,7 +619,7 @@ def _friendly_link_failure(exc: Exception) -> str:
     if isinstance(exc, (httpx.HTTPError, RuntimeError)):
         return ("The transcription service is unavailable right now. "
                 "Please try again in a minute.")
-    print(f"[link] unexpected failure: {type(exc).__name__}: {exc}")
+    print(f"[link] unexpected failure: {type(exc).__name__}: {log_safe(exc)}")
     return "Something went wrong reading that link. Please try again."
 
 
@@ -669,7 +669,8 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
     # safe_cache_call.
     text = await safe_cache_call(repo.transcripts.get, key) if key else None
     if text:
-        print(f"[link] transcript cache hit for {key}: no download, no ASR")
+        # The platform, never the key: it carries the post's id (audit OPS-11).
+        print(f"[link] transcript cache hit ({info.platform}): no download, no ASR")
     else:
         try:
             with meter.activate():   # the download's normalize notes ASR seconds

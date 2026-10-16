@@ -46,9 +46,11 @@ def test_the_launcher_parses():
 
 
 def test_the_launcher_runs_the_app_the_way_it_must_run():
-    """One worker (the stream registry and the rate limiter are in memory)
-    and no auto-reload (a saved file would restart a check mid-answer)."""
+    """One worker (the stream registry and the rate limiter are in memory) —
+    EXPLICITLY since 2026-10-16: the default is only a default, and
+    WEB_CONCURRENCY changes it (audit-ops OPS-08) — and no auto-reload (a
+    saved file would restart a check mid-answer)."""
     text = (ROOT / "start.ps1").read_text(encoding="ascii")
-    assert "-m uvicorn app.main:app" in text
-    assert "--reload" not in text and "--workers" not in text
+    assert "-m uvicorn app.main:app --workers 1" in text
+    assert "--reload" not in text and "--workers 2" not in text
     assert "serve_demo" in text           # the guard against fake answers

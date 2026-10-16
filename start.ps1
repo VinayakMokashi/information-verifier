@@ -52,12 +52,16 @@ if (Get-PythonRunning 'serve_demo\.py') {
     exit 1
 }
 
-# 1. The app. One worker: the stream registry and the rate limiter live in memory.
+# 1. The app. One worker, explicitly: the stream registry and the rate limiter
+# live in memory, and WEB_CONCURRENCY would otherwise change the default. No
+# access log: it printed every visitor's IP and every job id, and a job id
+# opens that person's message. Unbuffered, so no line waits in a buffer.
 if (Test-AppUp) {
     Write-Host '>> The app is already running.' -ForegroundColor Green
 } else {
     Write-Host '>> Starting the app...' -ForegroundColor Cyan
-    Start-Window 'Verifier - app' "& $(Quote $python) -m uvicorn app.main:app"
+    Start-Window 'Verifier - app' ("`$env:PYTHONUNBUFFERED = '1'`n" +
+        "& $(Quote $python) -m uvicorn app.main:app --workers 1 --no-access-log")
     $deadline = (Get-Date).AddSeconds(60)
     while (-not (Test-AppUp)) {
         if ((Get-Date) -gt $deadline) {
@@ -76,7 +80,8 @@ if (Get-PythonRunning 'telegram_bot\.py') {
     Write-Host '>> The Telegram bot is already running.' -ForegroundColor Green
 } else {
     Write-Host '>> Starting the Telegram bot...' -ForegroundColor Cyan
-    Start-Window 'Verifier - Telegram bot' "& $(Quote $python) scripts\telegram_bot.py"
+    Start-Window 'Verifier - Telegram bot' ("`$env:PYTHONUNBUFFERED = '1'`n" +
+        "& $(Quote $python) scripts\telegram_bot.py")
 }
 
 Write-Host ''

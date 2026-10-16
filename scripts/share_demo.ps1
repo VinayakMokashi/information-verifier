@@ -30,6 +30,7 @@ try {
 # the console gets its old value back at the end.
 $previousHosts = $env:PUBLIC_HOSTS
 $env:PUBLIC_HOSTS = (@($env:PUBLIC_HOSTS, ".trycloudflare.com") | Where-Object { $_ }) -join ","
+$env:PYTHONUNBUFFERED = "1"     # no diagnostic waits in a buffer (or dies in one)
 
 if ($DemoMode) {
     Write-Host ">> FREE demo mode (simulated verdicts, `$0)." -ForegroundColor Green
@@ -38,7 +39,8 @@ if ($DemoMode) {
     Write-Host ">> REAL mode: each check costs ~`$0.05-0.12. Ctrl+C here stops the tunnel;" -ForegroundColor Yellow
     Write-Host ">> close the server window (or stop-process) when finished." -ForegroundColor Yellow
     $server = Start-Process -PassThru -NoNewWindow ".\.venv\Scripts\python.exe" `
-        "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"
+        "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000",
+        "--workers", "1", "--no-access-log"     # no visitor IPs or job ids in a log
 }
 
 Start-Sleep -Seconds 3

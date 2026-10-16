@@ -255,6 +255,19 @@ def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
             client.close()
 
 
+_ANY_URL = re.compile(r"\w+://\S+")
+# yt-dlp names the post right after the extractor: "[Instagram] ABCdef123: ..."
+_YTDLP_POST = re.compile(r"(\[[\w:]+\]) [\w-]+:")
+
+
+def log_safe(text, limit: int = 300) -> str:
+    """A platform's error, fit for a log line: what went wrong, without the
+    URL or the post id — which say exactly which reel someone checked
+    (audit-ops OPS-11; on a host, logs outlive the 30-day promise)."""
+    text = _ANY_URL.sub("<url>", " ".join(str(text).split()))
+    return _YTDLP_POST.sub(r"\1 <post>:", text)[:limit]
+
+
 def _classified(exc: Exception) -> LinkError:
     """Name the failure; 'it did not work' is not something a user can act on.
 
@@ -263,7 +276,7 @@ def _classified(exc: Exception) -> LinkError:
     another instance.
     """
     m = str(exc).lower()
-    print(f"[links] resolve/fetch failed: {' '.join(str(exc).split())[:300]}")
+    print(f"[links] resolve/fetch failed: {log_safe(exc)}")
     if isinstance(exc, LinkError):
         return exc
     if "empty media response" in m or "cookies" in m or "login" in m or "logged-in" in m:
@@ -435,7 +448,7 @@ def subtitle_text(ref: SubtitleRef) -> str | None:
         return text or None
     except Exception as exc:  # noqa: BLE001 — degrade to the audio path
         print(f"[links] subtitle fetch failed ({ref.lang}/{ref.ext}): "
-              f"{type(exc).__name__}: {exc}")
+              f"{type(exc).__name__}: {log_safe(exc)}")
         return None
 
 

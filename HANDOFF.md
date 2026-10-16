@@ -69,7 +69,10 @@ asks for the running app to be closed) 32462f1; OPS-07 + R12 (the bot's
 pending checks persist in data/bot_pending.json and a restarted bot
 delivers them) 0ba4f62; OPS-18 + §11 19 (`/ready`: a database write+read
 on the /reports pool within 3 s, the key, ffmpeg, and real|demo — the bot
-refuses the demo). NEXT: OPS-19 no monitoring or
+refuses the demo) d65638f; OPS-11/08/20 (no access log — it printed visitor
+IPs and job ids; platform errors logged without URL or post id; `--workers
+1` explicit; output line-buffered and PYTHONUNBUFFERED). NEXT: OPS-19 no
+monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
 OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,

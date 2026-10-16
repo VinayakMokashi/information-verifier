@@ -284,7 +284,20 @@ async def _sweep_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import sys
+
     from app.store import instance
+
+    # Line by line even when stdout is a pipe or a file (a service manager):
+    # block-buffered, diagnostics arrived hours late and a killed process
+    # lost them (audit-ops OPS-20, reproduced). Not left to whoever starts
+    # the app remembering PYTHONUNBUFFERED.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(line_buffering=True)
+        except (OSError, ValueError):
+            pass
 
     # FIRST, before _serving's startup sweep can touch a running copy's checks
     # (audit OPS-05: a second start failed them all, then died on the busy port).
