@@ -165,6 +165,8 @@ def apply_fake_stages() -> None:
     # Says so on /ready, so the Telegram bot refuses to send people its
     # simulated verdicts (audit-ops OPS-18; PROJECT_PLAN §11 19).
     settings.demo_mode = True
+    # No owner alerts from the demo: it is offline, and its "trouble" is fake.
+    settings.owner_chat_id = ""
 
     # Sarvam and Google read settings at call time, so the lines above cover
     # them. Anthropic does NOT: providers/llm.py builds one client at import,

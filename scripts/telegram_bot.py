@@ -112,6 +112,11 @@ def classify_message(msg: dict) -> tuple[str, str]:
     text = (msg.get("text") or "").strip()
     if text.startswith(("/start", "/help")):
         return "help", ""
+    # (A voice note or photo has no text at all: guard the split.)
+    if text.startswith("/") and text.split(maxsplit=1)[0].split("@")[0].lower() == "/id":
+        # Anyone's own chat id — how the owner finds the OWNER_CHAT_ID that
+        # the app's alerts go to (app/providers/alerts.py).
+        return "id", ""
     if text:
         if allowed_link_host(text) is not None:
             return "link", text
@@ -752,6 +757,9 @@ async def handle_message(
 
     if kind == "help":           # instant — it never waits behind anyone's check
         await tg.send(chat_id, HELP)
+        return
+    if kind == "id":             # instant too: nothing to check, nothing spent
+        await tg.send(chat_id, f"Your chat id: {chat_id}")
         return
 
     # Lock BEFORE slot: a message queued behind its own chat must not hold

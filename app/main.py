@@ -302,7 +302,11 @@ async def _sweep_stale_once() -> int:
         print(f"[sweep] failed: {type(exc).__name__}: {exc}")
         return 0
     if healed:
+        from app.providers import alerts
+
         print(f"[sweep] failed {healed} job(s) stuck mid-flight")
+        alerts.notify("stuck", f"{healed} check(s) were stuck mid-flight and were "
+                               "marked failed (what they cost is in the ledger).")
     return healed
 
 
@@ -353,7 +357,11 @@ async def _serving():
     import asyncio
     import contextlib
 
+    from app.providers import alerts
+
     init_db()
+    # Alerts raised on worker threads (the limiter's pool) go through this loop.
+    alerts.attach(asyncio.get_running_loop())
     # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
     # is dead by definition — it would otherwise be polled forever by a page
     # that will never get an answer. (Only once this process holds the
@@ -363,6 +371,9 @@ async def _serving():
     healed = AnswerRepository().sweep_orphans()
     if healed:
         print(f"[startup] failed {healed} job(s) orphaned by a restart")
+        alerts.notify("restart", f"The server restarted while {healed} check(s) were "
+                                 "running; they were marked failed (what they cost "
+                                 "is in the ledger).")
     done = housekeeping()
     if any(done.values()):
         print(f"[startup] housekeeping: {done}")

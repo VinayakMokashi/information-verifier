@@ -79,10 +79,13 @@ from it passed the whole suite; caps on majors; pytest in
 requirements-dev.txt); OPS-25 (yt-dlp warnings logged once, scrubbed;
 startup says when yt-dlp is >30 days old — it is 58 today: ASK Vinayak
 before `pip install -U yt-dlp`, and before installing deno, the JS runtime
-yt-dlp wants for YouTube). NEXT: OPS-19 no monitoring or
-alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
-and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
-OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,
+yt-dlp wants for YouTube) 6c74d76; OPS-19 (owner alerts on Telegram:
+paused for money, the budget running low or spent, 3 failures in a row, a
+restart or a sweep that failed checks — to OWNER_CHAT_ID, each kind at
+most hourly; the bot's /id tells anyone their chat id). Step 3's remaining
+audit items are for a cloud host or later steps (OPS-09 pool starvation on
+1 vCPU, OPS-21 config from the working directory — the service recipe of
+step 4 must set it, OPS-26 slow memory growth). NEXT (4) running 24/7 here — the domain,
 cloudflared as a service, auto-start; (5) privacy notice, terms, the app
 manifest; then WhatsApp. Each step: failing test first, commit + push,
 update this section.
@@ -98,7 +101,8 @@ Sarvam's data retention to 0 days; a separate Anthropic workspace with a
 monthly spend limit for the public key; buy the .com (if Cloudflare declines
 the card, any registrar + Cloudflare nameservers); once the .com exists, a
 free Turnstile widget for it (Cloudflare dashboard → Turnstile: two keys
-for .env); `BACKUP_DIR=` a OneDrive (or USB) folder in .env, so the daily
+for .env); `OWNER_CHAT_ID=` your Telegram chat id in .env (send /id to the bot), so
+trouble reaches your phone; `BACKUP_DIR=` a OneDrive (or USB) folder in .env, so the daily
 copies of the spend record leave this laptop; for WhatsApp, a new SIM and
 a free Udyam registration. Pre-public **blockers**
 already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):

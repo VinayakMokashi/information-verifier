@@ -19,6 +19,9 @@ os.environ["PUBLIC_HOSTS"] = "testserver,test"
 # for every paid check and asks Cloudflare (tests/test_turnstile.py fakes it).
 os.environ["TURNSTILE_SITE_KEY"] = ""
 os.environ["TURNSTILE_SECRET_KEY"] = ""
+# No owner alerts from a test (app/providers/alerts.py): tests/test_alerts.py
+# turns them on against a fake Telegram.
+os.environ["OWNER_CHAT_ID"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

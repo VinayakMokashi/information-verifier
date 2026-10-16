@@ -32,7 +32,7 @@ from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
     download_link_audio, log_safe, resolve_link, subtitle_text,
 )
-from app.providers import turnstile
+from app.providers import alerts, turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
 from app.providers.vision import ocr_image
@@ -214,6 +214,23 @@ async def _quota(request: Request, kind: str, *, deferred: bool = False,
         raise
 
 
+_FAILURES_TO_ALERT = 3
+_failures = [0]            # checks failed in a row, in this process
+
+
+def _count_outcome(status: str, error: str) -> None:
+    """A run of failed checks is the error storm the owner must hear about
+    (audit-ops OPS-19: a revoked key or a Sarvam outage fails every check,
+    and only the app window said so). One success resets the count."""
+    if status != "FAILED":
+        _failures[0] = 0
+        return
+    _failures[0] += 1
+    if _failures[0] == _FAILURES_TO_ALERT:
+        alerts.notify("failing", f"{_FAILURES_TO_ALERT} checks in a row failed. "
+                                 f"The last said: {error[:200]}")
+
+
 async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
     """A background check has ended, however it ended: settle its day.
 
@@ -243,7 +260,9 @@ async def _finish(job_id: str, repo, quota: _Spend | None) -> None:
         # each one kept its reservation, so a handful drained the day's $1.
         refused = answer is not None and answer.error == PAUSED_MESSAGE
         if refused:
-            pause()
+            pause()                 # (the owner was told when it was detected)
+        elif answer is not None:
+            _count_outcome(answer.status.value, answer.error or "")
         if quota.day is not None:
             usage = answer.usage if answer is not None else None
             actual = None

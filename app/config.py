@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # refused: a DNS-rebinding page sends its own name (review R5). Going
     # live, put the domain here — the server prints any name it refused.
     public_hosts: str = ""
+    # The OWNER's Telegram chat id: trouble (paused for money, the budget
+    # running low, failures in a row, a restart mid-check) is sent there
+    # (app/providers/alerts.py). Empty = off. The bot's /id command says it.
+    owner_chat_id: str = ""
     # True only in the FREE demo server (scripts/fake_stages.apply_fake_stages):
     # /ready says "demo", and the bot refuses to wire people to it.
     demo_mode: bool = False

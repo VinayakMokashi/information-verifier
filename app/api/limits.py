@@ -36,6 +36,7 @@ from fastapi import HTTPException, Request
 from app.api.device import device_of
 from app.api.local import is_this_machine
 from app.config import settings
+from app.providers import alerts
 from app.store.repository import DailyBudget, DailyQuota, operator_day
 
 _MAX_TRACKED_CLIENTS = 512
@@ -118,8 +119,16 @@ _NEARLY_SPENT = (
     "forwarded TEXT can still be checked against published fact-checks.")
 
 
+_MODE_MEANS = {"vetted": "no open-web search",
+               "shortcut": "text only, answered from published fact-checks"}
+
+
 def _mode_for(kind: str) -> str:
     mode = budget_mode(today())
+    if mode != "full":
+        alerts.notify("budget", f"Today's ${settings.daily_budget_usd:.2f} budget is "
+                                f"running low: checks now run '{mode}' "
+                                f"({_MODE_MEANS[mode]}) until midnight.")
     if mode == "shortcut" and kind != "text":
         # Its OCR or transcription alone could outrun what is left, and it
         # would end in a shortcut-only answer anyway.
@@ -341,6 +350,9 @@ def _day_is_full(client: str, now: float, what: str) -> HTTPException:
         return HTTPException(429, "The service is busy right now — please try "
                                   "again in a few minutes.")
     if what == "money":
+        alerts.notify("budget-spent", f"Today's ${settings.daily_budget_usd:.2f} budget "
+                                      "is used up: paid checks are refused until "
+                                      f"{_reset_label()} (repeats stay free).")
         return HTTPException(
             429, "Today's checking budget has been used up. It resets at "
                  f"{_reset_label()} — please come back then.")

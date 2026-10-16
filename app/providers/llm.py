@@ -54,8 +54,14 @@ def paused_reason(exc: BaseException) -> str | None:
 
 
 def tell_owner_paused(reason: str) -> None:
-    """The one console line that says what to fix (Anthropic's own words)."""
+    """The one console line that says what to fix (Anthropic's own words),
+    and the same to the owner's Telegram (app/providers/alerts.py)."""
+    from app.providers import alerts
+
     print(f"[paused] Anthropic refused a check for money: {reason}. Top up the "
           "credit balance or raise the spend limit (console.anthropic.com); "
           "until then paid checks pause, and one is let through every "
           f"{max(1, settings.paused_retry_s // 60)} minutes to see if it has cleared.")
+    alerts.notify("paused", f"Anthropic is refusing checks for money ({reason}). "
+                            "Checking is paused until the credit balance is topped "
+                            "up or the spend limit raised (console.anthropic.com).")
