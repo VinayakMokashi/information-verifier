@@ -50,6 +50,21 @@ def _operator() -> str:
     return html.escape(settings.operator_name.strip()) or "an individual"
 
 
+def sarvam_line(language: str = "en") -> str:
+    """What may be said of Sarvam's copy: only what the owner has confirmed
+    (SARVAM_ZERO_RETENTION — Sarvam keeps everything until an owner sets a
+    period; review S5-4). One switch for every surface: the web notice was
+    corrected and the bot, public already, went on promising (re-check
+    F-12)."""
+    if language == "hinglish":
+        return ("Humara Sarvam account kuch bhi na rakhne par set hai."
+                if settings.sarvam_zero_retention
+                else "Sarvam ise apne niyamon ke hisaab se rakh sakta hai.")
+    return ("Our Sarvam account is set to keep none of it."
+            if settings.sarvam_zero_retention
+            else "Sarvam may keep it, under its own terms.")
+
+
 def public_url(path: str) -> str | None:
     """https://<the public name>/<path>, for a surface that is not this page
     (the bot's /privacy). The first PUBLIC_HOSTS entry that names a host: a
@@ -73,11 +88,7 @@ def render(name: str) -> str:
         "cache": _span(max(settings.answer_cache_ttl_trusted_h,
                            settings.answer_cache_ttl_web_h)),
         "transcripts": _count(settings.transcript_cache_ttl_days, "day"),
-        # Only what the owner has confirmed (review S5-4): Sarvam keeps
-        # everything until an owner sets a retention period.
-        "sarvam": ("Our Sarvam account is set to keep none of it."
-                   if settings.sarvam_zero_retention
-                   else "Sarvam may keep it, under its own terms."),
+        "sarvam": sarvam_line(),
     }
     # One pass: a value that happens to contain a marker stays text. A marker
     # nobody fills is left as it is, and the tests fail on any leftover.

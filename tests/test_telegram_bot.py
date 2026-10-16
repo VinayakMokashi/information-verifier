@@ -1254,6 +1254,20 @@ def test_privacy_answers_at_once_with_the_notice_and_costs_nothing(monkeypatch):
     assert "45 din" in text and "18" in text and "/delete" in text
 
 
+def test_the_bot_promises_only_what_is_ours_and_what_sarvam_confirmed(monkeypatch):
+    """REPRODUCED by re-check F-12: S5-4 and S5-14 corrected the web notice
+    only. The bot is public already, its text is the whole notice until a
+    public address exists, and it still said the message "is deleted after
+    30 days" — while Sarvam keeps voice notes on its own terms until the
+    owner's dashboard change, and Anthropic may keep flagged content."""
+    monkeypatch.setattr(settings, "sarvam_zero_retention", False)
+    for text in (B.privacy_text(), B.delete_text()):
+        assert "apni copy" in text, "says the deletion covers everyone's copy"
+    assert "apne niyamon" in B.privacy_text() and "kuch bhi na rakhne" not in B.privacy_text()
+    monkeypatch.setattr(settings, "sarvam_zero_retention", True)
+    assert "kuch bhi na rakhne" in B.privacy_text()
+
+
 def test_privacy_without_a_public_name_still_explains(monkeypatch):
     monkeypatch.setattr(settings, "public_hosts", "")
     app, tg = StubApp(), StubTG()

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx  # noqa: E402
 
-from app.api.legal import public_url  # noqa: E402
+from app.api.legal import public_url, sarvam_line  # noqa: E402
 from app.api.limits import SUBJECT_HEADER  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.engine.marker import strip_any_sentinel  # noqa: E402
@@ -124,9 +124,13 @@ def privacy_text() -> str:
         "<b>Google</b> (published fact-checks mein dhoondhne ke liye) aur "
         "<b>Sarvam</b> (India; awaaz ko text banata hai). Link ho to wo public "
         "post Instagram, YouTube ya Facebook se padha jaata hai.",
-        f"• Message aur jawab {settings.answer_retention_days} din baad delete ho "
-        "jaate hain. Kharch ka hisaab rakha jaata hai — usmein na aapka message "
-        "hota hai, na aapki pehchaan.",
+        # "Our copy", and Sarvam only as confirmed: the bot is public, and
+        # its text is the whole notice until there is a web one to link
+        # (re-check F-12).
+        f"• Humari copy {settings.answer_retention_days} din baad delete ho jaati "
+        "hai; Anthropic, Sarvam aur Telegram apni copy apne niyamon se rakhte "
+        f"hain. {_e(sarvam_line('hinglish'))} Kharch ka hisaab rakha jaata hai — "
+        "usmein na aapka message hota hai, na aapki pehchaan.",
         "• Koi account, ad ya tracking nahi. Sirf 18+ ke liye.",
         "• Kisi aur ki private jaankari mat bhejiye.",
     ]
@@ -151,9 +155,10 @@ def delete_text() -> str:
            "Jaldi delete karwane ka koi pata abhi diya nahi gaya hai.")
     return ("🗑 <b>Delete</b>\n"
             "Jawab bhejne ke baad main yeh yaad nahi rakhta ki kaunsa message "
-            "aapka tha — isliye khud dhoondh kar delete nahi kar sakta. Aapka "
-            f"message aur jawab {settings.answer_retention_days} din mein "
-            f"apne-aap delete ho jaate hain.\n{how}")
+            "aapka tha — isliye khud dhoondh kar delete nahi kar sakta. Humare "
+            f"paas rakha aapka message aur jawab {settings.answer_retention_days} "
+            "din mein apne-aap delete ho jaata hai (Anthropic, Sarvam aur Telegram "
+            f"apni copy apne niyamon se rakhte hain).\n{how}")
 
 
 def startup_warnings() -> list[str]:
