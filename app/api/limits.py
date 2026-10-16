@@ -29,7 +29,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request
 
@@ -289,6 +289,18 @@ def today() -> str:
     return operator_day(datetime.now(timezone.utc))
 
 
+# A claim takes its day, then may wait on two database reads (each up to the
+# 30 s busy timeout) before its allowance is judged. A finished day's counts
+# are kept this long after midnight, so no claim for it is still on its way
+# when they go (review S5-3).
+_STRAGGLER_S = 300.0
+
+
+def _day_ago(seconds: float) -> str:
+    """The operator's day as it was `seconds` ago (a seam for the tests)."""
+    return operator_day(datetime.now(timezone.utc) - timedelta(seconds=seconds))
+
+
 def _reset_label() -> str:
     minutes = settings.day_boundary_utc_offset_min
     if minutes == 330:
@@ -454,6 +466,13 @@ def _fund(client: str, day: str, now: float, kind: str, mode: str) -> None:
     if _daily_full(day):
         raise _day_is_full(client, now, "slots")
     with _lock:
+        if _person_day[0] > day:
+            # Timed before midnight, judged after the new day's first claim:
+            # its own day's counts are gone. Clearing the table back to it
+            # dropped the new day's counts and granted this on an empty one
+            # (review S5-3) — so it is refused, never judged on another day.
+            raise HTTPException(429, "The day has just changed — please send "
+                                     "it again.")
         if _person_day[0] != day:
             _person_today.clear()
             _person_day[0] = day
@@ -663,11 +682,13 @@ def forget_idle() -> int:
     memory only when 512 others pushed it out or the server restarted —
     weeks, on a server meant to stay up. Each step removes only what the
     limits already ignore — attempts older than the hour, checks past their
-    TTL, a finished day's counts — so no decision changes. Memory only, as
+    TTL, a finished day's counts once no claim for that day can still be on
+    its way (_STRAGGLER_S; review S5-3: cleared at midnight, they let a claim
+    timed just before it through) — so no decision changes. Memory only, as
     _lock requires. The housekeeping loop calls it (app/main.py).
     """
     now = _now()
-    day = today()
+    cutoff = _day_ago(_STRAGGLER_S)
     with _lock:
         idle = [k for k, v in _per_client.items() if not _prune(v, 3600, now)]
         for key in idle:
@@ -676,9 +697,8 @@ def forget_idle() -> int:
         for key in ended:
             del _in_flight[key]
         dropped = len(idle) + len(ended)
-        # Cleared, not re-dated: a claim that took its day just before
-        # midnight still counts under that day, as it would have anyway.
-        if _person_day[0] != day:
+        # Cleared, not re-dated: the next day's first claim dates the table.
+        if _person_day[0] and _person_day[0] < cutoff:
             dropped += len(_person_today)
             _person_today.clear()
     return dropped

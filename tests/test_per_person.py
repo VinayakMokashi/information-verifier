@@ -287,9 +287,46 @@ def test_idle_people_are_forgotten_after_their_day(limiting, clock, monkeypatch)
     limits.reserve(_bot(3), token="hung")        # never ended: past its TTL below
     assert limits._per_client and limits._person_today and limits._in_flight
     clock[0] += max(3601, settings.in_flight_ttl_s + 1)
-    monkeypatch.setattr(limits, "today", lambda: "2099-01-01")
+    # Five minutes ago was already another day: no straggler can be left.
+    monkeypatch.setattr(limits, "_day_ago", lambda seconds: "2099-01-01")
     assert limits.forget_idle() > 0
     assert (limits._per_client, limits._person_today, limits._in_flight) == ({}, {}, {})
+
+
+def test_a_claim_timed_before_midnight_is_judged_on_its_own_day(limiting, monkeypatch):
+    """REPRODUCED by review S5-3: a claim takes its day, then waits on a
+    database read; midnight passes and the housekeeping call lands there. It
+    cleared the day's counts, so a person who had used up the day got one
+    more, charged to it. A finished day is now kept until no claim for it
+    can still be on its way."""
+    day = limits.today()
+    for _ in range(5):
+        assert _paid(_bot(1))
+    # 00:00:10 the next day: a new day, but five minutes ago was still `day`.
+    monkeypatch.setattr(limits, "today", lambda: "2099-01-02")
+    monkeypatch.setattr(limits, "_day_ago", lambda seconds: day)
+    limits.forget_idle()
+    monkeypatch.setattr(limits, "today", lambda: day)   # it took its day before midnight
+    with pytest.raises(HTTPException) as refused:
+        limits.reserve(_bot(1))                 # the straggler, still on `day`
+    assert refused.value.status_code == 429 and "today" in refused.value.detail
+
+
+def test_a_claim_for_a_day_already_over_is_refused_never_counted_on_another(
+        limiting, monkeypatch):
+    """The older form of the same race: the NEW day's first claim cleared the
+    table under a straggler, which then re-dated it back — dropping the new
+    day's counts and granting the straggler on an empty one."""
+    day = limits.today()
+    for _ in range(5):
+        assert _paid(_bot(1))
+    monkeypatch.setattr(limits, "today", lambda: "2099-01-02")
+    assert _paid(_bot(2))                       # the new day has begun
+    monkeypatch.setattr(limits, "today", lambda: day)
+    with pytest.raises(HTTPException) as refused:
+        limits.reserve(_bot(1))                 # timed before midnight, late here
+    assert refused.value.status_code == 429 and "send it again" in refused.value.detail
+    assert limits._person_today == {"tg:2": 1}  # the new day's count survived
 
 
 def test_an_hour_later_only_the_hourly_record_goes(limiting, clock):
