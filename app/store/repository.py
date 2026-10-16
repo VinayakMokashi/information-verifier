@@ -471,6 +471,54 @@ class AnswerRepository:
             ).fetchone()
         return Answer.model_validate_json(row["payload"]) if row else None
 
+    def find(self, text: str, day: str | None = None) -> list:
+        """Answers whose message — or what a machine read from it — contains
+        `text`, folded as the cache folds a message (case, invisible
+        characters, spacing), sent on the operator's `day` if one is given.
+        For a deletion request (scripts/forget.py); the table holds at most
+        answer_retention_days of checks, so reading it whole is fine."""
+        from app.models.answer import Answer
+
+        needle = _normalize_input(text)
+        with get_conn() as conn:
+            rows = conn.execute("SELECT payload FROM answers").fetchall()
+        found = []
+        for row in rows:
+            try:
+                answer = Answer.model_validate_json(row["payload"])
+            except ValidationError:
+                continue
+            said = _normalize_input(f"{answer.input_text} {answer.source_text or ''}")
+            if needle and needle in said and (
+                    day is None or operator_day(answer.created_at) == day):
+                found.append(answer)
+        return sorted(found, key=lambda a: a.created_at)
+
+    def forget(self, answers: list) -> tuple[int, int]:
+        """Delete these answers and every cached answer to the same message.
+        -> (answers deleted, cached copies deleted). The spend ledger keeps
+        its rows: they never held the message (invariant 10)."""
+        # What was checked: the message, or for a voice note, a screenshot or
+        # a link, what a machine read from it.
+        messages = {_normalize_input(t) for a in answers
+                    for t in (a.input_text, a.source_text or "")}
+        messages.discard("")
+        with get_conn() as conn:
+            gone = sum(conn.execute("DELETE FROM answers WHERE job_id = ?",
+                                    (a.job_id,)).rowcount or 0 for a in answers)
+            copies = 0
+            for row in conn.execute("SELECT key, payload FROM answer_cache").fetchall():
+                try:
+                    cached = json.loads(row["payload"])
+                    said = {_normalize_input(cached.get("input_text") or ""),
+                            _normalize_input(cached.get("source_text") or "")}
+                except (ValueError, AttributeError):
+                    continue
+                if said & messages:
+                    copies += conn.execute("DELETE FROM answer_cache WHERE key = ?",
+                                           (row["key"],)).rowcount or 0
+        return gone, copies
+
     def record_progress(self, job_id: str, usage) -> bool:
         """A RUNNING check's bill so far, onto its row (audit-ops OPS-04: a
         check killed mid-flight restarted with usage=None, and what it had

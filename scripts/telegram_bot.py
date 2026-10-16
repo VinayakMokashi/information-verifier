@@ -134,7 +134,7 @@ def delete_text() -> str:
     """/delete: Telegram's bot terms want data deleted on request. After an
     answer is delivered nothing ties this chat to its message (the answer
     row has no chat in it), so the bot cannot find it to delete — the owner
-    can, from the message and the day."""
+    can, from the message and the day (scripts/forget.py)."""
     email = settings.contact_email.strip()
     how = (f"Jaldi delete karwana ho to {_e(email)} par likhiye — message aur din "
            "bata dijiye. Hum 7 din mein jawab dene ki koshish karte hain."
