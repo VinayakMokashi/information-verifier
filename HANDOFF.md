@@ -135,7 +135,13 @@ free Turnstile widget for it (Cloudflare dashboard → Turnstile: two keys
 for .env); `OWNER_CHAT_ID=` your Telegram chat id in .env (send /id to the bot), so
 trouble reaches your phone; `BACKUP_DIR=` a OneDrive (or USB) folder in .env, so the daily
 copies of the spend record leave this laptop; for WhatsApp, a new SIM and
-a free Udyam registration. Pre-public **blockers**
+a free Udyam registration. From step 5: decide what the privacy notice
+publishes as the operator's name and contact (`OPERATOR_NAME`,
+`CONTACT_EMAIL` — a role address avoids a personal one); once the .com
+exists, set the bot's privacy policy in @BotFather to
+`https://<the .com>/privacy`; check that this PC's disk is encrypted
+(Settings → Privacy & security → Device encryption — Telegram's bot terms
+want stored data encrypted at rest, PROJECT_PLAN §11 29). Pre-public **blockers**
 already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
 one stranger can use up the day's cap; a 25 MB text post freezes the server
 for 10–19 s; the bot answers anyone, even with no public URL; any website can

@@ -92,7 +92,13 @@ checks, no oversized-post freeze — and reviewed twice (§7). Later on
 2026-10-16: checking pauses at no cost when Anthropic refuses for money,
 the dashboard shows the day's money, and a web visitor's check needs a
 Cloudflare Turnstile pass, which earns the device cookie that carries 3
-checks a day (§7). Step 3 — restarts, the ledger, monitoring — the same evening. **1145 tests.**
+checks a day (§7). Step 3 — restarts, the ledger, monitoring — the same evening.
+Step 5 that night: a privacy notice and terms that read their periods from
+the code's own settings, an AI line on every answer on every surface, the
+bot's /privacy and /delete, a deletion tool for the owner, and an
+installable app; drafting the notice against the code found the limiter
+keeping visitors' addresses for weeks, and the bot billing unknown
+commands as claims (§7). **1230 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -434,6 +440,87 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-16 (night) — Step 5 of the launch: privacy notice, terms, the AI line, deletion, an installable app
+
+Drafted from [policy-legal.md](docs/research/2026-10-15/policy-legal.md)'s
+recommendation as its verification corrected it, and then checked claim by
+claim against the CODE, not the research. That second check is where the
+findings came from:
+- **The limiter kept visitors' addresses in memory for weeks** (60beff7).
+  A subject's hourly record left only when 512 others pushed it out or the
+  server restarted. `forget_idle()` drops what the limits already ignore,
+  from the 6-hourly housekeeping loop; no decision changes (four mutants
+  caught).
+- **The bot billed unknown commands as claims** (bb623ae). MEASURED:
+  "/privacy", before the bot knew it, reached the API as a PAID text
+  check: one word passes the small-talk triage. A bare unknown /command
+  now gets the help text. Also: "/id" arriving with a claim made the claim
+  look sent mid-check, so it was never checked; instant commands are no
+  longer counted as work in flight.
+- **The answer cache holds the message too**, and an answer page opens
+  for anyone holding its `#job=` address. Both are now stated in the
+  notice.
+
+What was built:
+- dfb16b7: `/privacy` and `/terms` are served by `app/api/legal.py`
+  (single-pass fill since 69e7d6d), not from static/. The periods they
+  state are read from the settings the deleting code reads, and the tests
+  move those settings.
+- The page: "I'm an AI (Claude), and I can be wrong — open the sources
+  before you rely on an answer. For ages 18+", beside Check, and
+  "AI-written" on every answer.
+- bb623ae (the bot): the AI line on EVERY answer (a Telegram chat never
+  starts a new session, and Anthropic's policy asks for the disclosure
+  per session), /privacy, and an honest /delete.
+- 4806194: `scripts/forget.py` honours a deletion request. The notice
+  promises one, and without a tool that promise meant hand-written SQL.
+- 767d44f: the installable app.
+  - Manifest, icons drawn by `scripts/make_icons.py` in headless Chrome,
+    an Install button, and an iOS hint.
+  - A GET share target that only fills the box.
+  - No service worker: none is needed to install, and one would serve a
+    stale page after deploys.
+  - Headless Chrome over DevTools reported no manifest errors and no
+    installability errors. A shared reel link filled the box and sent
+    nothing.
+
+Decided here (mine; Vinayak can overturn any):
+- **What to publish as the operator's name and contact is his decision.**
+  It lives in `.env` (`OPERATOR_NAME`, `CONTACT_EMAIL`), never in the
+  repo. Until set, the pages say a contact comes before launch, and a
+  public deployment warns at startup.
+- **18+ is a line beside the button, not a checkbox.** It is a
+  self-declaration either way; DPDP's child rules start 13 May 2027; and a
+  box ticked before every check is friction for nothing. Revisit with the
+  2027 rewrite.
+- **Telegram /delete tells the truth.** Once an answer is delivered,
+  nothing ties a chat to its message, so the bot cannot find it to delete.
+  The person writes to the contact, and the owner runs `forget.py`.
+
+Go-live preconditions this adds (HANDOFF §0):
+- `CONTACT_EMAIL`;
+- Sarvam's retention set to 0 days. The notice says "Our Sarvam account is
+  set to keep none of it", which is true only once it is set;
+- the privacy policy URL set in @BotFather.
+
+**A DECISION RECORDED NOW, NEEDED BEFORE 13 MAY 2027 (Vinayak's):**
+- DPDP Rule 8(3) requires every Data Fiduciary to keep "such personal
+  data, associated traffic data and other logs of the processing" for at
+  least one year from processing. Rule 6(1)(e) adds a second one-year duty
+  for security logs. The verification read Illustration Case 1 as keeping
+  the personal data itself, "even if X deletes her account".
+- That collides with invariant 10 (messages deleted after 30 days), with
+  the notice's own promise, with `/delete`, and with Telegram's bot terms
+  §4.2(a) (delete on request).
+- The options:
+  - keep message content for a year (breach impact up, and the notice
+    must say so);
+  - keep only a content-free processing log, beside the ledger, on the
+    narrow reading of "such personal data" (legally uncertain);
+  - take advice in early 2027, then choose.
+- Nothing changes before 13 May 2027. The notice already says it will be
+  rewritten before then.
 
 ### 2026-10-16 (evening) — Step 3 of the launch: restarts, the ledger, monitoring
 
@@ -1871,10 +1958,14 @@ A. **A website / app anyone can use.** **DECIDED 2026-10-15** (§7): this PC
    - **Before any public URL:** §11 17 (a `Settings` repr prints the API
      keys — fix first), §11 18 (who may use the bot), privacy note + terms
      (messages kept 30 days), SQLite backups (the ledger is the spend record).
-     The dashboard already 404s for anyone but this machine.
+     The dashboard already 404s for anyone but this machine. **All DONE by
+     2026-10-16** (privacy notice and terms: §7, step 5).
    - **"App":** the page is mobile-first; a web-app manifest + icon makes it
      installable from the phone's browser ("Add to Home screen") — no app
-     store needed. A store app is a separate, much larger project.
+     store needed. A store app is a separate, much larger project. **DONE
+     2026-10-16** (767d44f; installable per Chrome, a share target that
+     fills the box). Still to see on a real Android phone once the .com is
+     live: the install prompt, and what WhatsApp's share sheet offers.
 B. **The WhatsApp bot.** Meta's WhatsApp Business Platform (Cloud API):
    a Meta Business account, a phone number not already on WhatsApp,
    business verification (slow — start it early), and a public HTTPS
@@ -2060,6 +2151,27 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    Counting both (device AND address, all or none) touches every give-back
    path (refund, the free cache hit, both rollbacks), so it is its own step,
    with its own review.
+28. **DECISION FOR VINAYAK, before 13 May 2027: DPDP Rule 8(3)'s one-year
+   minimum retention** against the 30-day deletion (invariant 10), the
+   notice, /delete and Telegram's delete-on-request. The facts and the
+   options are recorded in §7 (2026-10-16, night). Take advice early 2027.
+29. **Telegram's bot terms §4.4(a): data "encrypted at rest and stored
+   separately from its encryption key".** The SQLite database (messages
+   for 30 days, the bot's pending file) is plain. Cheapest: Windows Device
+   encryption / BitLocker on this PC — an OWNER CHECK (Settings → Privacy &
+   security → Device encryption); an encrypted disk on the VM later. Else
+   encrypt the answer payloads with a key kept outside the database.
+30. **Individualised advice** (Anthropic's Usage Policy from 12 Nov 2026:
+   medical, legal and financial "High-risk AI Recommendations" need a
+   qualified person's review; general information is excluded). "Is this
+   forwarded health claim true?" is general information; "should I stop
+   my medicine?" is not. The terms disclaim advice (dfb16b7); the prompt or
+   triage should also decline the individual part and answer the general
+   claim. A prompt change changes the cache fingerprint and needs one paid
+   check to verify, so ASK first.
+31. **A "report this answer" control** — required only if the app ever
+   goes on the Play Store (Play's AI-content policy; pwa-app.md F9).
+   Deferred with the Play route itself.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.
