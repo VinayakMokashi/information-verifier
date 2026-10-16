@@ -32,12 +32,18 @@ served by app/api/legal.py with the periods read from settings; the AI +
 18+ line beside Check; "AI-written" on every answer); bb623ae (the bot:
 the AI line on every answer and in /start, /privacy, /delete; a bare
 unknown /command gets help instead of being a PAID check — measured; "/id"
-no longer makes the next message look mid-check); scripts/forget.py — how
-the owner honours a deletion request (`--job <id>` from a web address, or
+no longer makes the next message look mid-check); 4806194 (scripts/forget.py — how
+the owner honours a deletion request: `--job <id>` from a web address, or
 `--text "…" --day YYYY-MM-DD` from a message; lists first, `--yes`
 deletes the check and cached copies of its message; the ledger keeps its
-content-free row; dry-run on a copy of the real database worked).
-Next: the app manifest + icons + share target; then PROJECT_PLAN §7/§11.
+content-free row; dry-run on a copy of the real database worked); the
+installable app (manifest, icons drawn by scripts/make_icons.py, an
+"Install app" button, an iOS "Share → Add to Home Screen" hint, a GET
+share target that only FILLS the box; no service worker — headless Chrome
+over DevTools: no manifest errors, no installability errors, and a shared
+reel link filled the box with no /verify request).
+Next: PROJECT_PLAN §7/§11 for step 5 (and the DPDP Rule 8(3) decision
+record); then the owner's list below; then WhatsApp.
 
 **Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
 63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB

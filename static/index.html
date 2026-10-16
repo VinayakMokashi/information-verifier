@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Information Verifier — is this true?</title>
+<!-- Installable as an app (pwa-app.md): the manifest, its icons (drawn by
+     scripts/make_icons.py) and, for iOS, which ignores both, its own icon.
+     No service worker, on purpose: see tests/test_app_manifest.py. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0f13" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-title" content="Verifier">
 <style>
   :root {
     --bg: #fbfbfa;        --surface: #ffffff;   --surface-2: #f4f4f2;
@@ -51,6 +60,12 @@
   }
   header h1 { font-size: 1.02rem; font-weight: 650; margin: 0; letter-spacing: -.01em; }
   header .tag { color: var(--ink-3); font-size: .82rem; }
+  .install { margin-left: auto; align-self: center; font: inherit; font-size: .8rem;
+             font-weight: 600; cursor: pointer; color: var(--accent);
+             background: var(--accent-soft); border: 1px solid transparent;
+             border-radius: 999px; padding: 4px 12px; }
+  .install:hover { border-color: var(--accent); }
+  .ios-hint { max-width: 720px; margin: 8px auto 0; font-size: .84rem; color: var(--ink-2); }
 
   main {
     flex: 1; width: 100%; max-width: 720px; margin: 0 auto;
@@ -211,7 +226,10 @@
   <div class="head-inner">
     <h1>🔎 Information Verifier</h1>
     <span class="tag">Is this true? — paste anything and find out</span>
+    <button class="install hidden" id="install" type="button">Install app</button>
   </div>
+  <p class="ios-hint hidden" id="iosHint">To install: tap <b>Share</b>, then
+     <b>Add to Home Screen</b>.</p>
 </header>
 
 <main id="thread">
@@ -771,6 +789,63 @@ for (const chip of document.querySelectorAll(".chip")) {
     box.focus();
   });
 }
+
+// -- Install as an app (pwa-app.md) -------------------------------------------
+// Chrome on Android and the desktop offers it through beforeinstallprompt;
+// iOS has no prompt at all, so there the button says how. Never shown once
+// installed, nor inside Instagram's or Facebook's browser, which cannot
+// install anything.
+let installPrompt = null;
+const INSTALLED = matchMedia("(display-mode: standalone)").matches
+                  || navigator.standalone === true;
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+            || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();               // this button, not Chrome's own bar
+  installPrompt = e;
+  if (!INSTALLED) $("install").classList.remove("hidden");
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("install").classList.add("hidden");
+});
+if (IOS && !INSTALLED && !IN_APP) $("install").classList.remove("hidden");
+$("install").addEventListener("click", async () => {
+  if (installPrompt) {
+    const offer = installPrompt;
+    installPrompt = null;           // Chrome's prompt can be shown only once
+    offer.prompt();
+    await offer.userChoice;
+    // Installed or dismissed, this offer is spent; Chrome makes a new one
+    // (and the button comes back) when it is ready to ask again.
+    $("install").classList.add("hidden");
+    return;
+  }
+  if (IOS) $("iosHint").classList.toggle("hidden");
+});
+
+// -- Shared into the installed app --------------------------------------------
+// Android's share sheet opens /?text=…&url=…&title=… (the manifest's
+// share_target); a reel's link usually arrives in `text`. It only FILLS the
+// box: the person still taps Check, so the limits, the budget and Turnstile
+// stand between a share and any spend, exactly as for typing.
+function takeShared() {
+  const p = new URLSearchParams(location.search);
+  const url = (p.get("url") || "").trim();
+  const text = (p.get("text") || "").trim();
+  const title = (p.get("title") || "").trim();
+  if (!url && !text && !title) return;
+  // Read once: a reload must not refill the box over what was typed since.
+  history.replaceState(null, "", location.pathname + location.hash);
+  const shared = LINK_RE.test(url) ? url
+               : LINK_RE.test(text) ? text
+               : [text, url].filter(Boolean).join(" ") || title;
+  // Far past a message's 5,000 characters, so nothing real is cut — a bound
+  // only so that a crafted address cannot freeze the page.
+  box.value = shared.slice(0, 20000);
+  box.dispatchEvent(new Event("input"));
+}
+takeShared();
 
 $("check").addEventListener("click", () => {
   const text = box.value.trim();
