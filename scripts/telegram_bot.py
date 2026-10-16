@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx  # noqa: E402
 
+from app.api.legal import public_url  # noqa: E402
 from app.api.limits import SUBJECT_HEADER  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.engine.marker import strip_any_sentinel  # noqa: E402
@@ -77,6 +78,8 @@ _TIER_BADGE = {
 }
 
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:[^)\s]+)\)")
+# A Telegram command: "/name", optionally "@ThisBot" (the form a group sends).
+_COMMAND = re.compile(r"/([A-Za-z0-9_]{1,32})(?:@[A-Za-z0-9_]{1,64})?")
 _URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
 
@@ -91,8 +94,58 @@ HELP = (
     "official sources (WHO, NASA, NIH, government sites…) se check karke "
     "jawab dunga — aapki hi bhasha mein. Sirf India ya politics nahi: "
     "health, science, history, kuch bhi.\n\n"
-    "Galat ho sakta hoon; diye gaye sources khud padhiye."
+    "🤖 Jawab ek AI (Claude) likhta hai — galat ho sakta hai, isliye diye gaye "
+    "sources khud padhiye.\n"
+    "Sirf 18+ ke liye. Bhejne ka matlab: aap maante hain ki aapka message check "
+    "ke liye Anthropic, Google aur Sarvam ke paas jaata hai — /privacy"
 )
+
+# On EVERY answer, not only in /start: Anthropic's Usage Policy wants the AI
+# disclosed at the start of each chat session, and a Telegram chat never
+# starts a new one (the verification of policy-legal.md, 2026-10-15).
+AI_TAG = "🤖 Yeh jawab AI (Claude) ne likha hai — sources khud check kariye."
+
+
+def privacy_text() -> str:
+    """/privacy: where a message goes and for how long, in the chat itself —
+    Telegram's bot terms want the policy easily reached — and the full
+    notice when there is a public name to link it from."""
+    lines = [
+        "🔒 <b>Privacy</b>",
+        "• Aap jo bhejte hain — message, photo, voice note ya link — wo check ke "
+        "liye jaata hai: <b>Anthropic</b> (USA; uska AI, Claude, jawab likhta hai), "
+        "<b>Google</b> (published fact-checks mein dhoondhne ke liye) aur "
+        "<b>Sarvam</b> (India; awaaz ko text banata hai). Link ho to wo public "
+        "post Instagram, YouTube ya Facebook se padha jaata hai.",
+        f"• Message aur jawab {settings.answer_retention_days} din baad delete ho "
+        "jaate hain. Kharch ka hisaab rakha jaata hai — usmein na aapka message "
+        "hota hai, na aapki pehchaan.",
+        "• Koi account, ad ya tracking nahi. Sirf 18+ ke liye.",
+        "• Kisi aur ki private jaankari mat bhejiye.",
+    ]
+    url = public_url("privacy")
+    if url:
+        lines.append(f"Poora notice: {_e(url)}")
+    lines.append("Delete karwana ho: /delete")
+    return "\n".join(lines)
+
+
+def delete_text() -> str:
+    """/delete: Telegram's bot terms want data deleted on request. After an
+    answer is delivered nothing ties this chat to its message (the answer
+    row has no chat in it), so the bot cannot find it to delete — the owner
+    can, from the message and the day."""
+    email = settings.contact_email.strip()
+    how = (f"Jaldi delete karwana ho to {_e(email)} par likhiye — message aur din "
+           "bata dijiye. Hum 7 din mein jawab dene ki koshish karte hain."
+           if email else
+           "Jaldi delete karwane ka email pata service public hone se pehle "
+           "privacy notice mein diya jaayega.")
+    return ("🗑 <b>Delete</b>\n"
+            "Jawab bhejne ke baad main yeh yaad nahi rakhta ki kaunsa message "
+            "aapka tha — isliye khud dhoondh kar delete nahi kar sakta. Aapka "
+            f"message aur jawab {settings.answer_retention_days} din mein "
+            f"apne-aap delete ho jaate hain.\n{how}")
 
 
 # The Bot API hands a bot files up to 20 MB (getFile); bigger ones are
@@ -103,8 +156,8 @@ _TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024
 def classify_message(msg: dict) -> tuple[str, str]:
     """(kind, payload) for one Telegram message. Pure — fully offline-testable.
 
-    kinds: help | smalltalk | text | link | media | image | too_big |
-    unsupported. The
+    kinds: help | id | privacy | delete | smalltalk | text | link | media |
+    image | too_big | unsupported. The
     link test reuses the SERVER's own allowlist check, and the small-talk test
     the server's own triage, so the bot and the API can never disagree about
     what counts as a checkable link or as nothing to check.
@@ -113,10 +166,21 @@ def classify_message(msg: dict) -> tuple[str, str]:
     if text.startswith(("/start", "/help")):
         return "help", ""
     # (A voice note or photo has no text at all: guard the split.)
-    if text.startswith("/") and text.split(maxsplit=1)[0].split("@")[0].lower() == "/id":
-        # Anyone's own chat id — how the owner finds the OWNER_CHAT_ID that
-        # the app's alerts go to (app/providers/alerts.py).
-        return "id", ""
+    first = text.split(maxsplit=1)[0] if text.startswith("/") else ""
+    command = _COMMAND.fullmatch(first)
+    if command:
+        name = command.group(1).lower()
+        if name == "id":
+            # Anyone's own chat id — how the owner finds the OWNER_CHAT_ID
+            # that the app's alerts go to (app/providers/alerts.py).
+            return "id", ""
+        if name in ("privacy", "delete"):
+            return name, ""
+        if first == text:
+            # A bare command this bot does not know ("/stop", "/settings") is
+            # never a claim. MEASURED 2026-10-16: "/privacy" went to the API
+            # as a paid text check, before the bot knew the command.
+            return "help", ""
     if text:
         if allowed_link_host(text) is not None:
             return "link", text
@@ -339,6 +403,9 @@ def format_reply(answer: dict) -> str:
         verdict += "  <i>(pehle check kiya hua — is baar kharch $0)</i>"
     if answer.get("truncated"):
         verdict += "\n<i>Jawab lamba tha, beech mein kat gaya — poora web page par.</i>"
+    # In the verdict block, which is reserved before the prose: no length
+    # budget can drop it.
+    verdict += f"\n<i>{AI_TAG}</i>"
 
     # The two lines a skimmer reads. Reserved BEFORE the prose, like the
     # receipts: it is the one part a reader who reads nothing else will read,
@@ -628,6 +695,9 @@ _TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi f
                   "ya video ka link.")
 # Kinds that are never submitted, so never told "this was not checked".
 _NEVER_CHECKED = ("unsupported", "smalltalk", "too_big")
+# Kinds answered at once, before any lock or bound — so never work in flight
+# that would make the chat's next message look sent mid-check.
+_INSTANT = ("help", "id", "privacy", "delete")
 # Said when a wait gives up while the check still runs; the person's next
 # message, whatever it is, collects the answer.
 _STILL_RUNNING = ("⏳ Check abhi bhi chal raha hai. Mujhe koi bhi message bhejiye "
@@ -760,6 +830,12 @@ async def handle_message(
         return
     if kind == "id":             # instant too: nothing to check, nothing spent
         await tg.send(chat_id, f"Your chat id: {chat_id}")
+        return
+    if kind == "privacy":
+        await tg.send(chat_id, privacy_text())
+        return
+    if kind == "delete":
+        await tg.send(chat_id, delete_text())
         return
 
     # Lock BEFORE slot: a message queued behind its own chat must not hold
@@ -905,7 +981,10 @@ class Dispatcher:
         # alone left the third message of three looking like a fresh start
         # (found by a 2,000-interleaving search, seed 120).
         chat_id = (message.get("chat") or {}).get("id")
-        counted = chat_id is not None and classify_message(message)[0] != "help"
+        # FOUND 2026-10-16: every kind but "help" was counted, so "/id" and a
+        # claim arriving together left the claim looking sent mid-check, and
+        # it was never checked.
+        counted = chat_id is not None and classify_message(message)[0] not in _INSTANT
         busy = chat_id is not None and (chat_id in self.pending
                                         or self.in_flight.get(chat_id, 0) > 0)
         if counted:

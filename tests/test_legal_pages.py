@@ -191,3 +191,14 @@ def test_every_answer_is_tagged_as_ai_written():
     """A screenshot of one answer travels without the page around it."""
     foot = PAGE[PAGE.index("function drawFooter("):PAGE.index("// -- transport")]
     assert "AI-written" in foot
+
+
+def test_the_public_address_is_the_first_name_that_is_a_host(monkeypatch):
+    """What the bot's /privacy links to. A ".example.com" entry allows a
+    family of names (main._our_host) but names no one host to link."""
+    from app.api.legal import public_url
+
+    monkeypatch.setattr(settings, "public_hosts", " .trycloudflare.com , Verifier.Example.com. ")
+    assert public_url("privacy") == "https://verifier.example.com/privacy"
+    monkeypatch.setattr(settings, "public_hosts", ".trycloudflare.com")
+    assert public_url("privacy") is None

@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 
+from app.config import settings
 from scripts import telegram_bot as B
 
 # -- classification -----------------------------------------------------------
@@ -1200,3 +1201,117 @@ def test_anonymous_admins_and_channel_posts_are_their_chat_not_a_shared_account(
     assert B.subject_of_message(as_channel) == "tgchat:-100999"
     person = {"chat": {"id": 7}, "from": {"id": 4242}}
     assert B.subject_of_message(person) == "tg:4242"
+
+
+# -- step 5 of the launch: AI on every answer, /privacy, /delete (2026-10-16) --
+# policy-legal.md as its verification corrected it: Anthropic's Usage Policy
+# wants the AI disclosed at the start of each chat SESSION, and a Telegram
+# chat never starts a new one; Telegram's bot terms want an easily reached
+# privacy policy and deletion on request.
+
+def test_help_says_an_ai_answers_who_it_is_for_and_where_data_goes():
+    assert "AI" in B.HELP and "Claude" in B.HELP
+    assert "18" in B.HELP
+    assert "/privacy" in B.HELP
+
+
+def test_every_answer_says_an_ai_wrote_it():
+    assert B.AI_TAG in B.format_reply(_answer())
+
+
+def test_the_ai_line_survives_an_answer_too_long_for_one_message():
+    paragraphs = ["Ek lamba paragraph. " * 30] * 40
+    reply = B.format_reply(_answer(sections=[{"tier": "trusted",
+                                              "markdown": "\n\n".join(paragraphs)}]))
+    assert "paragraph — poora jawab web page par" in reply    # some were dropped
+    assert B.AI_TAG in reply and len(reply) <= B._TG_HARD_LIMIT
+
+
+@pytest.mark.parametrize("text,kind", [("/privacy", "privacy"),
+                                       ("/privacy@SomeVerifierBot", "privacy"),
+                                       ("/delete", "delete"), ("/DELETE", "delete")])
+def test_privacy_and_delete_are_commands(text, kind):
+    assert B.classify_message({"text": text})[0] == kind
+
+
+@pytest.mark.parametrize("text", ["/privacyx", "/deleted it", "/delete_all"])
+def test_lookalikes_are_not_those_commands(text):
+    assert B.classify_message({"text": text})[0] not in ("privacy", "delete")
+
+
+def test_privacy_answers_at_once_with_the_notice_and_costs_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "public_hosts", ".trycloudflare.com,verifier.example.com")
+    monkeypatch.setattr(settings, "answer_retention_days", 45)
+    app, tg, pending = StubApp(), StubTG(), {7: "old-job"}      # even mid-check
+    _handle(_msg(7, "/privacy"), app, tg, pending)
+    [(chat, text)] = tg.sent
+    assert chat == 7 and app.submissions == [] and pending == {7: "old-job"}
+    # The first name that IS a host: ".trycloudflare.com" names none.
+    assert "https://verifier.example.com/privacy" in text
+    for who in ("Anthropic", "Google", "Sarvam", "Claude"):
+        assert who in text
+    assert "45 din" in text and "18" in text and "/delete" in text
+
+
+def test_privacy_without_a_public_name_still_explains(monkeypatch):
+    monkeypatch.setattr(settings, "public_hosts", "")
+    app, tg = StubApp(), StubTG()
+    _handle(_msg(7, "/privacy"), app, tg)
+    assert "Anthropic" in tg.sent[0][1] and "https://" not in tg.sent[0][1]
+
+
+def test_delete_says_how_and_gives_the_contact(monkeypatch):
+    monkeypatch.setattr(settings, "contact_email", "owner@example.com")
+    monkeypatch.setattr(settings, "answer_retention_days", 45)
+    app, tg, pending = StubApp(), StubTG(), {7: "old-job"}
+    _handle(_msg(7, "/delete"), app, tg, pending)
+    [(chat, text)] = tg.sent
+    assert "owner@example.com" in text and "45 din" in text
+    assert app.submissions == [] and pending == {7: "old-job"}
+
+
+def test_delete_without_a_contact_says_one_is_coming():
+    app, tg = StubApp(), StubTG()
+    _handle(_msg(7, "/delete"), app, tg)
+    assert "@" not in tg.sent[0][1] and "privacy notice" in tg.sent[0][1]
+
+
+def test_what_settings_say_is_escaped_in_the_chat(monkeypatch):
+    """The bot sends HTML: markup in a setting would break the message."""
+    monkeypatch.setattr(settings, "contact_email", "a<b>@example.com")
+    app, tg = StubApp(), StubTG()
+    _handle(_msg(7, "/delete"), app, tg)
+    assert "a&lt;b&gt;@example.com" in tg.sent[0][1]
+
+
+@pytest.mark.parametrize("command", ["/help", "/id", "/privacy", "/delete"])
+def test_an_instant_command_never_makes_the_next_message_look_mid_check(command):
+    """FOUND 2026-10-16: the dispatcher counted every message but /help as
+    work in flight, so "/id" and a claim arriving together made the claim
+    look sent mid-check — it was never checked, and the person was told
+    so."""
+    async def scenario():
+        app, tg = StubApp(), StubTG()
+        bot = B.Dispatcher(app, tg)
+        bot.dispatch(_msg(7, command))
+        bot.dispatch(_msg(7, "WHO ne kaha 5G se corona"))
+        await bot.drain()
+        return app
+
+    app = asyncio.run(scenario())
+    assert app.submissions == [("text", {"text": "WHO ne kaha 5G se corona"})]
+
+
+@pytest.mark.parametrize("text", ["/stop", "/settings", "/cancel@SomeVerifierBot", "/privacyx"])
+def test_a_bare_unknown_command_gets_help_never_a_paid_check(text):
+    """MEASURED 2026-10-16: "/privacy" reached the API as a paid text check
+    before the bot knew the command — and so does any command it does not
+    know, since one word passes the small-talk triage as a "claim"."""
+    app, tg = StubApp(), StubTG()
+    _handle(_msg(7, text), app, tg)
+    assert app.submissions == []
+    assert "Information Verifier" in tg.sent[0][1]
+
+
+def test_a_claim_that_starts_with_a_slash_is_still_checked():
+    assert B.classify_message({"text": "/5G se corona phailta hai, sach?"})[0] == "text"

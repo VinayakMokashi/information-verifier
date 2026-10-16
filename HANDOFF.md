@@ -27,12 +27,14 @@ session, no agents in flight; each part is its own pushed commit, listed
 here as it lands. The owner's published name and contact are placeholders
 until Vinayak says what to publish. Landed: 60beff7 (the limiter forgets
 who asked after the day it counts — found while drafting the notice; it
-kept IP addresses in memory for weeks); the pages themselves (`/privacy`,
-`/terms`, served by app/api/legal.py with the periods read from settings;
-the AI + 18+ line beside Check; "AI-written" on every answer).
-Next: the bot's AI line on every answer, /privacy and /delete; a way for
-the owner to honour a deletion request (scripts/forget.py); the app
-manifest + icons + share target; then PROJECT_PLAN §7/§11.
+kept IP addresses in memory for weeks); dfb16b7 (`/privacy`, `/terms`,
+served by app/api/legal.py with the periods read from settings; the AI +
+18+ line beside Check; "AI-written" on every answer); the bot (the AI line
+on every answer and in /start, /privacy, /delete; a bare unknown /command
+gets help instead of being a PAID check — measured; "/id" no longer makes
+the next message look mid-check).
+Next: a way for the owner to honour a deletion request (scripts/forget.py);
+the app manifest + icons + share target; then PROJECT_PLAN §7/§11.
 
 **Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
 63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB

@@ -48,6 +48,19 @@ def _operator() -> str:
     return html.escape(settings.operator_name.strip()) or "an individual"
 
 
+def public_url(path: str) -> str | None:
+    """https://<the public name>/<path>, for a surface that is not this page
+    (the bot's /privacy). The first PUBLIC_HOSTS entry that names a host: a
+    ".example.com" entry names none. None when there is no public name."""
+    for entry in settings.public_hosts.split(","):
+        host = entry.strip().lower()
+        if host.endswith("."):
+            host = host[:-1]        # one trailing dot is the same name (main.py)
+        if host and not host.startswith("."):
+            return f"https://{host}/{path}"
+    return None
+
+
 def render(name: str) -> str:
     page = (_HERE / name).read_text(encoding="utf-8")
     values = {
