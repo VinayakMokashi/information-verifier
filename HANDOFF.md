@@ -58,13 +58,21 @@ deleted check's stream is not replayed; working files under data/tmp,
 emptied at startup); S5-14 + S5-15 (the notice says "we delete OUR
 copy"; the iOS Install button only where Add to Home Screen exists). ALL
 18 findings are closed (ae85077).
-**In flight:** an adversarial RE-CHECK of those fixes and of step 4's
-never-reviewed runner (serve_forever.py) and runbook (go-live.md) — one
-agent, writing each finding as it goes to
-[docs/research/2026-10-16/review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md).
-"status: in progress" at its top means it was interrupted: re-run it,
-seeded from the file. Meanwhile: PROJECT_PLAN §7/§0 for the review. Then
-fix what the re-check finds; then the owner's list below; then WhatsApp. Each: failing test
+**The RE-CHECK of those fixes and of step 4's runner and runbook is
+COMPLETE** (2026-10-17):
+[docs/research/2026-10-16/review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md),
+13 findings (4 medium, 9 low). FIXED: F-12 1ae3cc3 (the bot's notice:
+"our copy", Sarvam by the switch); F-4 + F-8 5acbbad (the supervisor in
+its own job first; a stop file for an orderly unattended stop); F-1
+1f23fc2 (two more real-database copies deleted; scripts/find_db_copies.py
+finds copies by what they are); F-2 + F-6 + F-9 c584e1d (bot: chats let
+go the moment their day ends; the restart hand-over locked and counted;
+one bot at a time; scripts/bot_explorer_restarts.py). NEXT: F-3, F-7,
+F-11, F-13 (store: scratch folder per database file; the WAL truncate
+with a short timeout and an honest result; the one-time VACUUM guarded;
+the ledger writer knows restored rows); then F-5 + F-10 (go-live.md: the
+cloudflared ImagePath step; what a fallback service account needs). Then
+PROJECT_PLAN §7; then the owner's list below; then WhatsApp. Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 
