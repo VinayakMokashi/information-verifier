@@ -6,7 +6,7 @@
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log, §11 the to-do
 > list) and [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-10-15**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-10-16**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -16,22 +16,23 @@
 > If a session ended mid-task (usage limit, network drop), start here.
 > Verify first (CLAUDE.md, "Interruptions"), then continue from **Next**.
 
-**Task in hand (2026-10-15):** §11 A–C — lay out the public-launch choices,
-ask Vinayak to decide, then build; tell him early what WhatsApp needs.
+**Task in hand (2026-10-16):** §11 A–C — the public launch, built in the
+order of the decision brief's §6; then WhatsApp; then the rest of §11.
 
-**Done, all pushed:** e4a9822 (no key in any `Settings` repr, §11 17) ·
+**NOW — the brief's §6 step 5 (step 4 waits on owner actions below):** a
+privacy notice and terms pages, an "answers are written by AI" line on
+every surface, an 18+ line beside submit, the bot's /privacy, and the
+installable-app manifest + icons (no service worker). Built in this
+session, no agents in flight; each part is its own pushed commit, listed
+here as it lands. The owner's published name and contact are placeholders
+until Vinayak says what to publish.
+
+**Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
 63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
 Telegram file gets the real reason) · ee49622 (docs; translated Hindi lookups
 measured, 3/12 → 7/12) · ca76538 (Facebook reel and share links resolve in the
-app — they never did) · ad79c00 (the research so far, persisted in
+app — they never did) · ad79c00 (the research, persisted in
 [docs/research/2026-10-15/](docs/research/2026-10-15/README.md)).
-
-**In flight — each writes its own file as it goes:**
-- WhatsApp research → `docs/research/2026-10-15/whatsapp.md`
-- verifiers → `docs/research/2026-10-15/{cloud-hosting,home-tunnel,limits-budget,policy-legal}.verification.md`
-- in the session's workflow (its results reach only a session journal, so
-  they are copied into the topic files when it finishes): verifiers for
-  `ytdlp-cloud-ips.md` and `audit-ops.md`, then a critic.
 
 A research file whose top says **"status: in progress"** means its agent died:
 re-run that one task, seeded from the file.
@@ -57,8 +58,8 @@ cookie — 3 checks a day per web device, the bot and this machine never
 challenged (b6daec5, f724156, b79bb2a; run end to end in real headless
 Chrome with Cloudflare's test keys).
 
-**NOW — the brief's §6 step 3: restarts, the ledger, monitoring**
-([audit-ops.md](docs/research/2026-10-15/audit-ops.md)). DONE: OPS-06
+**DONE — the brief's §6 step 3: restarts, the ledger, monitoring**
+([audit-ops.md](docs/research/2026-10-15/audit-ops.md)): OPS-06
 b7d4ced (a check always ends — saved, billed, its stream closed — and a
 5-minute sweep fails rows stuck mid-flight that nothing here still runs);
 OPS-04 2b5a261 (a running check's bill so far is checkpointed onto its row,
@@ -85,10 +86,10 @@ restart or a sweep that failed checks — to OWNER_CHAT_ID, each kind at
 most hourly; the bot's /id tells anyone their chat id). Step 3's remaining
 audit items are for a cloud host or later steps (OPS-09 pool starvation on
 1 vCPU, OPS-21 config from the working directory — the service recipe of
-step 4 must set it, OPS-26 slow memory growth). NEXT (4) running 24/7 here — the domain,
-cloudflared as a service, auto-start; (5) privacy notice, terms, the app
-manifest; then WhatsApp. Each step: failing test first, commit + push,
-update this section.
+step 4 must set it, OPS-26 slow memory growth). Step (4), running 24/7
+here — the domain, cloudflared as a service, auto-start — needs the owner
+actions below first; (5) is NOW; then WhatsApp. Each step: failing test
+first, commit + push, update this section.
 
 **Going live needs, in .env:** `PUBLIC_HOSTS=<the .com>` — without it every
 visitor is refused (the server prints each refused name once) — and
