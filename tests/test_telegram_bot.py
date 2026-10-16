@@ -942,18 +942,52 @@ def _probe(base: str, status: int, body: dict | None = None):
     return asyncio.run(run()), seen
 
 
-def test_the_startup_probe_asks_the_apps_real_health_route():
+_READY = {"status": "ready", "mode": "real",
+          "checks": {"database": True, "keys": True, "ffmpeg": True}}
+
+
+def test_the_startup_probe_asks_the_apps_real_ready_route():
     """MEASURED 2026-09-29, going live: the probe asked APP_BASE/../health,
     which resolves to /api/health — a 404 — and passed anyway, because any
     HTTP response counted as "up". Something else on port 8000 would have
-    passed too."""
-    up, seen = _probe("http://127.0.0.1:8000/api/v1", 200, {"status": "ok"})
-    assert seen == ["/health"]
+    passed too. Since OPS-18 it asks /ready, which knows the mode."""
+    up, seen = _probe("http://127.0.0.1:8000/api/v1", 200, _READY)
+    assert seen == ["/ready"]
     assert up is True
     # APP_BASE can point at an app mounted under a prefix (a proxy path).
-    up, seen = _probe("http://host/verifier/api/v1/", 200, {"status": "ok"})
-    assert seen == ["/verifier/health"]
+    up, seen = _probe("http://host/verifier/api/v1/", 200, _READY)
+    assert seen == ["/verifier/ready"]
     assert up is True
+
+
+def test_the_bot_refuses_the_free_demo_server():
+    """PROJECT_PLAN §11 19 / audit-ops OPS-18: the demo server answered the
+    constant /health too, and a bot started beside it would have sent people
+    its simulated verdicts as real."""
+    import httpx
+
+    def handler(request):
+        return httpx.Response(200, json={**_READY, "mode": "demo"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return (await B.app_status(http, "http://127.0.0.1:8000/api/v1"),
+                    await B.app_is_up(http, "http://127.0.0.1:8000/api/v1"))
+
+    assert asyncio.run(run()) == ("demo", False)
+
+
+def test_an_app_that_is_not_ready_is_told_apart_from_an_absent_one():
+    import httpx
+
+    def handler(request):
+        return httpx.Response(503, json={**_READY, "status": "not ready"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            return await B.app_status(http, "http://127.0.0.1:8000/api/v1")
+
+    assert asyncio.run(run()) == "not ready"
 
 
 def test_a_404_from_the_probe_is_not_an_app_that_is_up():

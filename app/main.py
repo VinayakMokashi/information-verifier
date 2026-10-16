@@ -6,11 +6,14 @@ Run locally:
 Interactive API docs at http://127.0.0.1:8000/docs
 """
 import re
+import shutil
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 # The very function Starlette's router matches routes with, so the raw ASGI
 # middlewares below judge the same path the router will route (review R4).
@@ -23,7 +26,7 @@ from app.api.local import names_this_machine
 from app.api.routes import router
 from app.api.stream import router as stream_router
 from app.config import settings
-from app.store.db import init_db
+from app.store.db import get_conn, init_db
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -362,7 +365,49 @@ app.include_router(dashboard_router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    """Liveness only: the process answers. Whether a check would WORK here
+    is /ready's question."""
     return {"status": "ok"}
+
+
+# /ready's own deadline for a database write and read-back: past it, the
+# pool /reports uses is starved or the database is held, and that is "not
+# ready" however healthy the process looks.
+_READY_TIMEOUT_S = 3.0
+
+
+def _probe_database() -> bool:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute("INSERT OR REPLACE INTO ready_probe (id, at) VALUES (1, ?)", (now,))
+        row = conn.execute("SELECT at FROM ready_probe WHERE id = 1").fetchone()
+    return row is not None and row["at"] == now
+
+
+@app.get("/ready")
+async def ready() -> JSONResponse:
+    """Would a check actually work here? REPRODUCED (audit-ops OPS-18): the
+    constant /health stayed green while the database was locked, the pool
+    starved (/health 10 ms while /reports took 19 s), the keys were missing
+    — or while it was the free DEMO server, which the bot would then wire to
+    people as if real (PROJECT_PLAN §11 19). Booleans and the mode only:
+    what this server spends is the dashboard's business, not a probe's."""
+    import asyncio
+
+    try:
+        database = await asyncio.wait_for(asyncio.to_thread(_probe_database),
+                                          _READY_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 — any failure is "not ready"
+        print(f"[ready] database probe failed: {type(exc).__name__}")
+        database = False
+    checks = {"database": bool(database),
+              "keys": bool(settings.anthropic_api_key),
+              "ffmpeg": bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))}
+    ok = all(checks.values())
+    return JSONResponse({"status": "ready" if ok else "not ready",
+                         "mode": "demo" if settings.demo_mode else "real",
+                         "checks": checks},
+                        status_code=200 if ok else 503)
 
 
 # Mounted LAST so the API routes above always win; "/" then serves the

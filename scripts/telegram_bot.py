@@ -998,17 +998,31 @@ async def check_token(http: httpx.AsyncClient, token: str) -> tuple[bool, str]:
     return True, f"@{me.get('username', '?')} ({me.get('first_name', '')})"
 
 
-async def app_is_up(http: httpx.AsyncClient, base: str = APP_BASE) -> bool:
-    """Is OUR app serving? /health lives at the site root, not under the API
-    prefix. MEASURED 2026-09-29: `{base}/../health` resolved to /api/health,
-    a 404, and passed anyway because any response counted as "up" — so did
-    whatever else might have been listening on the port."""
+async def app_status(http: httpx.AsyncClient, base: str = APP_BASE) -> str:
+    """"ready", "demo", "not ready" or "unreachable", from OUR app's /ready.
+
+    /ready lives at the site root, not under the API prefix. MEASURED
+    2026-09-29: `{base}/../health` resolved to /api/health, a 404, and passed
+    anyway because any response counted as "up" — so did whatever else might
+    have been listening on the port: only our app's own answer counts. And
+    the FREE demo server answers too, with simulated verdicts (audit-ops
+    OPS-18, PROJECT_PLAN §11 19): it says "demo", and the bot refuses it.
+    """
     root = base.rstrip("/").removesuffix("/api/v1")
     try:
-        resp = await http.get(f"{root}/health")
-        return resp.status_code == 200 and resp.json().get("status") == "ok"
+        resp = await http.get(f"{root}/ready")
+        body = resp.json()
     except (httpx.HTTPError, ValueError, AttributeError):
-        return False
+        return "unreachable"
+    if not isinstance(body, dict) or body.get("status") not in ("ready", "not ready"):
+        return "unreachable"                     # some other server answered
+    if body.get("mode") == "demo":
+        return "demo"
+    return "ready" if resp.status_code == 200 and body["status"] == "ready" else "not ready"
+
+
+async def app_is_up(http: httpx.AsyncClient, base: str = APP_BASE) -> bool:
+    return await app_status(http, base) == "ready"
 
 
 async def main() -> None:
@@ -1033,10 +1047,19 @@ async def main() -> None:
             print(">> --check-token: nothing started, nothing spent.")
             return
 
-        if not await app_is_up(http):
+        status = await app_status(http)
+        if status == "demo":
+            print(f"The app at {APP_BASE} is the FREE DEMO server - its answers are "
+                  "simulated, and the bot would send them to people as real. Start "
+                  "the real app instead (start.cmd).")
+            return
+        if status == "unreachable":
             print(f"The app is not reachable at {APP_BASE} - start it first:\n"
                   "  .venv\\Scripts\\python.exe -m uvicorn app.main:app")
             return
+        if status == "not ready":
+            print(">> WARNING: the app says it is NOT READY (see its /ready: the "
+                  "database, its keys or ffmpeg). Checks may fail until that is fixed.")
 
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0

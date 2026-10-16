@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS daily_budget (
     committed_micro  INTEGER NOT NULL
 );
 
+-- One row /ready writes and reads back: a database that cannot take a
+-- write is not ready, however fast a read answers (audit-ops OPS-18).
+CREATE TABLE IF NOT EXISTS ready_probe (
+    id  INTEGER PRIMARY KEY,
+    at  TEXT NOT NULL
+);
+
 -- What a pasted link SAID (caption + subtitles or ASR transcript), keyed by
 -- the platform's own video id — known for free at resolve time, before any
 -- download or ASR is bought. One viral reel forwarded by fifty people used to

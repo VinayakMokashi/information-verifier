@@ -162,6 +162,9 @@ def apply_fake_stages() -> None:
     # offline by design. Empty, not dummy — empty is how it is switched off.
     settings.turnstile_site_key = ""
     settings.turnstile_secret_key = ""
+    # Says so on /ready, so the Telegram bot refuses to send people its
+    # simulated verdicts (audit-ops OPS-18; PROJECT_PLAN §11 19).
+    settings.demo_mode = True
 
     # Sarvam and Google read settings at call time, so the lines above cover
     # them. Anthropic does NOT: providers/llm.py builds one client at import,

@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # refused: a DNS-rebinding page sends its own name (review R5). Going
     # live, put the domain here — the server prints any name it refused.
     public_hosts: str = ""
+    # True only in the FREE demo server (scripts/fake_stages.apply_fake_stages):
+    # /ready says "demo", and the bot refuses to wire people to it.
+    demo_mode: bool = False
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
 

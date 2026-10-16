@@ -1954,7 +1954,10 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    (§7). Built: each Telegram user is counted as themselves (020e26f; the
    anonymous-admin and post-as-channel stand-ins, 2d3b5c8), with 5 paid
    checks a day each (55d3de0), inside the $1-a-day budget (20e882d).
-19. **The bot's own startup check accepts the demo server.** `app_is_up`
+19. ~~**The bot's own startup check accepts the demo server.**~~ **DONE
+   2026-10-16 with OPS-18**: `/ready` says `mode: demo` for the free demo
+   (fake_stages sets it) and the bot refuses it at startup. The original
+   note: `app_is_up`
    wants `{"status": "ok"}`, which `serve_demo.py` also returns, so a bot
    started by hand next to a running demo would send fake verdicts.
    `start.ps1` guards by process; the structural fix is a `/health` that

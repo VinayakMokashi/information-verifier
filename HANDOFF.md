@@ -67,7 +67,9 @@ database: an OS lock beside it, taken before the startup sweep — a second
 copy now refuses instead of failing the first one's checks; share_demo.ps1
 asks for the running app to be closed) 32462f1; OPS-07 + R12 (the bot's
 pending checks persist in data/bot_pending.json and a restarted bot
-delivers them). NEXT: OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
+delivers them) 0ba4f62; OPS-18 + §11 19 (`/ready`: a database write+read
+on the /reports pool within 3 s, the key, ffmpeg, and real|demo — the bot
+refuses the demo). NEXT: OPS-19 no monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
 OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,

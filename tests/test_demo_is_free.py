@@ -17,6 +17,9 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
     monkeypatch.setattr(settings, "google_factcheck_api_key", "real-google-key")
     monkeypatch.setattr(settings, "turnstile_site_key", "real-site-key")
     monkeypatch.setattr(settings, "turnstile_secret_key", "real-turnstile-secret")
+    # Patched first so the undo restores it: apply_fake_stages assigns it
+    # directly, and it leaked "demo" into every later test's /ready.
+    monkeypatch.setattr(settings, "demo_mode", False)
 
     # apply_fake_stages assigns module attributes directly, so snapshot them
     # rather than reloading the modules (which would orphan routes' _repo).
@@ -43,6 +46,8 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         from app.providers import turnstile
 
         assert not turnstile.enabled()
+        # And it says it is the demo, so the bot refuses it (OPS-18).
+        assert settings.demo_mode is True
 
         # Assert on the value that actually goes ON THE WIRE. The Anthropic
         # client is built once at import, so blanking `settings` alone left
