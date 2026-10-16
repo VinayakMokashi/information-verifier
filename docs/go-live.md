@@ -161,5 +161,10 @@ started.
 - **Everything stops:** sign in, run `start.cmd`, and read its windows.
 - **One part keeps restarting:** your phone gets an alert. Read
   `logs\app-<today>.log` or `logs\bot-<today>.log`.
-- **Taking it offline:** Task Scheduler → "Information Verifier" → End,
-  then `Stop-Service cloudflared`. Its children stop with it.
+- **Taking it offline:** in the project folder,
+  `New-Item data\serve_forever.stop`. The supervisor stops the bot, lets
+  checks already running finish (up to 5 minutes), stops the app, and its
+  task ends. `logs\supervisor-<today>.log` then says "stopped". Then
+  `Stop-Service cloudflared`. Task Scheduler's **End** is a hard kill:
+  checks in flight are lost but still paid for, so use it only if the stop
+  file is ignored.

@@ -41,6 +41,8 @@ _MAX_PAUSE_S = 300.0
 _STABLE_S = 600.0            # a run this long resets the pause
 _TICK_S = 1.0
 _STOP_GRACE_S = 15.0         # then it is killed
+_ORDERLY_GRACE_S = 300.0     # a stop file: a long check gets to finish (~5 min max)
+STOP_FILE = ROOT / "data" / "serve_forever.stop"
 _ALREADY_RUNNING = 3         # this script's own exit code when a copy already runs
 _HEALTH = "http://127.0.0.1:8000/health"
 _WINDOWS = os.name == "nt"
@@ -117,19 +119,40 @@ def _kill_on_close_job():
     return job
 
 
-def _contain(proc: subprocess.Popen) -> None:
-    if not _WINDOWS:
-        return
+def _assign(handle) -> bool:
     import ctypes
     from ctypes import wintypes
 
     if _job[0] is None:
         _job[0] = _kill_on_close_job()
     if _job[0] is None:
-        return
+        return False
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
-    kernel32.AssignProcessToJobObject(_job[0], int(proc._handle))
+    return bool(kernel32.AssignProcessToJobObject(_job[0], handle))
+
+
+def contain_self() -> bool:
+    """Put THIS process in the kill-on-close job before it starts anything,
+    so every descendant is born inside it. MEASURED (re-check F-4): putting
+    each child in after Popen lost a race against the venv's python.exe — a
+    launcher that starts the interpreter at once — and in about half of cold
+    starts the interpreter, and the ffmpeg it runs, were born outside the
+    job and outlived a hard kill. -> whether it took."""
+    if not _WINDOWS:
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    return _assign(kernel32.GetCurrentProcess())
+
+
+def _contain(proc: subprocess.Popen) -> None:
+    """Belt and braces for a child: already inside if contain_self() took."""
+    if _WINDOWS:
+        _assign(int(proc._handle))
 
 
 def process_alive(pid: int) -> bool:
@@ -245,10 +268,26 @@ def prune_logs(logs: Path, today: date) -> int:
 
 class Supervisor:
     def __init__(self, app: Child, bot: Child, *, ready=_app_answers, notify=None,
-                 now=time.monotonic):
+                 now=time.monotonic, stop_file: Path | None = None):
         self.app, self.bot = app, bot
         self.ready, self.now = ready, now
         self._notify = notify
+        # Unattended, nothing can send it a Ctrl+C: Task Scheduler's End and a
+        # reboot are hard kills (re-check F-8). This file is a stop it can
+        # receive — taken by an orderly stop that lets running checks finish.
+        self.stop_file = stop_file
+        self._orderly = False
+
+    def _stop_requested(self) -> bool:
+        if self.stop_file is None or not self.stop_file.exists():
+            return False
+        try:
+            self.stop_file.unlink()          # consumed: the next boot starts
+        except OSError:
+            pass
+        self._log(f"stop requested ({self.stop_file.name})")
+        self._orderly = True
+        return True
 
     def _log(self, text: str) -> None:
         stamp = datetime.now()
@@ -294,7 +333,7 @@ class Supervisor:
     def run(self, stop: threading.Event) -> None:
         last_day = None
         try:
-            while not stop.is_set():
+            while not stop.is_set() and not self._stop_requested():
                 if date.today() != last_day:
                     last_day = date.today()
                     prune_logs(self.app.logs, last_day)
@@ -306,7 +345,10 @@ class Supervisor:
         finally:
             self._log("stopping")
             self.bot.stop()              # first: no new checks submitted
-            self.app.stop()
+            # An orderly stop gives running checks time to finish: uvicorn's
+            # graceful shutdown waits for them (their stream connections).
+            self.app.stop(_ORDERLY_GRACE_S if self._orderly else None)
+            self._log("stopped")
 
 
 def main() -> int:
@@ -316,6 +358,9 @@ def main() -> int:
     from scripts.render import force_utf8_stdout
 
     force_utf8_stdout()
+    # First, before any child exists: every descendant is born in the job
+    # (re-check F-4).
+    contain_self()
     lock = str(ROOT / "data" / "serve_forever")
     (ROOT / "data").mkdir(exist_ok=True)
     try:
@@ -323,12 +368,14 @@ def main() -> int:
     except instance.AlreadyRunning:
         print("[serve_forever] already running — not starting a second copy.")
         return _ALREADY_RUNNING
+    STOP_FILE.unlink(missing_ok=True)    # a stale one must not stop this boot
     stop = threading.Event()
     for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
         if hasattr(signal, name):
             signal.signal(getattr(signal, name), lambda *_: stop.set())
     try:
-        Supervisor(Child("app", app_argv()), Child("bot", bot_argv())).run(stop)
+        Supervisor(Child("app", app_argv()), Child("bot", bot_argv()),
+                   stop_file=STOP_FILE).run(stop)
     finally:
         instance.release(lock)
     return 0

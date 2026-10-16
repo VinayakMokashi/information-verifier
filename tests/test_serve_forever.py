@@ -153,6 +153,101 @@ def test_old_logs_are_deleted_and_the_rest_kept(tmp_path):
     assert not old.exists() and recent.exists() and other.exists()
 
 
+def test_a_stop_file_stops_both_in_order_and_is_consumed(tmp_path, quick):
+    """Re-check F-8: under Task Scheduler nothing can send the supervisor a
+    Ctrl+C — End and a reboot are hard kills — so its ordered stop never
+    ran. A file it watches is a stop it can receive unattended."""
+    stop_file = tmp_path / "serve_forever.stop"
+    app = S.Child("app", _py("import time; time.sleep(60)"), tmp_path)
+    bot = S.Child("bot", _py("import time; time.sleep(60)"), tmp_path)
+    supervisor = S.Supervisor(app, bot, ready=lambda: True, notify=lambda k, t: None,
+                              stop_file=stop_file)
+    thread = threading.Thread(target=supervisor.run, args=(threading.Event(),),
+                              daemon=True)
+    thread.start()
+    try:
+        assert _wait(lambda: app.running() and bot.running())
+        stop_file.write_text("", encoding="utf-8")
+        thread.join(30)
+        assert not thread.is_alive(), "the stop file did not stop it"
+        assert not app.running() and not bot.running()
+        assert not stop_file.exists(), "a stale stop file would stop the next boot"
+        assert "stop requested" in _log(tmp_path, "supervisor")
+    finally:
+        app.stop(1)
+        bot.stop(1)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows job object")
+def test_the_supervisor_is_inside_its_job_before_it_starts_anything(tmp_path):
+    """The deterministic half of F-4 (the race below is only probable):
+    main() puts the supervisor itself in the kill-on-close job FIRST, so
+    every descendant is born inside it. In a subprocess — never pytest's
+    own process."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import ctypes, sys\n"
+        "from ctypes import wintypes\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "from scripts import serve_forever as S\n"
+        "getattr(S, 'contain_self', lambda: None)()\n"
+        "k = ctypes.WinDLL('kernel32', use_last_error=True)\n"
+        "k.IsProcessInJob.argtypes = (wintypes.HANDLE, wintypes.HANDLE,"
+        " ctypes.POINTER(wintypes.BOOL))\n"
+        "k.GetCurrentProcess.restype = wintypes.HANDLE\n"
+        "inside = wintypes.BOOL(0)\n"
+        "if S._job[0] is not None:\n"
+        "    k.IsProcessInJob(k.GetCurrentProcess(), S._job[0], ctypes.byref(inside))\n"
+        "print('inside' if inside.value else 'outside', flush=True)\n", encoding="utf-8")
+    out = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True,
+                         timeout=60).stdout
+    assert out.strip() == "inside", out
+
+
+_GRANDPARENT = (
+    "import os, subprocess, sys, time\n"
+    "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+    "print(kid.pid, flush=True)\n"
+    "time.sleep(120)\n")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows job object")
+def test_nothing_the_children_start_outlives_the_supervisor(tmp_path):
+    """REPRODUCED by re-check F-4: the venv's python.exe is a launcher that
+    starts the interpreter at once, and a child was put in the job only
+    AFTER Popen returned — so in about half of cold starts the interpreter
+    (and the ffmpeg it runs) were born outside it, and outlived a hard kill
+    of the supervisor. Six cold starts: a grandchild must never survive."""
+    holder = tmp_path / "holder.py"
+    holder.write_text(
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "from pathlib import Path\n"
+        "from scripts import serve_forever as S\n"
+        "getattr(S, 'contain_self', lambda: None)()   # what main() does first\n"
+        f"child = S.Child('app', [sys.executable, '-c', {_GRANDPARENT!r}], Path(sys.argv[1]))\n"
+        "child.start(0.0)\n"
+        "time.sleep(120)\n", encoding="utf-8")
+    survivors = []
+    for run in range(6):
+        logs = tmp_path / f"logs{run}"
+        supervisor = subprocess.Popen([sys.executable, str(holder), str(logs)])
+        try:
+            assert _wait(lambda: "app-" in "".join(p.name for p in logs.glob("*"))
+                         and _log(logs, "app").strip(), timeout=20), "no grandchild"
+            grandchild = int(_log(logs, "app").split()[-1])
+            supervisor.kill()                  # a hard kill: no clean-up code runs
+            supervisor.wait(10)
+            if not _wait(lambda: not S.process_alive(grandchild), timeout=10):
+                survivors.append(grandchild)
+        finally:
+            if supervisor.poll() is None:
+                supervisor.kill()
+    for pid in survivors:                       # never leave strays behind
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+    assert not survivors, f"{len(survivors)} of 6 grandchildren outlived the supervisor"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the Windows job object")
 def test_children_die_with_the_supervisor_however_it_dies(tmp_path):
     """Task Scheduler's "End", a crash or a closed window kills the
