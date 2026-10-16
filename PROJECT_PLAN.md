@@ -88,7 +88,11 @@ credential reaches any printed line (§11 17 closed, and the bot token's own
 leak through error text); translated Hindi lookups measured.
 **2026-10-15/16: the pre-public blockers are fixed** — per-person limits,
 the $1-a-day budget that gets cheaper as it drains, no cross-site paid
-checks, no oversized-post freeze — and reviewed twice (§7). **986 tests.**
+checks, no oversized-post freeze — and reviewed twice (§7). Later on
+2026-10-16: checking pauses at no cost when Anthropic refuses for money,
+the dashboard shows the day's money, and a web visitor's check needs a
+Cloudflare Turnstile pass, which earns the device cookie that carries 3
+checks a day (§7). **1074 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -431,6 +435,46 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-10-16 (later) — Paused for money; the money on the dashboard; Turnstile and the device cookie
+
+- **A refusal for MONEY pauses checking, and costs nothing** (f545885). A
+  spend limit, the tier's monthly cap, a billing problem or an empty
+  balance fails every check until someone pays, and "failed requests aren't
+  charged" (Anthropic's billing article). Before: a spend-limit 400 was
+  taken for a whitelist rejection and retried, the open-web pass tried
+  again, the reader was told "try again in a few minutes", and each such
+  check KEPT its reservation, so a handful drained the day's $1 and a
+  top-up would still read "budget used up" until midnight. Now: one call;
+  "Checking is paused for now. Please try again later"; the reservation
+  settles at the recorded cost (slot and allowance back at $0); new paid
+  checks get 503 up front for 10 minutes, then one probes; cached repeats
+  stay free; the console names Anthropic's reason. Reviewing it found its
+  own flaw (dbd5f08): an answer already streamed was failed as "paused";
+  now it is kept, marked cut short, never cached.
+- **The dashboard shows the day's money** (42d1dd9): "$0.72 of $1.00", what
+  it still buys, "Paused", the 40-check count as a backstop note — and its
+  reads moved off the event loop. The test's first draft timed /health
+  in-process and passed AGAINST the bug: a blocked loop runs nothing else,
+  the test's own timer included. It now measures the loop's own lag
+  (1.04 s before, under 0.5 s after).
+- **Turnstile and the device cookie** (b6daec5, f724156, b79bb2a), as
+  decided: a web visitor's paid check needs a Cloudflare Turnstile pass,
+  verified BEFORE any slot, money or place in line is taken; a pass earns
+  the signed `vd` cookie, and the device is the person — 3 checks a day.
+  The bot and this machine are never challenged. The cookie's HMAC key is
+  made fresh at each start: the counts it keys live in memory and reset on
+  restart anyway, so a persistent key would buy nothing. Cloudflare's test
+  keys were read off its own page, not remembered. Run end to end in REAL
+  headless Chrome against Cloudflare's real siteverify with the test
+  secret (free): two checks, two fresh tokens, siteverify True twice, one
+  device counted twice. **Lesson: `--virtual-time-budget` races a third
+  party's own timeouts** — the widget errored under it; the harness now
+  holds the page's load event open on an image the scratch server answers
+  when the driver is done, in real time. (A later failure was simply the
+  network being down — the script "couldn't load" — read before fixing.)
+- Going live needs `PUBLIC_HOSTS` and both Turnstile keys in .env
+  (HANDOFF §0); startup warns about the second.
+
 ### 2026-10-16 — The pre-public blockers fixed; the fixes reviewed; the review's fixes re-checked
 
 Built in the brief's order, each test-first (the commit messages carry the
@@ -469,8 +513,9 @@ phases, *admit* before any free work (only the person's place in line) and
 *fund* right before the first paid step (5f8e7db; 5 of 5 slots held → 0).
 R15: the limiter held its lock across SQLite writes while the event loop
 took the same lock — under another writer, /health 7.02 s → 0.02 s
-(3bd7772). Fixed: R1–R3, R6, R9, R11, R13–R15. Open: R4, R5, R7, R8.
-Deferred: R10, R12 (§11 25–26).
+(3bd7772). Fixed: R1–R3, R6, R9, R11, R13–R15; later the same day R4
+(456701b), R5 (786c046), R7 (478a2c1) and R8 (ba0653e). Deferred: R10,
+R12 (§11 25–26).
 
 **Re-running the reviewer's own scripts against those fixes found five
 more** — "review the fix", again:
@@ -1967,6 +2012,14 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    complementary: for a BOT-named person only (never an address, where it
    would hand one NAT neighbour another's job), return the running job's id
    with the 429, so the bot can resume and deliver it.
+27. **The address brakes do not apply on top of a device cookie** (the
+   research's L3, deferred 2026-10-16). With a valid `vd` cookie the device
+   IS the person (3 a day); the per-address limits (IPv6 /64 5, IPv4 20)
+   then no longer count, so clearing cookies and solving Turnstile again
+   buys 3 more — bounded by that friction, the hourly limit and the $1 day.
+   Counting both (device AND address, all or none) touches every give-back
+   path (refund, the free cache hit, both rollbacks), so it is its own step,
+   with its own review.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

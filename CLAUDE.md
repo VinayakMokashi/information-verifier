@@ -62,7 +62,10 @@ EmbeddingGemma. Startup no longer imports torch.
 
 Secrets live only in `.env` (git-ignored): `ANTHROPIC_API_KEY`,
 `GOOGLE_FACTCHECK_API_KEY`, `SARVAM_API_KEY`, `HF_TOKEN`, `DB_PATH`,
-`TELEGRAM_BOT_TOKEN`.
+`TELEGRAM_BOT_TOKEN`; going live, also `TURNSTILE_SITE_KEY`,
+`TURNSTILE_SECRET_KEY` and the setting `PUBLIC_HOSTS` (HANDOFF §0). The test
+suite never loads a real key (dummies, set in `tests/conftest.py` before the
+app is imported; Turnstile left off).
 
 Run the real server with **one worker**: the stream registry and the rate
 limiter are both in-memory.

@@ -43,80 +43,45 @@ research is complete and verified (except `whatsapp.md`, complete but
 unverified), and the brief is corrected:
 [docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md).
 
-**Building (resume here):** blocker 1 DONE 50dcf3b (a 25 MB text post froze
-the server 6–10 s; now refused in 0.6 s) · blocker 2 DONE (other sites'
-pages can no longer submit paid checks — proven in real headless Chrome) ·
-blockers 3+5 DONE (checks counted per PERSON: the bot names each Telegram
-user, honoured only from this machine; one check in flight per person; a
-refund keeps the attempt — live-checked through real uvicorn) · per-person
-DAILY allowances DONE (Telegram 5, WhatsApp 5, web device 3; by address
-until device cookies: IPv6 /64 5, IPv4 20 — in memory, never on disk) · a
-reviewer agent is checking all of today's fixes → it writes
-`docs/research/2026-10-15/review-blockers.md` as it goes · the $1/day
-DOLLAR budget DONE (each check reserves its kind's worst case — text $0.20,
-image $0.25, reel/voice $0.30 — and settles at its real cost; the database
-refuses past $1; the 5-checks count is now a 40 backstop) — blocker 1
-closed · cheaper as the day drains DONE (under 40% left: no open-web pass;
-under 15%: text only, answered from published fact-checks or an honest
-"budget used up" — never cached) and repeats served free even at zero ·
-the REVIEWER of these fixes (`docs/research/2026-10-15/review-blockers.md`)
-found 15 issues (its file is COMPLETE). FIXED: R1 5f8e7db (free work holds
-nothing), R2+R3 2f4d825 (share links: no port, no line breaks, one
-deadline), R6+R11 05418fa (release by token, before the answer shows),
-R9+R13+R14 2d3b5c8 (IPv4 may run 3 at once; Telegram sender_chat; free
-repeats count toward the hour), R15 3bd7772 (the limiter's lock guards
-memory only, never SQLite I/O — /health under a held write: 7.02 s →
-0.02 s, real uvicorn) · RE-CHECKED with the reviewer's own scripts
-(2026-10-16; the review file's "re-checked" section), which found five
-more, all fixed: dc3ebd4 (the suite held the REAL keys — dummy keys now,
-and it passes with no .env), f4f00b1 (a test for a link cancelled while
-funding), 4f6be5c (a rollback never on the event loop), 2147412 (release
-needs the claim's token — R11 had survived as the no-token call), 56c3990
-(a second cancellation cannot strand a person). PROJECT_PLAN §7 has the
-entry; §11 25–26 hold the DEFERRED R10 (authenticate the bot with a
-secret, not "looks local") and R12 (bot restart → OPS-07) · R4 456701b
-(a root path no longer blinds the middlewares) · R5 786c046 (a paid check
-must name this app: **going live, put the domain in PUBLIC_HOSTS in .env**,
-or every visitor is refused — the server prints each refused name once;
-share_demo.ps1 sets its own) · R7 (the body-cap test builds the costliest
-real message instead of trusting 6 bytes a character) 478a2c1 · R8 (the
-Google key travels in a header — no URL, error or httpx log line carries
-it; Google accepts it, measured live with the free probe). **The review's
-R1–R15 are all closed or deferred.** · Anthropic refusing for MONEY (a
-spend limit, the tier cap, billing, an empty balance) now pauses checking:
-the reader is told "paused … try again later", the check gives its whole
-reservation back (failed requests aren't charged), new paid checks get 503
-up front for 10 minutes and then one probes, repeats stay free, and the
-console says what to fix (f545885; dbd5f08 keeps an answer already
-written) · the dashboard's card shows the day's MONEY — "$0.72 of $1.00",
-what it still buys, "Paused" — with the 40-check count as a backstop
-note, and its reads run off the event loop (looked at in headless Chrome:
-light, dark, paused, phone width) 42d1dd9 · Turnstile SERVER side done:
-b6daec5 (the siteverify provider; tests and the demo never reach
-Cloudflare) and f724156 (a web visitor's paid check needs a pass, verified
-before anything is held; a pass earns the signed "vd" device cookie = the
-person, 3 a day; the bot and this machine are never challenged; startup
-warns when PUBLIC_HOSTS is set without Turnstile). NEXT: the PAGE — load
-the widget when the server names a site key (a small config endpoint),
-send a fresh token per check in X-Turnstile-Token, reset after each, and
-handle 403/503; look at it in headless Chrome with Cloudflare's test keys
-(site 1x00000000000000000000AA, secret 1x0000000000000000000000000000000AA).
-Going live then needs TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY in .env
-(an owner action: a free Turnstile widget in the Cloudflare dashboard).
+**Done 2026-10-15/16, all pushed** (PROJECT_PLAN §7 has the why and every
+measurement): the brief's §6 steps 1 and 2 — the five reproduced
+pre-public blockers (50dcf3b, 1080d2d, 020e26f); per-person limits
+(55d3de0); the $1/day DOLLAR budget, cheaper as the day drains, repeats
+free (20e882d, 0951150); the review of those fixes, R1–R15, all fixed or
+deferred (R10, R12 → §11 25–26; table in
+[review-blockers.md](docs/research/2026-10-15/review-blockers.md)) and a
+re-check of the fixes that found five more (dc3ebd4 … 56c3990); Anthropic
+refusing for MONEY pauses checking at no cost (f545885, dbd5f08); the
+dashboard shows the day's money (42d1dd9); Turnstile + the signed device
+cookie — 3 checks a day per web device, the bot and this machine never
+challenged (b6daec5, f724156, b79bb2a; run end to end in real headless
+Chrome with Cloudflare's test keys).
 
-**Then — in the brief's §6 order:** (1) the rest of the reproduced
-blockers, incl. the per-person limit for the bot (it is open to
-anyone by decision, and one person can still use the day's whole cap);
-(2) the dollar budget, per-person limits, Turnstile; (3) restarts, ledger,
-monitoring; (4) running 24/7 here — the domain, cloudflared as a service,
-auto-start; (5) privacy notice, terms, the app manifest; then WhatsApp.
-Each step: failing test first, commit + push, update this section.
+**NEXT — the brief's §6 step 3: restarts, the ledger, monitoring**
+([audit-ops.md](docs/research/2026-10-15/audit-ops.md)): OPS-06 run_check's
+final save is unguarded (a stuck job, a lost paid answer); OPS-04 a check
+killed mid-flight loses its spend from the ledger; OPS-07 the bot forgets
+in-flight checks on restart (+ §11 26); OPS-05 a second copy on the same
+database; OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
+alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
+and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
+OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,
+cloudflared as a service, auto-start; (5) privacy notice, terms, the app
+manifest; then WhatsApp. Each step: failing test first, commit + push,
+update this section.
+
+**Going live needs, in .env:** `PUBLIC_HOSTS=<the .com>` — without it every
+visitor is refused (the server prints each refused name once) — and
+`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` from a free Turnstile widget
+for the .com in the Cloudflare dashboard (without them startup warns, and
+visitors are not challenged).
 
 **Owner actions waiting on Vinayak** (free; the brief has details): set
 Sarvam's data retention to 0 days; a separate Anthropic workspace with a
 monthly spend limit for the public key; buy the .com (if Cloudflare declines
-the card, any registrar + Cloudflare nameservers); for WhatsApp, a new SIM
-and a free Udyam registration. Pre-public **blockers**
+the card, any registrar + Cloudflare nameservers); once the .com exists, a
+free Turnstile widget for it (Cloudflare dashboard → Turnstile: two keys
+for .env); for WhatsApp, a new SIM and a free Udyam registration. Pre-public **blockers**
 already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
 one stranger can use up the day's cap; a 25 MB text post freezes the server
 for 10–19 s; the bot answers anyone, even with no public URL; any website can
@@ -146,7 +111,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 986 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1074 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -224,7 +189,7 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **986 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **1074 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
@@ -319,7 +284,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 986 tests, ~1 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 1074 tests, ~1 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?

@@ -31,7 +31,7 @@ which landed while this review ran).
 | R5 | nice-to-have - FIXED 786c046 (re-checked) | 1080d2d | A DNS-rebinding page is "same-origin" and passes; the paid routes never check Host |
 | R6 | nice-to-have - FIXED 05418fa (re-checked) | 020e26f | The person is released after the bookkeeping, so "poll until COMPLETE, then submit" gets "already running" about half the time |
 | R7 | nice-to-have - FIXED 478a2c1 | 50dcf3b | The pinned body-cap arithmetic is x6 per character; an emoji is x12 |
-| R8 | nice-to-have - FIXED (re-checked) | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
+| R8 | nice-to-have - FIXED ba0653e (re-checked) | (63f8049's class) | `scripts/factcheck_probe.py` prints the Google key on any HTTP error; `ANTHROPIC_LOG=info` makes the app log it on every lookup |
 | R9 | should-fix - FIXED 2d3b5c8 (re-checked) | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
 | R10 | nice-to-have - DEFERRED (PROJECT_PLAN 11.25) | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
 | R11 | nice-to-have - FIXED 05418fa + 2147412 (re-checked) | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |
