@@ -119,12 +119,29 @@ def test_a_bare_link_goes_to_the_link_endpoint():
     assert PAGE.index("LINK_RE.test(text)") < PAGE.index('fetch("api/v1/verify/text"')
 
 
+def test_every_check_carries_a_fresh_turnstile_token():
+    """A Turnstile token is single-use and lives 300 s (Cloudflare's docs):
+    the page asks for one per check and resets the widget after EVERY send,
+    success or failure — without the reset the second check would carry a
+    spent token and be refused. Measured end to end in real headless Chrome
+    with Cloudflare's test keys (2026-10-16): two checks, two fresh tokens,
+    siteverify True both times, one device."""
+    assert '"X-Turnstile-Token"' in PAGE
+    body = PAGE[PAGE.index("async function submit(makeRequest"):]
+    finally_block = body[body.index("finally {"):][:200]
+    assert "humanReset();" in finally_block
+
+
 def test_submit_takes_a_factory_so_the_busy_guard_runs_first():
     """`submit(fetch(...))` would dispatch the request while evaluating the
     argument — i.e. before the busy check — so a double click could spend
     twice."""
     assert "async function submit(makeRequest" in PAGE
-    assert "await makeRequest()" in PAGE
+    # The factory is called INSIDE submit, after the busy check. Since
+    # Turnstile (2026-10-16) it receives the check's person-proof headers.
+    body = PAGE[PAGE.index("async function submit(makeRequest"):]
+    assert "await makeRequest(await humanHeaders())" in body
+    assert body.index("if (busy)") < body.index("await makeRequest(")
     # Every call site must pass a thunk. Comments are stripped first — the
     # code near here NAMES the anti-pattern in order to explain it, and a
     # naive substring search flagged the explanation instead of a bug.
@@ -133,7 +150,8 @@ def test_submit_takes_a_factory_so_the_busy_guard_runs_first():
     sites = re.findall(r"(?<!function )submit\(([^,]*?)(?:,|$)", code)
     assert len(sites) >= 3, f"expected text/link/file call sites, found {sites}"
     for site in sites:
-        assert site.startswith("() =>"), f"submit() called with a live promise: {site}"
+        assert site.startswith(("() =>", "(human) =>")), \
+            f"submit() called with a live promise: {site}"
 
 
 def test_a_busy_submission_is_never_silently_swallowed():

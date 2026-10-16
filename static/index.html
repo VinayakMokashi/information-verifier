@@ -199,6 +199,7 @@
           background: var(--accent); color: #fff; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   input[type=file] { display: none; }
+  .human { display: flex; justify-content: center; }
   .hint { max-width: 720px; margin: 8px auto 0; color: var(--ink-3);
           font-size: .74rem; text-align: center; }
   .hidden { display: none !important; }
@@ -249,6 +250,9 @@
       <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
       <button class="send" id="check">Check</button>
     </div>
+    <!-- Cloudflare Turnstile, when the server names a site key: invisible
+         unless Cloudflare needs the person to tick a box. -->
+    <div class="human" id="human"></div>
   </div>
   <p class="hint">Answers cite fact-checkers and official sources. I can be
      wrong — open the sources. When nobody reliable has covered something,
@@ -262,6 +266,72 @@ const $ = (id) => document.getElementById(id);
 // longer than a text check — poll up to ~4 minutes.
 const POLL_MS = 2500, POLL_MAX = 96;
 let busy = false;
+
+// -- Is a person asking? (Cloudflare Turnstile; decided 2026-10-15) -----------
+// When the server names a site key, every paid check carries a fresh token in
+// X-Turnstile-Token; without a valid one the server refuses before anything
+// is spent. A token is good for ONE check and lives 300 s, so the widget is
+// reset after every send and makes the next one by itself.
+const IN_APP = /Instagram|FBAN|FBAV|FB_IAB|Line\//.test(navigator.userAgent);
+const OPEN_IN_CHROME = IN_APP ? " If it keeps failing, open this page in Chrome." : "";
+const human = { siteKey: null, widget: null, ready: null, waiting: [] };
+
+function settleHuman(how, value) {
+  for (const w of human.waiting.splice(0)) w[how](value);
+}
+
+function loadTurnstile(siteKey) {
+  human.siteKey = siteKey;
+  human.ready = new Promise((resolve, reject) => {
+    window.onTurnstileLoad = () => {
+      human.widget = turnstile.render("#human", {
+        sitekey: siteKey, action: "check", appearance: "interaction-only",
+        "refresh-expired": "auto",
+        callback: (token) => settleHuman("resolve", token),
+        "error-callback": (code) => {
+          // Cloudflare's own code, kept where support (and a test) can read it.
+          $("human").dataset.error = String(code || "");
+          settleHuman("reject", new Error(
+            "We couldn't confirm you're a person. Please try again." + OPEN_IN_CHROME));
+          return true;   // handled here; Turnstile need not log it
+        },
+      });
+      resolve();
+    };
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js"
+               + "?render=explicit&onload=onTurnstileLoad";
+    script.async = true;
+    script.onerror = () => reject(new Error(
+      "The check that you're a person couldn't load. Check your connection and try again."));
+    document.head.appendChild(script);
+  });
+  human.ready.catch(() => {});      // reported when a check needs it
+}
+
+async function humanHeaders() {
+  if (!human.siteKey) return {};
+  await human.ready;
+  let token = turnstile.getResponse(human.widget);
+  if (!token) {
+    token = await new Promise((resolve, reject) => {
+      human.waiting.push({ resolve, reject });
+      setTimeout(() => reject(new Error(
+        "Please finish the check above that you're a person, then send again.")), 60000);
+    });
+  }
+  return { "X-Turnstile-Token": token };
+}
+
+function humanReset() {
+  if (human.widget === null) return;
+  try { turnstile.reset(human.widget); } catch (e) { /* the next check reports it */ }
+}
+
+fetch("api/v1/client-config")
+  .then((r) => (r.ok ? r.json() : {}))
+  .then((c) => { if (c && c.turnstile_site_key) loadTurnstile(c.turnstile_site_key); })
+  .catch(() => { /* no config: no challenge; the server says so if it wants one */ });
 
 // A pasted link goes to /verify/link, which pulls the claim OUT of the reel.
 // Sent to /verify/text it would be treated as a string, find nothing, and
@@ -599,7 +669,7 @@ async function submit(makeRequest, mine) {
   setBusy(true);
   newTurn(mine);
   try {
-    const resp = await makeRequest();
+    const resp = await makeRequest(await humanHeaders());
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       const err = new Error(typeof body.detail === "string" ? body.detail : "");
@@ -614,6 +684,7 @@ async function submit(makeRequest, mine) {
     turn.answer.classList.remove("hidden");
     turn.answer.innerHTML = `<div class="err">${esc(friendlyError(e))}</div>`;
   } finally {
+    humanReset();          // a token is good for ONE check
     setBusy(false);
   }
 }
@@ -699,16 +770,16 @@ $("check").addEventListener("click", () => {
   box.value = "";
   box.style.height = "auto";
   if (LINK_RE.test(text)) {
-    submit(() => fetch("api/v1/verify/link", {
+    submit((human) => fetch("api/v1/verify/link", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...human, "Content-Type": "application/json" },
       body: JSON.stringify({ url: text, language: replyLanguage }),
     }), text);
     return;
   }
-  submit(() => fetch("api/v1/verify/text", {
+  submit((human) => fetch("api/v1/verify/text", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...human, "Content-Type": "application/json" },
     body: JSON.stringify({ text, language: replyLanguage }),
   }), text);
 });
@@ -722,7 +793,8 @@ function wireFilePicker(buttonId, inputId, endpoint, label) {
     fd.append("file", f);
     fd.append("language", replyLanguage);
     $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
-    submit(() => fetch(endpoint, { method: "POST", body: fd }), `${label}: ${f.name}`);
+    submit((human) => fetch(endpoint, { method: "POST", headers: human, body: fd }),
+           `${label}: ${f.name}`);
   });
 }
 wireFilePicker("pickImage", "image", "api/v1/verify/image", "📷 Image");

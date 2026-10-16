@@ -139,6 +139,14 @@ async def _person(request: Request, response: Response | None) -> str:
     return f"dev:{device_id}"
 
 
+@router.get("/client-config", include_in_schema=False)
+async def client_config() -> dict:
+    """What the page must know before a check: the Turnstile SITE key, which
+    is public by design (the widget shows it), or null while Turnstile is
+    off. Never the secret."""
+    return {"turnstile_site_key": settings.turnstile_site_key if turnstile.enabled() else None}
+
+
 @asynccontextmanager
 async def _quota(request: Request, kind: str, *, deferred: bool = False,
                  response: Response | None = None):

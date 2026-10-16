@@ -157,6 +157,15 @@ def test_going_public_without_turnstile_is_said_out_loud(client, monkeypatch, ca
     assert "s3cr3t" not in out
 
 
+def test_the_page_learns_the_site_key_and_never_the_secret(client, monkeypatch):
+    assert client.get("/api/v1/client-config").json() == {"turnstile_site_key": None}
+    monkeypatch.setattr(settings, "turnstile_site_key", "1x00000000000000000000AA")
+    monkeypatch.setattr(settings, "turnstile_secret_key", "s3cr3t-turnstile")
+    body = client.get("/api/v1/client-config")
+    assert body.json() == {"turnstile_site_key": "1x00000000000000000000AA"}
+    assert "s3cr3t" not in body.text
+
+
 def test_a_cookie_is_only_ever_this_processes_own():
     device_id, value = device.mint()
     assert device.verified(value) == device_id
