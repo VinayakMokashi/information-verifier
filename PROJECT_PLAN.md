@@ -100,7 +100,7 @@ installable app; drafting the notice against the code found the limiter
 keeping visitors' addresses for weeks, and the bot billing unknown
 commands as claims (§7). Its review found 18 more, all fixed the same night;
 step 4 is ready for the owner (`docs/go-live.md`, `scripts/serve_forever.py`).
-**1291 tests.**
+A re-check of those fixes found 13 more (2026-10-17), all fixed. **1316 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -442,6 +442,50 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-17 — The fixes re-checked: 13 more, all fixed
+
+A second adversarial pass
+([review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md))
+covered the step-5 fixes and step 4's two never-reviewed pieces. It found
+13 (4 medium, 9 low). The lesson held a third time: six were fixes
+covering the case they named but not its rule. By theme:
+
+- **Copies of people's data (F-1, medium).** My S5-10 clean-up searched
+  by name and folder, and missed two more full copies of the real
+  database: one in %TEMP% itself (via tempfile's default), one named
+  `*.before-upgrade`. They and seven stale old-schema databases are
+  deleted. `scripts/find_db_copies.py` now finds copies by header and
+  table names, and deletes nothing.
+- **The owner's runbook would not have worked (F-5, F-10, medium).**
+  - The cloudflared service, installed as written, runs NO tunnel. The
+    registry ImagePath edit is now in the runbook, from Cloudflare's own
+    page and cloudflared's source.
+  - A fallback service account could not reach Python or ffmpeg in the
+    owner's profile.
+- **The bot's promise (F-12, medium).** Its /privacy still said
+  "deleted after 30 days" unqualified. It now takes "our copy" and the
+  Sarvam line from the same switch as the web notice.
+- **The runner (F-4, F-8).**
+  - ffmpeg escaped the job in about half of cold starts: the supervisor
+    now joins its job first.
+  - No orderly stop was possible under Task Scheduler. A stop file now
+    lets checks in flight finish.
+- **The bot (F-2, F-6, F-9).**
+  - A chat's mark outlived its day when another chat's write expired it.
+  - After a restart, a message during the hand-over was paid for (found
+    by the reviewer's extended explorer, now
+    `scripts/bot_explorer_restarts.py`).
+  - Two bots could run. There is now one lock.
+- **The store (F-3, F-7, F-11, F-13).**
+  - The demo's start emptied the real app's working files.
+  - The WAL truncate stalled every write ~30 s behind a reader, then
+    lied.
+  - The one-time VACUUM could fail a start.
+  - A restore plus a sweep counted $0.16 as $0.32.
+
+All fixed by 09dc74d. Each test failed first, mutants were caught, and
+6,000 explorer seeds ran clean. 1316 tests.
 
 ### 2026-10-16 (late night) — Step 5 reviewed: 18 findings, each reproduced, all fixed; step 4 made ready
 

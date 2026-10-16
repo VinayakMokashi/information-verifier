@@ -67,12 +67,16 @@ its own job first; a stop file for an orderly unattended stop); F-1
 1f23fc2 (two more real-database copies deleted; scripts/find_db_copies.py
 finds copies by what they are); F-2 + F-6 + F-9 c584e1d (bot: chats let
 go the moment their day ends; the restart hand-over locked and counted;
-one bot at a time; scripts/bot_explorer_restarts.py). NEXT: F-3, F-7,
-F-11, F-13 (store: scratch folder per database file; the WAL truncate
-with a short timeout and an honest result; the one-time VACUUM guarded;
-the ledger writer knows restored rows); then F-5 + F-10 (go-live.md: the
-cloudflared ImagePath step; what a fallback service account needs). Then
-PROJECT_PLAN §7; then the owner's list below; then WhatsApp. Each: failing test
+one bot at a time; scripts/bot_explorer_restarts.py); F-3 + F-7 + F-11 +
+F-13 e039852 (store: scratch folder per database file; a WAL truncate
+that never stalls the app and tells the truth; the one-time VACUUM
+guarded; the one ledger writer knows restored rows); F-5 + F-10 09dc74d
+(go-live.md: the cloudflared ImagePath step without which the service
+runs no tunnel; what a fallback service account needs). **ALL 13 are
+closed; 1316 tests.** These third-round fixes were proven by failing-first
+tests, mutants and 6,000 explorer seeds — not yet by a fresh reviewer.
+NEXT: the owner's list below (step 4 is ready: docs/go-live.md); then
+WhatsApp (B); then the rest of §11 (C). Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 
