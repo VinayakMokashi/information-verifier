@@ -268,6 +268,74 @@ def test_the_allowances_match_the_decision():
     assert settings.person_daily_limits["dev"] == 3
 
 
+# -- who asked is forgotten, not only never written down (2026-10-16) ---------
+# The privacy notice says the counts behind the limits are cleared after the
+# day they count. FOUND while drafting it: a subject's hourly record left
+# memory only when 512 others pushed it out or the server restarted — weeks,
+# for an IP address, on a server meant to stay up.
+
+@pytest.fixture()
+def clock(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(limits, "_now", lambda: now[0])
+    return now
+
+
+def test_idle_people_are_forgotten_after_their_day(limiting, clock, monkeypatch):
+    _paid(_req("203.0.113.7"))
+    _paid(_bot(1))
+    limits.reserve(_bot(3), token="hung")        # never ended: past its TTL below
+    assert limits._per_client and limits._person_today and limits._in_flight
+    clock[0] += max(3601, settings.in_flight_ttl_s + 1)
+    monkeypatch.setattr(limits, "today", lambda: "2099-01-01")
+    assert limits.forget_idle() > 0
+    assert (limits._per_client, limits._person_today, limits._in_flight) == ({}, {}, {})
+
+
+def test_an_hour_later_only_the_hourly_record_goes(limiting, clock):
+    _paid(_bot(1))
+    clock[0] += 3601
+    limits.forget_idle()
+    assert "tg:1" not in limits._per_client
+    assert limits._person_today.get("tg:1") == 1  # today's allowance still counts
+
+
+def test_nothing_the_limits_still_use_is_forgotten(limiting, clock):
+    _paid(_bot(1))
+    limits.reserve(_bot(2), token="running")
+    clock[0] += 60
+    assert limits.forget_idle() == 0
+    assert "tg:1" in limits._per_client and limits._person_today.get("tg:1") == 1
+    assert limits._in_flight.get("tg:2")
+    limits.release("tg:2", "running")
+
+
+def test_the_housekeeping_loop_forgets_idle_people(monkeypatch):
+    import asyncio
+    import contextlib
+
+    import app.main as M
+    import app.store.repository as repository
+
+    calls = []
+    monkeypatch.setattr(M, "_HOUSEKEEPING_EVERY_S", 0)
+    monkeypatch.setattr(repository, "housekeeping", lambda: {})
+    monkeypatch.setattr(limits, "forget_idle", lambda: calls.append(1) or 0)
+
+    async def one_round():
+        task = asyncio.create_task(M._housekeeping_loop())
+        for _ in range(200):                     # bounded: 2 s at most
+            if calls:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(one_round())
+    assert calls, "the housekeeping loop never forgot anyone"
+
+
 # -- review R11, R6 (2026-10-15): release exactly one's own place, and in time --
 
 def test_a_late_release_frees_only_its_own_place(limiting, monkeypatch):

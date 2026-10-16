@@ -238,11 +238,14 @@ async def _housekeeping_loop() -> None:
     """
     import asyncio
 
-    from app.store.repository import housekeeping
+    from app.api import limits
+    from app.store import repository
 
     while True:
         await asyncio.sleep(_HOUSEKEEPING_EVERY_S)
-        done = await asyncio.to_thread(housekeeping)
+        done = await asyncio.to_thread(repository.housekeeping)
+        # Who asked is held in memory only, and only while a limit uses it.
+        done["people_forgotten"] = await asyncio.to_thread(limits.forget_idle)
         if any(done.values()):
             print(f"[housekeeping] {done}")
 

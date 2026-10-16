@@ -654,6 +654,36 @@ def release(subject: str | None, token: str | None) -> None:
         _unadmit_locked(subject, token)
 
 
+def forget_idle() -> int:
+    """Drop every subject the limits no longer use. -> entries dropped.
+
+    Who asked (an address, a device id, a Telegram id) is never written to
+    disk, and the privacy notice says it is cleared after the day it counts.
+    FOUND 2026-10-16, drafting that notice: a subject's hourly record left
+    memory only when 512 others pushed it out or the server restarted —
+    weeks, on a server meant to stay up. Each step removes only what the
+    limits already ignore — attempts older than the hour, checks past their
+    TTL, a finished day's counts — so no decision changes. Memory only, as
+    _lock requires. The housekeeping loop calls it (app/main.py).
+    """
+    now = _now()
+    day = today()
+    with _lock:
+        idle = [k for k, v in _per_client.items() if not _prune(v, 3600, now)]
+        for key in idle:
+            del _per_client[key]
+        ended = [k for k, v in _in_flight.items() if not _running(v, now)]
+        for key in ended:
+            del _in_flight[key]
+        dropped = len(idle) + len(ended)
+        # Cleared, not re-dated: a claim that took its day just before
+        # midnight still counts under that day, as it would have anyway.
+        if _person_day[0] != day:
+            dropped += len(_person_today)
+            _person_today.clear()
+    return dropped
+
+
 def drain(timeout: float = 10.0) -> bool:
     """Test helper — wait until every claim already on the pool has finished,
     the slot-returning callbacks included. False if that took too long.
