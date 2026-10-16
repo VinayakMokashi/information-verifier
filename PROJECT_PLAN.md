@@ -2004,8 +2004,10 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    secret in `.env`, sent by the bot as a header and compared with
    `hmac.compare_digest`, honoured from anywhere; and a 202 that echoes the
    person it counted, so the bot can complain loudly when it was not.
-26. **After a bot restart, "wait for its answer" promises an answer the bot
-   has forgotten** (review R12, deferred to OPS-07). The bot keeps its
+26. ~~**After a bot restart, "wait for its answer" promises an answer the
+   bot has forgotten**~~ **DONE 2026-10-16 with OPS-07**: the bot's pending
+   checks are written through to `data/bot_pending.json` and a restarted bot
+   delivers them (`Dispatcher.resume`). The original note (review R12): The bot keeps its
    pending job ids in memory; restarted while someone's check runs, it
    relays the one-in-flight refusal about a check whose answer will never
    arrive. Root fix: persist the pending job ids (OPS-07). Cheaper and

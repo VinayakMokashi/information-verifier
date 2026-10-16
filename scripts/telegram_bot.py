@@ -18,9 +18,11 @@ setup instructions and exits at $0.
 import asyncio
 import contextlib
 import html
+import json
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -621,6 +623,86 @@ _TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi f
                   "ya video ka link.")
 # Kinds that are never submitted, so never told "this was not checked".
 _NEVER_CHECKED = ("unsupported", "smalltalk", "too_big")
+# Said when a wait gives up while the check still runs; the person's next
+# message, whatever it is, collects the answer.
+_STILL_RUNNING = ("⏳ Check abhi bhi chal raha hai. Mujhe koi bhi message bhejiye "
+                  "aur main wahi report dikha dunga — dobara paisa nahi lagega. "
+                  "(Wo message khud check nahi hoga — use baad mein dobara bhejiyega.)")
+_DONE_EARLIER = "Aapka pichla check pura hua:"
+
+
+class PendingStore(dict):
+    """`pending` (chat id -> the job it waits for), written through to a file.
+
+    REPRODUCED (docs/research/2026-10-15/audit-ops.md OPS-07; the review's
+    R12): kept only in memory, every check in flight was forgotten when the
+    bot restarted — its window closed, a reboot. The check still completed
+    and was billed, and no reply was ever sent. Dispatcher.resume delivers
+    what a previous run was waiting for.
+
+    A job id opens the person's message (OPS-11), so nothing is kept longer
+    than it could still be delivered: an entry goes on delivery, and any
+    older than a day is dropped on load. Written whole, to a temporary file
+    swapped in, so a crash mid-write leaves the old file, never half of one.
+    The bot uses only get, item assignment, `in` and pop — those write.
+    """
+
+    _TTL_S = 24 * 3600
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self._path = path
+        self._at: dict[int, float] = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                saved = json.load(f)
+        except (OSError, ValueError):
+            saved = {}
+        now = time.time()
+        for chat, entry in (saved.items() if isinstance(saved, dict) else ()):
+            try:
+                chat_id, job_id, at = int(chat), str(entry["job"]), float(entry["at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if now - at < self._TTL_S:
+                super().__setitem__(chat_id, job_id)
+                self._at[chat_id] = at
+        self._write()
+
+    def __setitem__(self, chat_id, job_id) -> None:
+        super().__setitem__(chat_id, job_id)
+        self._at[chat_id] = time.time()
+        self._write()
+
+    def __delitem__(self, chat_id) -> None:
+        super().__delitem__(chat_id)
+        self._at.pop(chat_id, None)
+        self._write()
+
+    def pop(self, chat_id, *default):
+        had = chat_id in self
+        value = super().pop(chat_id, *default)
+        if had:
+            self._at.pop(chat_id, None)
+            self._write()
+        return value
+
+    def _write(self) -> None:
+        data = {str(chat): {"job": job, "at": self._at.get(chat, time.time())}
+                for chat, job in self.items()}
+        temporary = f"{self._path}.tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(temporary, self._path)
+        except OSError as exc:
+            print(f"[bot] could not save the pending checks: {type(exc).__name__}")
+
+
+def pending_path() -> str:
+    """Beside the app's database: the same .env says where both live."""
+    return os.path.join(os.path.dirname(os.path.abspath(settings.db_path)),
+                        "bot_pending.json")
 
 
 async def handle_message(
@@ -705,7 +787,7 @@ async def handle_message(
                 return
             else:
                 pending.pop(chat_id, None)
-                await tg.send(chat_id, "Aapka pichla check pura hua:")
+                await tg.send(chat_id, _DONE_EARLIER)
                 await tg.send(chat_id, format_reply(report))
                 # Its wait had asked for "any message": this was that poke.
                 # Otherwise the person sent something new mid-check — say so.
@@ -766,11 +848,7 @@ async def handle_message(
             # Says outright that the poke itself is not checked: a new claim
             # sent in answer to this was consumed as the poke, in silence.
             prompted.add(chat_id)          # the next message IS the poke
-            await tg.send(chat_id, "⏳ Check abhi bhi chal raha hai. Mujhe koi "
-                                   "bhi message bhejiye aur main wahi report "
-                                   "dikha dunga — dobara paisa nahi lagega. "
-                                   "(Wo message khud check nahi hoga — use "
-                                   "baad mein dobara bhejiyega.)")
+            await tg.send(chat_id, _STILL_RUNNING)
             return
         if pending.get(chat_id) != job_id:
             return        # a later message from this chat already delivered it
@@ -796,9 +874,13 @@ class Dispatcher:
     holds none, and /help skips the bound entirely.
     """
 
-    def __init__(self, app: AppClient, tg: TelegramClient, max_in_flight: int = 16):
+    def __init__(self, app: AppClient, tg: TelegramClient, max_in_flight: int = 16,
+                 pending_path: str | None = None):
         self.app, self.tg = app, tg
-        self.pending: dict[int, str] = {}
+        # Persisted when given a path (the bot itself — OPS-07); tests that
+        # do not care keep the plain in-memory dict.
+        self.pending: dict[int, str] = (PendingStore(pending_path) if pending_path
+                                        else {})
         self.locks: dict[int, asyncio.Lock] = {}
         self.prompted: set[int] = set()   # chats asked for "any message"
         self.in_flight: dict[int, int] = {}      # handlers per chat, right now
@@ -840,6 +922,38 @@ class Dispatcher:
                     self.in_flight[counted_chat] = left
                 else:
                     self.in_flight.pop(counted_chat, None)
+
+    async def resume(self) -> None:
+        """Deliver what a previous run of the bot was waiting for (OPS-07).
+        Each on its own task, like any message; the chat counts as busy
+        meanwhile (its entry is in `pending`), so a message it sends is
+        never checked on top of it."""
+        for chat_id, job_id in list(self.pending.items()):
+            task = asyncio.create_task(self._deliver_late(chat_id, job_id))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _deliver_late(self, chat_id: int, job_id: str) -> None:
+        try:
+            try:
+                report = await self.app.wait_for_report(job_id)
+            except JobGone:
+                # Deleted after the retention period: nothing left to deliver.
+                if self.pending.get(chat_id) == job_id:
+                    self.pending.pop(chat_id, None)
+                return
+            if self.pending.get(chat_id) != job_id:
+                return            # the person's own message collected it meanwhile
+            if report is None:
+                self.prompted.add(chat_id)       # the next message IS the poke
+                await self.tg.send(chat_id, _STILL_RUNNING)
+                return
+            self.pending.pop(chat_id, None)
+            await self.tg.send(chat_id, _DONE_EARLIER)
+            await self.tg.send(chat_id, format_reply(report))
+        except Exception as exc:  # noqa: BLE001 — one chat must not stop the rest
+            print(f"[bot] delivering a check after a restart failed: "
+                  f"{type(exc).__name__}: {exc}")
 
     async def drain(self) -> None:
         """Wait for everything in flight (tests; a graceful shutdown).
@@ -926,7 +1040,11 @@ async def main() -> None:
 
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0
-        dispatcher = Dispatcher(app, tg)
+        dispatcher = Dispatcher(app, tg, pending_path=pending_path())
+        if dispatcher.pending:
+            print(f">> Resuming {len(dispatcher.pending)} check(s) a previous run "
+                  "was waiting for.")
+        await dispatcher.resume()
         while True:
             try:
                 updates = await tg.get_updates(offset)

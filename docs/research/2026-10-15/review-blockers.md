@@ -35,7 +35,7 @@ which landed while this review ran).
 | R9 | should-fix - FIXED 2d3b5c8 (re-checked) | 020e26f | One in flight per IPv4 address = per carrier-NAT pool/office: strangers told "you already have a check running" |
 | R10 | nice-to-have - DEFERRED (PROJECT_PLAN 11.25) | 020e26f | Bot identity is inferred from "looks local": spoofable behind a header-less local proxy, silently collapses if the bot moves |
 | R11 | nice-to-have - FIXED 05418fa + 2147412 (re-checked) | 020e26f | A check longer than the 900 s TTL: its late release pops the next check's entry (two run at once) |
-| R12 | nice-to-have - DEFERRED (PROJECT_PLAN 11.26, OPS-07) | 020e26f x OPS-07 | After a bot restart, "wait for its answer" promises an answer the bot forgot |
+| R12 | nice-to-have - FIXED with OPS-07 (2026-10-16; the bot's pending checks persist and resume) | 020e26f x OPS-07 | After a bot restart, "wait for its answer" promises an answer the bot forgot |
 | R13 | nice-to-have - FIXED 2d3b5c8 (re-checked) | 020e26f | All anonymous group admins (and all "post as channel" senders) are one Telegram person |
 | R14 | should-fix - FIXED 2d3b5c8 (re-checked) | 0951150 (outside the seven) | Cache-hit repeats skip every limit: unbounded job rows and in-memory streams from one visitor |
 | R15 | should-fix - FIXED 3bd7772 + 4f6be5c (re-checked) | 020e26f (+5f8e7db) | `release()` (and at HEAD `admit()`) take the limiter lock on the event loop while a claim holds it across a contended SQLite write: /health froze 7 s |

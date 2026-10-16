@@ -65,8 +65,9 @@ OPS-04 2b5a261 (a running check's bill so far is checkpointed onto its row,
 so a killed one still reaches the ledger); OPS-05 (one server per
 database: an OS lock beside it, taken before the startup sweep — a second
 copy now refuses instead of failing the first one's checks; share_demo.ps1
-asks for the running app to be closed). NEXT: OPS-07 the bot forgets
-in-flight checks on restart (+ §11 26); OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
+asks for the running app to be closed) 32462f1; OPS-07 + R12 (the bot's
+pending checks persist in data/bot_pending.json and a restarted bot
+delivers them). NEXT: OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
 OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,
