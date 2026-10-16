@@ -111,9 +111,52 @@ def test_a_running_check_is_left_and_the_owner_told_why(repo, capsys):
     assert "still running" in capsys.readouterr().out
 
 
+def test_a_reel_check_is_found_by_its_link_and_what_the_post_said_goes_too(repo, capsys):
+    """Review S5-7: for a reel, the link IS what the person sent — they never
+    typed the words a machine heard. Its transcript is kept for the next
+    person who sends the same reel; a deletion request takes it too."""
+    reel = "https://www.instagram.com/reel/DAbCdEfGhIj/"
+    heard = "Sarkar har ghar ko 5000 rupaye de rahi hai"
+    mine = _check(repo, reel, heard=heard)
+    repo.transcripts.put("v2:instagram:DAbCdEfGhIj", heard)
+    assert forget.main(["--text", reel, "--day", "2026-10-16", "--yes"]) == 0
+    assert repo.get(mine.job_id) is None
+    assert repo.transcripts.get("v2:instagram:DAbCdEfGhIj") is None
+    assert "1 transcript" in capsys.readouterr().out
+
+
+def test_a_pasted_address_finds_its_check(repo, capsys):
+    """Review S5-7: the person sends the page's whole address; pasted as it
+    came, "No check matches" — "gone anyway?" — while the check stayed."""
+    mine = _check(repo, "a forward")
+    address = f"https://verifier.example.com/#job={mine.job_id}"
+    assert forget.main(["--job", address, "--yes"]) == 0
+    assert repo.get(mine.job_id) is None
+
+
+def test_one_viral_message_from_several_people_is_not_deleted_wholesale(repo, capsys):
+    """REPRODUCED by review S5-18: one forward, checked by three people in a
+    day. --text --yes deleted all three — two strangers' answers gone with
+    no request — and the listing showed no time to pick the right one by."""
+    morning, afternoon, night = (datetime(2026, 10, 16, h, 0, tzinfo=timezone.utc)
+                                 for h in (4, 9, 15))         # 09:30, 14:30, 20:30 India
+    checks = [_check(repo, "Kal se 2000 ke note band", when=t)
+              for t in (morning, afternoon, night)]
+    assert forget.main(["--text", "2000 ke note", "--day", "2026-10-16", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert all(repo.get(c.job_id) for c in checks), "strangers' checks were deleted"
+    assert "14:30" in out and "--job" in out
+    assert forget.main(["--text", "2000 ke note", "--day", "2026-10-16", "--yes",
+                        "--all"]) == 0
+    assert not any(repo.get(c.job_id) for c in checks)
+
+
 def test_nothing_found_says_so(repo, capsys):
     assert forget.main(["--job", "0" * 32]) == 1
-    assert "No check matches" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "No check matches" in out
+    # Not "probably gone already" — say how each kind of check is found.
+    assert "#job=" in out and "words read from it" in out
 
 
 def test_it_needs_a_job_or_some_words(repo):

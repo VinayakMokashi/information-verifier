@@ -76,6 +76,42 @@ def _ledger_rows():
         return conn.execute("SELECT COUNT(*) FROM spend_ledger").fetchone()[0]
 
 
+def test_a_repeat_from_the_cache_is_saved_once_so_a_deletion_stays_deleted(
+        repo, monkeypatch):
+    """REPRODUCED by review S5-8: a repeat served from the cache saved its
+    finished row, and then the `finally` saved it AGAIN (INSERT OR REPLACE).
+    A deletion in between (forget.py, run beside the app) was undone, and
+    the person's message was back for 30 days."""
+    _run(repo, _new(repo))                    # answered once, so cached
+    repeat = _new(repo)
+    real, finished_saves = repo.save, []
+
+    def save(answer):
+        real(answer)
+        if answer.job_id == repeat.job_id and answer.status is JobStatus.COMPLETE:
+            finished_saves.append(answer.job_id)
+            repo.forget([answer])             # the owner deletes it right then
+
+    monkeypatch.setattr(repo, "save", save)
+    _run(repo, repeat)
+    assert repo.get(repeat.job_id) is None, "the deletion was undone"
+    assert finished_saves == [repeat.job_id]
+
+
+def test_a_link_check_keeps_the_link_the_person_sent(repo):
+    """REPRODUCED by review S5-7: the engine overwrote the stored message —
+    the link — with the words it gathered, so "my check of <link>" could
+    never be found to delete. What a machine read is source_text."""
+    reel, heard = "https://www.instagram.com/reel/DAbCdEfGhIj/", "Sarkar har ghar ko 5000"
+    answer = Answer(job_id=uuid.uuid4().hex, status=JobStatus.QUEUED,
+                    created_at=datetime.now(timezone.utc), input_text=reel)
+    repo.save(answer)
+    asyncio.run(J.run_check(answer.job_id, heard, repo, S.create(answer.job_id),
+                            derived_text=heard, kind="link"))
+    stored = repo.get(answer.job_id)
+    assert (stored.input_text, stored.source_text) == (reel, heard)
+
+
 def test_a_save_that_fails_once_is_retried_and_the_answer_kept(repo, monkeypatch):
     _final_save_fails(repo, monkeypatch, times=1)
     answer = _new(repo)

@@ -115,9 +115,15 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         if stream is not None:
             await stream.publish(kind, data)
 
+    saved_early = False
     try:
         answer.status = JobStatus.PROCESSING
-        answer.input_text = text
+        # What the person SENT stays as the route stored it: for a reel, its
+        # link — what a deletion request names (review S5-7: overwritten
+        # with the gathered words, the check could not be found). A voice
+        # note's row starts empty; then what was heard is all there is.
+        if not answer.input_text:
+            answer.input_text = text
         answer.source_text = derived_text
         await asyncio.to_thread(repo.save, answer)
         await emit("status", {"text": "Reading what you sent…"})
@@ -142,6 +148,7 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
                 answer.usage = meter.snapshot()      # honestly $0
                 finished()
                 if await _save_finished(repo, answer):
+                    saved_early = True
                     for section in answer.sections:
                         await emit("text", {"text": section.markdown,
                                             "tier": section.tier})
@@ -195,9 +202,13 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
     finally:
         # Failures cost money too — the bill is attached either way.
         answer.usage = meter.snapshot()
-        answer.completed_at = datetime.now(timezone.utc)
+        if not saved_early:
+            answer.completed_at = datetime.now(timezone.utc)
         finished()
-        saved = await _save_finished(repo, answer)
+        # Saved ONCE. A repeat from the cache had already saved its finished
+        # row, and a second INSERT OR REPLACE brought back a row deleted in
+        # between (review S5-8: forget.py runs beside the app).
+        saved = saved_early or await _save_finished(repo, answer)
         # The spend ledger outlives the answer (which is deleted after
         # answer_retention_days) — and is written even when the answer could
         # not be: the money was spent either way. A ledger failure must not
@@ -207,6 +218,8 @@ async def run_check(job_id: str, text: str, repo, stream=None, *,
         # "done" — the page would re-read it from a row still PROCESSING.
         if not saved:
             await emit("error", {"message": _NOT_SAVED})
+        elif saved_early:
+            pass                     # the cache branch has already said "done"
         elif answer.status is JobStatus.FAILED:
             await emit("error", {"message": answer.error})
         else:

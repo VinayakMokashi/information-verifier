@@ -187,13 +187,13 @@ def _provable_kind(answer) -> str:
     """What kind of check a stored answer was, as far as the row can PROVE.
 
     A live check records its kind as it finishes; this is for rows without
-    one. The engine overwrites input_text with the text it gathered, so the
-    old guess — "starts with https://" — never fired for a FINISHED link
-    check, and every link and screenshot check came out as "media" (found by
-    review). What the row does show: a job that failed before any text
-    existed keeps what it was created with (a link's URL; a voice note's
-    empty string), and a text check has no machine-read text. A finished
-    link, screenshot or voice note looks the same — so it is "unknown".
+    one. The engine used to overwrite input_text with the text it gathered,
+    so the old guess — "starts with https://" — never fired for a FINISHED
+    link check, and every link and screenshot check came out as "media"
+    (found by review). What the row does show: a link keeps its URL (since
+    review S5-7) and a voice note starts empty, and a text check has no
+    machine-read text. A finished link, screenshot or voice note all carry
+    machine-read text — so it is "unknown".
     """
     if answer.source_text:
         return "unknown"
@@ -428,6 +428,13 @@ class DailyBudget:
             )
 
 
+class Forgotten(NamedTuple):
+    """What one deletion request removed (AnswerRepository.forget)."""
+    answers: int
+    cached: int
+    transcripts: int
+
+
 class AnswerRepository:
     """Job rows. The payload is opaque JSON, so the Answer model can evolve."""
 
@@ -494,10 +501,11 @@ class AnswerRepository:
                 found.append(answer)
         return sorted(found, key=lambda a: a.created_at)
 
-    def forget(self, answers: list) -> tuple[int, int]:
-        """Delete these answers and every cached answer to the same message.
-        -> (answers deleted, cached copies deleted). The spend ledger keeps
-        its rows: they never held the message (invariant 10)."""
+    def forget(self, answers: list) -> "Forgotten":
+        """Delete these answers, every cached answer to the same message, and
+        what a public post said when one was checked here (a deletion request
+        for a reel takes its transcript too — review S5-7). The spend ledger
+        keeps its rows: they never held the message (invariant 10)."""
         # What was checked: the message, or for a voice note, a screenshot or
         # a link, what a machine read from it.
         messages = {_normalize_input(t) for a in answers
@@ -517,7 +525,14 @@ class AnswerRepository:
                 if said & messages:
                     copies += conn.execute("DELETE FROM answer_cache WHERE key = ?",
                                            (row["key"],)).rowcount or 0
-        return gone, copies
+            # A link check's source_text IS what its transcript row holds.
+            transcripts = 0
+            for row in conn.execute("SELECT key, text FROM transcript_cache").fetchall():
+                if _normalize_input(row["text"]) in messages:
+                    transcripts += conn.execute(
+                        "DELETE FROM transcript_cache WHERE key = ?",
+                        (row["key"],)).rowcount or 0
+        return Forgotten(gone, copies, transcripts)
 
     def record_progress(self, job_id: str, usage) -> bool:
         """A RUNNING check's bill so far, onto its row (audit-ops OPS-04: a
