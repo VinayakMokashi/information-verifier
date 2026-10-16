@@ -43,13 +43,20 @@ share target that only FILLS the box; no service worker — headless Chrome
 over DevTools: no manifest errors, no installability errors, and a shared
 reel link filled the box with no /verify request).
 69e7d6d (the pages' markers filled in one pass).
-**In flight:** an adversarial review of the whole of step 5 (one agent),
-writing each finding as it goes to
-[docs/research/2026-10-16/review-step5.md](docs/research/2026-10-16/review-step5.md)
-— "status: in progress" at its top means it was interrupted: re-run it,
-seeded from the file. Meanwhile: PROJECT_PLAN §7/§11 for step 5 (and the
-DPDP Rule 8(3) decision record). Then fix what the review finds; then the
-owner's list below; then WhatsApp.
+**The review of step 5 is COMPLETE** (no agent in flight):
+[docs/research/2026-10-16/review-step5.md](docs/research/2026-10-16/review-step5.md),
+18 findings (7 medium, 11 low), each reproduced. FIXED so far: S5-3
+2e4562c (midnight), S5-4 ebbe0aa (Sarvam switch), S5-10 300f375 (three
+real-database copies deleted + a CLAUDE.md rule), S5-7/S5-8/S5-18 ed88772
+(forget.py finds reels, pasted addresses; one save; no wholesale deletion).
+NEXT, in this order: the bot (S5-1 pending file past a day, S5-2 chat ids
+kept in memory, S5-5 "Hi" + a claim, S5-6 a command as a poke, S5-9 the
+public bot's missing contact, S5-13 "/privacy?" still paid); then S5-11
+(secure_delete), S5-12 (job ids in the ledger backups), S5-16 (stream
+replay after a deletion), S5-17 (decode temp files); then S5-14 (two
+overstated sentences), S5-15 (iOS in-app browsers). Each: failing test
+first, its own commit, then this list updated. Then the owner's list
+below; then WhatsApp.
 
 **Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
 63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
