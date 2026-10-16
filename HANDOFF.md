@@ -73,8 +73,13 @@ refuses the demo) d65638f; OPS-11/08/20 (no access log — it printed visitor
 IPs and job ids; platform errors logged without URL or post id; `--workers
 1` explicit; output line-buffered and PYTHONUNBUFFERED) 7f97c0e; OPS-10 (a
 daily content-free backup of the spend record — never a message — last 14
-kept in data/backups or BACKUP_DIR; a tested restore). NEXT: OPS-19 no
-monitoring or
+kept in data/backups or BACKUP_DIR; a tested restore) 2581d1e; OPS-24
+a66cf5e (requirements.lock: the 29 exact tested packages — a fresh venv
+from it passed the whole suite; caps on majors; pytest in
+requirements-dev.txt); OPS-25 (yt-dlp warnings logged once, scrubbed;
+startup says when yt-dlp is >30 days old — it is 58 today: ASK Vinayak
+before `pip install -U yt-dlp`, and before installing deno, the JS runtime
+yt-dlp wants for YouTube). NEXT: OPS-19 no monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
 OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,

@@ -247,6 +247,38 @@ async def _housekeeping_loop() -> None:
             print(f"[housekeeping] {done}")
 
 
+_YTDLP_STALE_DAYS = 30
+
+
+def _ytdlp_released():
+    """yt-dlp's version IS its release date (2026.8.19); read from the
+    installed metadata, so the heavy package is not imported to learn it."""
+    from datetime import date
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        year, month, day = (int(part) for part in version("yt-dlp").split(".")[:3])
+        return date(year, month, day)
+    except (PackageNotFoundError, ValueError, TypeError):
+        return None
+
+
+def _ytdlp_staleness(today=None) -> str | None:
+    """A note when the installed yt-dlp is old (audit-ops OPS-25): the
+    platforms change under it, a 24/7 server never updates it by itself,
+    and reel links then fail for every stranger as "could not be read"."""
+    from datetime import date
+
+    released = _ytdlp_released()
+    if released is None:
+        return None
+    age = ((today or date.today()) - released).days
+    if age <= _YTDLP_STALE_DAYS:
+        return None
+    return (f"[startup] yt-dlp is {age} days old - the platforms change under it. "
+            r"Update: .venv\Scripts\python.exe -m pip install -U yt-dlp")
+
+
 _SWEEP_EVERY_S = 300
 # Longer than any check really runs (the longest measured: a two-pass check
 # at 295 s; a link adds its download and transcription), so a row this old
@@ -335,6 +367,9 @@ async def _serving():
     if any(done.values()):
         print(f"[startup] housekeeping: {done}")
     print("[startup] spending dashboard: /dashboard (this machine only)")
+    stale = _ytdlp_staleness()
+    if stale:
+        print(stale)
     from app.providers import turnstile
 
     if settings.public_hosts.strip() and not turnstile.enabled():

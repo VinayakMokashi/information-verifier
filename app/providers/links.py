@@ -144,18 +144,31 @@ class LinkInfo:
     subtitle: SubtitleRef | None
 
 
+_WARNED: set[str] = set()
+
+
 class _Silent:
     """yt-dlp writes to stderr regardless of quiet; failures are OUR output.
 
     scripts/link_probe.py imports this rather than copying it: the probe's
     job is to predict what /verify/link does, and every copied constant
     between the two has drifted at least once.
+
+    Warnings are the exception: each distinct one is logged ONCE per process,
+    scrubbed (log_safe). They were dropped (audit-ops OPS-25), and the day
+    YouTube stops working without a JavaScript runtime — yt-dlp already warns
+    that the no-runtime mode is deprecated — nothing would have said why.
     """
 
     def debug(self, m): pass
     def info(self, m): pass
-    def warning(self, m): pass
     def error(self, m): pass
+
+    def warning(self, m):
+        line = log_safe(m)
+        if line not in _WARNED and len(_WARNED) < 64:
+            _WARNED.add(line)
+            print(f"[links] yt-dlp warning: {line}")
 
 
 def allowed_link_host(url: str) -> str | None:
@@ -320,7 +333,7 @@ def _classified(exc: Exception) -> LinkError:
 def _base_opts() -> dict:
     return {
         "quiet": True,
-        "no_warnings": True,
+        "no_warnings": False,       # let them reach _Silent.warning, once each
         "noprogress": True,
         "socket_timeout": _RESOLVE_TIMEOUT_S,
         "noplaylist": True,

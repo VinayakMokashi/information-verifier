@@ -167,7 +167,7 @@ def probe(url: str, cookies_from: str | None = None) -> None:
 
     opts = {
         "quiet": True,
-        "no_warnings": True,
+        "no_warnings": False,       # as the app: _Silent logs each warning once
         "skip_download": True,      # metadata only — nothing is fetched
         "socket_timeout": 20,
         "noplaylist": True,
