@@ -13,7 +13,9 @@ machine:
 
 ```powershell
 python -m venv .venv                       # create an isolated Python environment
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt   # install libraries
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock   # the exact tested versions
+.\.venv\Scripts\python.exe -m pip install -U yt-dlp              # kept current on purpose
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt  # only to run the tests
 ```
 
 You do **not** need to repeat these unless you move the project.

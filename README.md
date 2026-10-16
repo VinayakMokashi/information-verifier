@@ -53,7 +53,9 @@ history, politics — not just Indian political rumours.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock   # exact tested versions
+.\.venv\Scripts\python.exe -m pip install -U yt-dlp              # kept current on purpose
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt  # to run the tests
 Copy-Item .env.example .env      # then fill in ANTHROPIC_API_KEY
 ```
 

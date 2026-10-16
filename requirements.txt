@@ -1,19 +1,25 @@
+# What the app needs, within the majors it was tested on. A fresh install
+# should use requirements.lock — the exact versions the suite passed with
+# (scripts/lock_requirements.py writes it). The caps stop an unlocked install
+# crossing a major version untested: anthropic 1.x moved to httpx2, and this
+# app patches the SDK's calls (audit-ops OPS-24).
+
 # Core
-anthropic>=0.116          # streaming + web_search_20260209 + vision
-fastapi>=0.115
-uvicorn[standard]>=0.30   # --workers 1: the rate limiter and the SSE registry
+anthropic>=0.116,<1       # streaming + web_search_20260209 + vision
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1  # --workers 1: the rate limiter and the SSE registry
                           # are both in-process
-pydantic>=2.7
-pydantic-settings>=2.3
-httpx>=0.27               # Google Fact Check API + Sarvam ASR
-python-multipart>=0.0.9   # multipart file uploads (image/audio)
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+httpx>=0.27,<1            # Google Fact Check API + Sarvam ASR
+python-multipart>=0.0.9,<1  # multipart file uploads (image/audio)
 
 # Link ingestion — /verify/link (app/providers/links.py) and the free probe
 # (scripts/link_probe.py). Pinned to the Instagram/YouTube/Facebook
 # extractors in code; the generic extractor is never allowed to run.
 yt-dlp>=2026.8.19         # Instagram, YouTube and Facebook (incl. share/r/ reel
                           # links) verified resolving anonymously on 2026-09-22.
-                          # Facebook changes often: upgrade first when it breaks.
+                          # NOT capped and NOT locked: the platforms change, and
+                          # yt-dlp must follow — pip install -U yt-dlp (OPS-25).
 
-# Dev / tests (free to run: tests never call paid APIs)
-pytest>=8.0
+# Tests: requirements-dev.txt (pytest is not installed into the running app).

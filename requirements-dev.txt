@@ -1,0 +1,4 @@
+# The app's packages plus what the test suite needs (free to run: tests never
+# call paid APIs). The running app installs requirements.lock without these.
+-r requirements.txt
+pytest>=8.0,<10
