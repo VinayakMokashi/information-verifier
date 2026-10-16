@@ -114,6 +114,12 @@ def main(argv: list[str] | None = None) -> int:
           f"{gone.cached} cached cop{'y' if gone.cached == 1 else 'ies'} and "
           f"{gone.transcripts} transcript{'' if gone.transcripts == 1 else 's'} of a "
           "public post. The spend ledger keeps its rows: they never held a message.")
+    if not gone.file_clean:
+        # Never reported as done when it is not (re-check F-7).
+        print("NOTE: something is reading the database, so its file still holds the "
+              "deleted text's earlier copy until the next housekeeping (within 6 "
+              "hours). To finish it now, close any program reading the database "
+              "and run this again.")
     return 0
 
 

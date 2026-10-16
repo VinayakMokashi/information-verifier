@@ -62,6 +62,83 @@ def test_a_deleted_message_leaves_no_bytes_in_the_database_files(repo, monkeypat
     assert b"REMNANT-ONE" not in data and b"REMNANT-TWO" not in data
 
 
+def _reader_holding_a_snapshot():
+    """Another program reading the database — a DB browser left open on it."""
+    reader = sqlite3.connect(settings.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM answers").fetchall()
+    return reader
+
+
+def test_the_wal_truncate_never_holds_writers_long_and_says_when_it_could_not(repo):
+    """REPRODUCED by re-check F-7: with a reader open, TRUNCATE took the
+    writer lock and waited out the 30 s busy timeout — every save, claim and
+    ledger write in the app waited with it — then gave up without a word,
+    the deleted message still in the WAL."""
+    import time
+
+    from app.store.db import truncate_wal
+
+    repo.save(_answer(1))                     # something in the WAL
+    reader = _reader_holding_a_snapshot()
+    try:
+        started = time.monotonic()
+        clean = truncate_wal()
+        took = time.monotonic() - started
+    finally:
+        reader.rollback()
+        reader.close()
+    assert clean is False and took < 5, (clean, took)
+    assert truncate_wal() is True             # once nobody is reading
+
+
+def test_forget_says_when_the_file_still_holds_the_old_copy(repo, monkeypatch, capsys):
+    from app.store import repository
+    from scripts import forget
+
+    answer = _answer(1, text="a forward to delete")
+    repo.save(answer)
+    monkeypatch.setattr(repository, "truncate_wal", lambda: False)
+    assert forget.main(["--job", answer.job_id, "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "still" in out and "close any program" in out
+
+
+def test_a_start_survives_a_rewrite_that_cannot_run(repo, monkeypatch, capsys):
+    """REPRODUCED by re-check F-11: the one-time VACUUM was the only
+    unguarded write at startup, so an open write transaction on the file
+    failed the start — where before it only slowed it."""
+    from fastapi.testclient import TestClient
+
+    import app.store.db as D
+    from app.main import app
+
+    def locked():
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(D, "vacuum_once", locked)
+    with TestClient(app):
+        pass
+    assert "next start" in capsys.readouterr().out
+
+
+def test_the_rewrite_is_marked_done_only_once_it_reached_the_file(repo):
+    """Re-check F-11's other half: a reader held at that moment let the
+    VACUUM land only in the WAL, yet the flag already said done — so the
+    old free pages stayed until some later checkpoint."""
+    from app.store.db import vacuum_once
+
+    repo.save(_answer(1))
+    reader = _reader_holding_a_snapshot()
+    try:
+        assert vacuum_once() is False         # could not finish: not marked
+    finally:
+        reader.rollback()
+        reader.close()
+    assert vacuum_once() is True              # tried again, finished
+    assert vacuum_once() is False             # and never again
+
+
 def test_what_was_deleted_before_secure_delete_is_gone_after_one_start(repo):
     """secure_delete covers deletions from now on. The real database already
     held earlier ones' bytes in its free pages (the answer cache had been

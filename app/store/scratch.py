@@ -18,7 +18,11 @@ from app.config import settings
 
 
 def folder() -> Path:
-    return Path(os.path.abspath(settings.db_path)).parent / "tmp"
+    """data/tmp/<database file name>: exactly what this process's lock
+    covers. The directory alone let the free demo (data/demo.db) empty the
+    real app's (data/verifier.db) files mid-decode (re-check F-3)."""
+    path = Path(os.path.abspath(settings.db_path))
+    return path.parent / "tmp" / path.name
 
 
 def workdir() -> tempfile.TemporaryDirectory:

@@ -252,6 +252,16 @@ class SpendLedger:
         search_errors = ",".join(f"{c}:{n}" for c, n in sorted(errors.items()))
         verb = "INSERT OR REPLACE" if overwrite else "INSERT OR IGNORE"
         with get_conn() as conn:
+            ref = ledger_ref(answer.job_id)
+            if conn.execute("SELECT 1 FROM spend_ledger WHERE job_id = ?",
+                            (ref,)).fetchone():
+                # Restored from a backup, this check's row carries the
+                # one-way reference, not the id: it IS this check. Keyed by
+                # the id alone, a sweep after a restore counted it twice
+                # (re-check F-13) — so the one writer knows, not a caller.
+                if not overwrite:
+                    return
+                conn.execute("DELETE FROM spend_ledger WHERE job_id = ?", (ref,))
             conn.execute(
                 verb + " INTO spend_ledger (job_id, day, finished_at, "
                 "kind, status, tier, cached, usd, llm_usd, search_usd, asr_usd, "
@@ -449,6 +459,9 @@ class Forgotten(NamedTuple):
     answers: int
     cached: int
     transcripts: int
+    # False: a reader held the write-ahead log, so the deleted text's earlier
+    # versions are still in the file until a later truncate (re-check F-7).
+    file_clean: bool = True
 
 
 class AnswerRepository:
@@ -548,8 +561,8 @@ class AnswerRepository:
                     transcripts += conn.execute(
                         "DELETE FROM transcript_cache WHERE key = ?",
                         (row["key"],)).rowcount or 0
-        truncate_wal()           # its earlier page versions too (review S5-11)
-        return Forgotten(gone, copies, transcripts)
+        clean = truncate_wal()   # its earlier page versions too (review S5-11)
+        return Forgotten(gone, copies, transcripts, clean)
 
     def record_progress(self, job_id: str, usage) -> bool:
         """A RUNNING check's bill so far, onto its row (audit-ops OPS-04: a
@@ -657,8 +670,9 @@ def housekeeping() -> dict[str, int]:
                        ("answer_cache_expired", repo.cache.prune),
                        ("transcripts_expired", repo.transcripts.prune),
                        # What those deleted, out of the write-ahead log too
-                       # (review S5-11). 0: it reports nothing of its own.
-                       ("wal_truncated", lambda: truncate_wal() or 0),
+                       # (review S5-11); said when a reader stopped it, and
+                       # tried again at the next run (re-check F-7).
+                       ("wal_not_emptied", lambda: int(not truncate_wal())),
                        # The money record, daily (audit-ops OPS-10).
                        ("ledger_backed_up", lambda: int(backup.backup_ledger() is not None)),
                        ("old_backups_deleted", backup.prune_backups)):

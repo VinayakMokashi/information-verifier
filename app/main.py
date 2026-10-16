@@ -403,9 +403,14 @@ async def _serving():
         print(f"[startup] removed {left} working file(s) a stopped run left behind")
     from app.store.db import vacuum_once
 
-    if await asyncio.to_thread(vacuum_once):
-        print("[startup] the database was rewritten once: what was deleted before "
-              "secure_delete leaves no trace in the file")
+    try:
+        if await asyncio.to_thread(vacuum_once):
+            print("[startup] the database was rewritten once: what was deleted before "
+                  "secure_delete leaves no trace in the file")
+    except Exception as exc:  # noqa: BLE001 — a held write must not fail the start
+        # (re-check F-11). Not marked done, so it is simply tried again.
+        print(f"[startup] the one-time rewrite could not run ({type(exc).__name__}); "
+              "it is tried again at the next start")
     # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
     # is dead by definition — it would otherwise be polled forever by a page
     # that will never get an answer. (Only once this process holds the

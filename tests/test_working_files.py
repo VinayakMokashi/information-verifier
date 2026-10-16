@@ -41,13 +41,14 @@ def _staged_by(call, monkeypatch) -> list[Path]:
 def test_a_decode_stages_the_upload_under_the_data_folder(data, monkeypatch):
     staged = _staged_by(lambda: media.normalize_to_wav(b"OggS", "voice.ogg",
                                                        max_seconds=300), monkeypatch)
-    assert staged and staged[0].parent.parent == data / "tmp"
+    assert staged and staged[0].parent.parent == scratch.folder()
+    assert scratch.folder().is_relative_to(data)
     assert not staged[0].exists()            # and gone once the block ended
 
 
 def test_splitting_for_asr_stages_there_too(data, monkeypatch):
     staged = _staged_by(lambda: media.split_wav(b"RIFF", 29), monkeypatch)
-    assert staged and staged[0].parent.parent == data / "tmp"
+    assert staged and staged[0].parent.parent == scratch.folder()
 
 
 def test_a_reel_download_stages_there_too(data, monkeypatch):
@@ -73,9 +74,25 @@ def test_a_reel_download_stages_there_too(data, monkeypatch):
 def test_startup_clears_what_a_killed_decode_left(data):
     from app.main import app
 
-    leftover = data / "tmp" / "tmpdead" / "src.ogg"
+    leftover = scratch.folder() / "tmpdead" / "src.ogg"
     leftover.parent.mkdir(parents=True)
     leftover.write_bytes(b"someone's voice note")
     with TestClient(app):
         pass
     assert not leftover.exists()
+
+
+def test_one_databases_start_never_clears_anothers_work(data, monkeypatch):
+    """REPRODUCED by re-check F-3: the working folder was the database's
+    DIRECTORY plus tmp, while the single-instance lock is per database FILE.
+    The free demo (data/demo.db) starting beside the real app
+    (data/verifier.db) emptied the real app's files mid-decode — a voice
+    note then refused as unreadable, a funded reel failed."""
+    with scratch.workdir() as live:
+        staged = Path(live) / "src.ogg"
+        staged.write_bytes(b"a voice note, mid-decode")
+        monkeypatch.setattr(settings, "db_path", str(data / "demo.db"))
+        scratch.clear()                       # the demo's start
+        survived = staged.exists()
+        monkeypatch.setattr(settings, "db_path", str(data / "verifier.db"))
+    assert survived, "another database's start deleted it"

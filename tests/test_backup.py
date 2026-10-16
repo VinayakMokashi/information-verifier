@@ -114,6 +114,29 @@ def test_a_restore_beside_surviving_answers_never_counts_twice(live):
     assert _rows(settings.db_path) == 2
 
 
+def test_a_restore_then_a_sweep_never_counts_a_check_twice(live):
+    """REPRODUCED by re-check F-13: a check whose final save failed keeps
+    its row PROCESSING while its ledger row is written (OPS-06). Restored
+    from a backup, that ledger row carries ledger_ref(); the next start's
+    sweep then failed the row and wrote ITS ledger row under the raw id —
+    $0.16 counted as $0.32 in the spend truth. The one writer now knows."""
+    now = datetime.now(timezone.utc)
+    answer = Answer(job_id=uuid.uuid4().hex, status=JobStatus.PROCESSING, created_at=now,
+                    input_text="a forward",
+                    usage=ReportUsage(estimated_usd=0.16, llm_usd=0.16, search_usd=0.0))
+    repo = AnswerRepository()
+    repo.save(answer)
+    repo.ledger.record(answer, "text")      # billed; the finished row never saved
+    made = backup.backup_ledger()
+    with get_conn() as conn:                # only the ledger was lost
+        conn.execute("DELETE FROM spend_ledger")
+    assert backup.restore_ledger(made) == 1
+    repo.sweep_orphans()                    # the next start
+    with get_conn() as conn:
+        rows, usd = conn.execute("SELECT COUNT(*), SUM(usd) FROM spend_ledger").fetchone()
+    assert (rows, round(usd, 2)) == (1, 0.16)
+
+
 def test_a_restore_brings_the_ledger_back(live):
     for _ in range(2):
         _paid_check()

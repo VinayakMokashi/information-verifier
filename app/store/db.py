@@ -136,30 +136,50 @@ _VACUUMED = "secure_delete_vacuumed"
 def vacuum_once() -> bool:
     """Rewrite the file once, so what was deleted BEFORE secure_delete was
     on leaves its free pages too: the answer cache had been pruning
-    messages for weeks (review S5-11). Recorded in `meta`; called at startup
-    only, while this process alone holds the database. -> whether it ran."""
+    messages for weeks (review S5-11). Called at startup only, while this
+    process alone holds the database. Marked done in `meta` only once the
+    rewrite has reached the FILE: with a reader open it lands in the WAL
+    alone, and was marked done anyway (re-check F-11) — then the next start
+    tries again. -> whether it ran and finished."""
     with get_conn() as conn:
         if conn.execute("SELECT 1 FROM meta WHERE key = ?", (_VACUUMED,)).fetchone():
             return False
     conn = get_conn()
     try:
         conn.execute("VACUUM")
-        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
-                     (_VACUUMED,))
-        conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         conn.close()
+    if not truncate_wal():
+        print("[startup] the one-time rewrite could not finish: something is reading "
+              "the database. It is tried again at the next start.")
+        return False
+    with get_conn() as conn:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                     (_VACUUMED,))
     return True
 
 
-def truncate_wal() -> None:
+# How long a WAL truncate may hold the writer lock waiting for readers. The
+# connection's own 30 s busy timeout made every save, claim and ledger write
+# in the app wait that long behind one reader (re-check F-7).
+_TRUNCATE_WAIT_S = 1.0
+
+
+def truncate_wal() -> bool:
     """After a deletion: fold the write-ahead log into the database and
     empty it, so the deleted content's earlier page versions do not linger
-    in verifier.db-wal either (review S5-11). Waits for readers up to the
-    busy timeout; called off the event loop."""
-    with get_conn() as conn:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    in verifier.db-wal either (review S5-11). Waits for readers a second at
+    most; called off the event loop. -> True when the log is empty now;
+    False when a reader held it (re-check F-7: it gave up silently)."""
+    conn = sqlite3.connect(settings.db_path, timeout=_TRUNCATE_WAIT_S)
+    try:
+        conn.execute(f"PRAGMA busy_timeout={int(_TRUNCATE_WAIT_S * 1000)}")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        return busy == 0
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        conn.close()
 
 
 def _drop_legacy(conn: sqlite3.Connection) -> None:
