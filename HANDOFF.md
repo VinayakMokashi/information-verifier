@@ -61,10 +61,12 @@ Chrome with Cloudflare's test keys).
 ([audit-ops.md](docs/research/2026-10-15/audit-ops.md)). DONE: OPS-06
 b7d4ced (a check always ends — saved, billed, its stream closed — and a
 5-minute sweep fails rows stuck mid-flight that nothing here still runs);
-OPS-04 (a running check's bill so far is checkpointed onto its row, so a
-killed one still reaches the ledger). NEXT: OPS-07 the bot forgets
-in-flight checks on restart (+ §11 26); OPS-05 a second copy on the same
-database; OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
+OPS-04 2b5a261 (a running check's bill so far is checkpointed onto its row,
+so a killed one still reaches the ledger); OPS-05 (one server per
+database: an OS lock beside it, taken before the startup sweep — a second
+copy now refuses instead of failing the first one's checks; share_demo.ps1
+asks for the running app to be closed). NEXT: OPS-07 the bot forgets
+in-flight checks on restart (+ §11 26); OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs
 and job ids; OPS-10 no database backup; OPS-24 unpinned dependencies;
 OPS-25 no yt-dlp update path. Then (4) running 24/7 here — the domain,

@@ -15,6 +15,15 @@ if (-not $cloudflared) {
     else { Write-Error "cloudflared not found. Install: winget install -e --id Cloudflare.cloudflared"; exit 1 }
 }
 
+# One server per database (a second copy refuses to start), and the running
+# one would not accept the tunnel's name anyway - so ask for it to be closed.
+try {
+    Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2 | Out-Null
+    Write-Host ">> The app is already running on port 8000 (start.cmd?). Close it first:" -ForegroundColor Red
+    Write-Host ">> this script starts its own copy, which accepts the tunnel's public name." -ForegroundColor Red
+    exit 1
+} catch { }
+
 # Visitors arrive through the tunnel under its random *.trycloudflare.com
 # name, and the app refuses paid checks addressed to a name it does not know
 # (a DNS-rebinding page sends its own). Set for the server started here only;

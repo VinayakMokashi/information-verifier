@@ -281,13 +281,35 @@ async def _sweep_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.store import instance
+
+    # FIRST, before _serving's startup sweep can touch a running copy's checks
+    # (audit OPS-05: a second start failed them all, then died on the busy port).
+    db_path = settings.db_path
+    try:
+        instance.acquire(db_path)
+    except instance.AlreadyRunning:
+        print("[startup] the app is already running on this database (another "
+              "window? start.cmd?) — not starting a second copy. Close the other "
+              "one first.")
+        raise
+    try:
+        async with _serving():
+            yield
+    finally:
+        instance.release(db_path)
+
+
+@asynccontextmanager
+async def _serving():
     import asyncio
     import contextlib
 
     init_db()
     # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
     # is dead by definition — it would otherwise be polled forever by a page
-    # that will never get an answer.
+    # that will never get an answer. (Only once this process holds the
+    # database: see the lock above.)
     from app.store.repository import AnswerRepository, housekeeping
 
     healed = AnswerRepository().sweep_orphans()
