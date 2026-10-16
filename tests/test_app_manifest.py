@@ -88,6 +88,18 @@ def test_the_install_button_appears_only_when_it_can_work():
     assert 'id="iosHint"' in PAGE and "Add to Home Screen" in PAGE   # iOS: say how
 
 
+def test_on_ios_only_a_browser_that_can_install_shows_the_button():
+    """Review S5-15: links travel by Telegram and WhatsApp, and an iPhone
+    opens them in that app's own browser, which has no Add to Home Screen —
+    yet the button showed there (only Instagram's and Facebook's were known).
+    Safari, Chrome and Firefox for iOS all carry "Safari/" in their user
+    agent; a bare in-app web view does not."""
+    start = PAGE.index("const IOS =")
+    ios = PAGE[start:PAGE.index("$(\"install\").addEventListener", start)]
+    assert "Safari\\/" in ios, "the iOS button does not ask for a real browser"
+    assert "Open this page in Safari" in PAGE   # for in-app browsers that pass as Safari
+
+
 def test_a_share_fills_the_box_and_never_sends_it():
     m = _manifest()["share_target"]
     assert m["action"] == "/" and m["method"] == "GET"

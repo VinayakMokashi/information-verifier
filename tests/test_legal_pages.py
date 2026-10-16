@@ -94,6 +94,17 @@ def test_the_notice_is_for_adults_and_says_where_to_complain(client):
     assert "Data Protection Board" in text and "13 May 2027" in text
 
 
+def test_the_notice_claims_no_more_than_the_code_does(client):
+    """Review S5-14: the "In short" box — what most readers read — promised
+    deletion after 30 days everywhere, while Anthropic, Sarvam and Telegram
+    keep their own copies on their own terms; and "the counts behind the
+    daily limits ... only in memory" while the deployment's day count and
+    budget are on disk (holding no one's data). Say exactly what is ours."""
+    text = _read(client, "/privacy")
+    assert "We delete our copy after" in text and "keep theirs" in text
+    assert "The per-person counts behind the daily limits" in text
+
+
 def test_the_notice_says_who_can_open_an_answer(client):
     """GET /reports/{job_id} is open to whoever has the id, and the page puts
     it in the address bar — so a shared address shares the message."""

@@ -229,7 +229,7 @@
     <button class="install hidden" id="install" type="button">Install app</button>
   </div>
   <p class="ios-hint hidden" id="iosHint">To install: tap <b>Share</b>, then
-     <b>Add to Home Screen</b>.</p>
+     <b>Add to Home Screen</b>. Not there? Open this page in Safari first.</p>
 </header>
 
 <main id="thread">
@@ -800,6 +800,11 @@ const INSTALLED = matchMedia("(display-mode: standalone)").matches
                   || navigator.standalone === true;
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
             || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// A browser that has "Add to Home Screen": Safari, Chrome and Firefox for iOS
+// all carry "Safari/" in their user agent. An app's own web view — a link
+// opened inside Telegram or WhatsApp — does not, and has no such menu item
+// (review S5-15). One that passes as Safari gets the hint's last line.
+const IOS_BROWSER = IOS && /Safari\//.test(navigator.userAgent);
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();               // this button, not Chrome's own bar
   installPrompt = e;
@@ -809,7 +814,7 @@ window.addEventListener("appinstalled", () => {
   installPrompt = null;
   $("install").classList.add("hidden");
 });
-if (IOS && !INSTALLED && !IN_APP) $("install").classList.remove("hidden");
+if (IOS_BROWSER && !INSTALLED && !IN_APP) $("install").classList.remove("hidden");
 $("install").addEventListener("click", async () => {
   if (installPrompt) {
     const offer = installPrompt;

@@ -55,8 +55,10 @@ S5-11, S5-12, S5-16, S5-17 in one commit (deleted is gone from the file:
 secure_delete + a WAL truncate + a ONE-TIME VACUUM of the real database at
 the next app start; backups carry a one-way reference, never a job id; a
 deleted check's stream is not replayed; working files under data/tmp,
-emptied at startup).
-NEXT: S5-14 (two overstated sentences), S5-15 (iOS in-app browsers). Each: failing test
+emptied at startup); S5-14 + S5-15 (the notice says "we delete OUR
+copy"; the iOS Install button only where Add to Home Screen exists). ALL
+18 findings are closed. Next: PROJECT_PLAN §7 for the review; then the
+owner's list below; then WhatsApp. Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 
