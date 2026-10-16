@@ -119,14 +119,22 @@ copy $env:USERPROFILE\.cloudflared\<UUID>.json C:\Windows\System32\config\system
 ```
 
 In the copied `config.yml`, change `credentials-file:` to the new folder.
-Then:
+Then install the service, and tell it what to run. Installed without a
+token, the service starts cloudflared with no arguments, and that runs
+**no tunnel**. Cloudflare's own Windows page makes this registry change
+as its steps 13–14; it was missing here until the re-check (F-5).
 
 ```powershell
 cloudflared service install
+$exe = (Get-Command cloudflared).Source
+Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Cloudflared" ImagePath `
+  ('"' + $exe + '" --config="C:\Windows\System32\config\systemprofile\.cloudflared\config.yml" tunnel run')
+Restart-Service cloudflared
 ```
 
-**Check:** `Get-Service cloudflared` shows Running, and the site still
-loads after closing the `tunnel run` window.
+**Check:** `Get-Service cloudflared` shows Running, AND the site still
+loads after closing the `tunnel run` window. The second half is the one
+that catches a service running no tunnel.
 
 **The app and the bot at boot.** `scripts\serve_forever.py` starts both
 and restarts either if it stops. It writes `logs\app-*.log` and
@@ -147,14 +155,33 @@ Register-ScheduledTask -TaskName "Information Verifier" -Action $action `
   -Trigger $trigger -Settings $settings -User "$env:USERNAME" -Password (Read-Host "Windows password")
 ```
 
-A password is needed to run with nobody signed in. If your account signs
-in with a PIN or a Microsoft account and this fails, the research's advice
-is a separate **local** standard account for the service. That account
-needs read and write access to the project folder.
+A password is needed to run with nobody signed in. With a Microsoft
+account, give that account's password, not the PIN.
 
-**Check:** restart the PC and don't sign in. From your phone, the site
-answers and the bot replies. `logs\supervisor-<today>.log` shows both
-started.
+If that is refused, the fallback is a separate **local** standard account
+for the service. It needs more than the project folder (re-check F-10):
+Python and ffmpeg live in YOUR profile, which only you can read, so the
+task would fail before anything starts. As administrator, with the
+account's name:
+
+```powershell
+$account = "<the service account>"
+$python = ((Get-Content "$dir\.venv\pyvenv.cfg") -match '^home') -replace '^home\s*=\s*', ''
+$ffmpeg = Split-Path (Get-Command ffmpeg).Source
+icacls $dir /grant "${account}:(OI)(CI)M"
+icacls $python /grant "${account}:(OI)(CI)RX"
+icacls $ffmpeg /grant "${account}:(OI)(CI)RX"
+[Environment]::SetEnvironmentVariable("Path",
+  [Environment]::GetEnvironmentVariable("Path", "Machine") + ";$ffmpeg", "Machine")
+```
+
+Then register the task with `-User $account` and that account's password.
+
+**Check, before any restart:** `Start-ScheduledTask "Information Verifier"`.
+Within a minute `logs\supervisor-<today>.log` shows both started, and
+http://127.0.0.1:8000/ready says `"ready"`. That covers ffmpeg too, as
+whatever account the task runs as. Then restart the PC and don't sign
+in: from your phone, the site answers and the bot replies.
 
 ## If something goes wrong
 
