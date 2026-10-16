@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     # running low, failures in a row, a restart mid-check) is sent there
     # (app/providers/alerts.py). Empty = off. The bot's /id command says it.
     owner_chat_id: str = ""
+    # Who runs the public service and where to write — printed by the privacy
+    # notice and the terms (app/api/legal.py) for questions, deletion,
+    # corrections and complaints. Publishing a person's name and address is
+    # the owner's decision, so neither lives in the repo. Empty = the pages
+    # say a contact is published before launch, and a public deployment is
+    # warned at startup.
+    operator_name: str = ""
+    contact_email: str = ""
     # True only in the FREE demo server (scripts/fake_stages.apply_fake_stages):
     # /ready says "demo", and the bot refuses to wire people to it.
     demo_mode: bool = False

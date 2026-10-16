@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Privacy notice — Information Verifier</title>
+<!-- Served by app/api/legal.py, which fills in every double-brace marker
+     from settings. What this page promises, the code must do: the periods
+     are the settings the deleting code reads, and tests/test_legal_pages.py
+     moves them to prove it. -->
+<style>
+  :root {
+    --bg: #fbfbfa; --surface: #ffffff; --ink: #16181d; --ink-2: #5b6270;
+    --ink-3: #8b93a1; --line: #e6e6e3; --accent: #1d4ed8; --accent-soft: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0f13; --surface: #161920; --ink: #e9ebef; --ink-2: #a3abba;
+      --ink-3: #737b8a; --line: #262b35; --accent: #7aa2ff; --accent-soft: #1a2136;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Noto Sans", "Noto Sans Devanagari", sans-serif;
+    font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  header { border-bottom: 1px solid var(--line);
+           padding: 12px max(16px, env(safe-area-inset-left)); }
+  header a { color: var(--ink); text-decoration: none; font-weight: 650; }
+  main { max-width: 720px; margin: 0 auto;
+         padding: 24px max(16px, env(safe-area-inset-left)) 48px; }
+  h1 { font-size: 1.6rem; letter-spacing: -.02em; margin: 0 0 4px; }
+  h2 { font-size: 1.08rem; margin: 30px 0 8px; letter-spacing: -.01em; }
+  p, li { color: var(--ink-2); }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 1.25em; }
+  li { margin-bottom: 8px; }
+  strong { color: var(--ink); font-weight: 650; }
+  a { color: var(--accent); }
+  .meta { color: var(--ink-3); font-size: .88rem; margin-bottom: 20px; }
+  .short { background: var(--accent-soft); border-left: 3px solid var(--accent);
+           border-radius: 0 10px 10px 0; padding: 12px 16px 2px; }
+  .short b { display: block; font-size: .74rem; text-transform: uppercase;
+             letter-spacing: .06em; color: var(--accent); margin-bottom: 4px; }
+  .short li { color: var(--ink); }
+  code { background: var(--surface); border: 1px solid var(--line);
+         border-radius: 4px; padding: 0 .3em; font-size: .9em; }
+</style>
+</head>
+<body>
+<header><a href="./">🔎 Information Verifier</a></header>
+<main>
+  <h1>Privacy notice</h1>
+  <p class="meta">Last updated 16 October 2026 · See also the <a href="terms">terms of use</a></p>
+
+  <div class="short">
+    <b>In short</b>
+    <ul>
+      <li>What you send goes to the services listed below so that it can be
+          checked, and it is deleted after {{retention}}.</li>
+      <li>No accounts, no ads, no tracking. For people aged 18 and over.</li>
+      <li>Please don't send other people's private information.</li>
+    </ul>
+  </div>
+
+  <h2>Who runs this</h2>
+  <p>Information Verifier is a free, non-commercial service run by
+     {{operator}} in India. To ask a question, to have something deleted or
+     corrected, or to make a complaint, write to {{contact}}.</p>
+
+  <h2>What is collected</h2>
+  <ul>
+    <li><strong>What you send:</strong> a message, a screenshot or photo, a
+        voice note or video, or a link to a public post on Instagram, YouTube
+        or Facebook.</li>
+    <li><strong>What is made from it:</strong> the text read from an image,
+        the words heard in a recording, and a linked post's caption and
+        words.</li>
+    <li><strong>The answer</strong> written for you, with its sources.</li>
+    <li><strong>To keep within the daily limits:</strong> on this website,
+        your internet (IP) address and a cookie holding a random number for
+        your browser; on Telegram, your Telegram user or chat number. These
+        are kept in the server's memory to count today's checks and are not
+        written to disk — except that the Telegram bot notes your chat number
+        until your answer is delivered (at most a day), so that a restart
+        does not lose it.</li>
+    <li><strong>Your answer language</strong>, if you choose one: saved in
+        your own browser only.</li>
+  </ul>
+
+  <h2>Why</h2>
+  <p>To check what you sent and show you the answer, and to stop abuse and
+     keep the service within its daily budget. We don't use any of it for
+     advertising or profiling, and we don't train AI on it.</p>
+
+  <h2>Who receives it</h2>
+  <ul>
+    <li><strong>Anthropic</strong> (USA): its AI, Claude, reads what you sent
+        and what was read from it, searches the web, and writes the answer.
+        Claude also reads the text in screenshots. Anthropic does not train
+        its models on it, and deletes it within 30 days — except content its
+        safety systems flag, which it may keep for up to 2 years (and safety
+        scores for up to 7 years), or longer where the law requires.</li>
+    <li><strong>Google</strong> (USA): the start of the text, to look it up in
+        Google's database of published fact-checks (Fact Check Tools).</li>
+    <li><strong>Sarvam AI</strong> (India): the sound of voice notes and
+        videos, to turn it into text. Our Sarvam account is set to keep
+        none of it.</li>
+    <li><strong>Instagram, YouTube or Facebook</strong>, when you send a
+        link: our server fetches that public post to read its caption and
+        sound. The platform sees our server, not you.</li>
+    <li><strong>Cloudflare</strong> (USA): carries all traffic to this
+        website, and runs the check that you are a person (Turnstile) under
+        its own privacy policy.</li>
+    <li><strong>Telegram</strong>, if you use the Telegram bot: it carries
+        your messages and the answers.</li>
+  </ul>
+  <p>Nothing is sold, and nothing goes anywhere else.</p>
+
+  <h2>How long it is kept</h2>
+  <ul>
+    <li><strong>Your message, what was read from it, and the answer:</strong>
+        deleted after {{retention}}. Until then, anyone who has the address of
+        the answer's page (it ends in <code>#job=…</code>) can open it, so
+        share that address only if you mean to.</li>
+    <li><strong>A copy used to answer the exact same message again</strong>,
+        without paying for it twice: deleted after {{cache}}.</li>
+    <li><strong>What a public post said</strong> (its caption and words):
+        deleted after {{transcripts}}, so that the same video is not
+        transcribed twice.</li>
+    <li><strong>A record of what each check cost</strong> — its date, kind and
+        price, never what was sent and never who sent it: kept, to track
+        spending.</li>
+    <li><strong>The counts behind the daily limits:</strong> only in the
+        server's memory, cleared after the day they count (and whenever the
+        server restarts).</li>
+  </ul>
+
+  <h2>What this service does not do</h2>
+  <p>There are no accounts, no ads, no analytics and no tracking. This site
+     sets one cookie, named <code>vd</code>: it holds a random number for your
+     browser, so that checks can be counted per device, and nothing about
+     you.</p>
+
+  <h2>For adults only</h2>
+  <p>This service is for people aged 18 and over. Please don't use it if you
+     are younger.</p>
+
+  <h2>Other people's information</h2>
+  <p>Forwarded messages and screenshots often carry other people's names,
+     numbers or photos. Before you send one, please remove anything private
+     that isn't needed to check the claim. Whatever you send is kept only as
+     long as described above.</p>
+
+  <h2>Your rights</h2>
+  <p>To have a check deleted or corrected sooner, write to {{contact}} with
+     the address of its answer page (ending in <code>#job=…</code>), or with
+     the message and the day you sent it. We aim to reply within 7 days. From
+     13 May 2027 you can also complain to the Data Protection Board of
+     India.</p>
+
+  <h2>Changes</h2>
+  <p>India's Digital Personal Data Protection Rules take full effect on
+     13 May 2027, and this notice will be updated before then. The date at
+     the top says when it last changed.</p>
+</main>
+</body>
+</html>

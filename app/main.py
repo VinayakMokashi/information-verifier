@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette._utils import get_route_path
 
 from app.api.dashboard import router as dashboard_router
+from app.api.legal import router as legal_router
 from app.api.local import names_this_machine
 from app.api.routes import router
 from app.api.stream import router as stream_router
@@ -355,6 +356,28 @@ async def lifespan(app: FastAPI):
         instance.release(db_path)
 
 
+def _going_live_warnings() -> list[str]:
+    """What a PUBLIC deployment is still missing. Each gap looks fine from
+    this machine and only shows to strangers, so startup says it out loud."""
+    from app.providers import turnstile
+
+    if not settings.public_hosts.strip():
+        return []
+    warnings = []
+    if not turnstile.enabled():
+        # Every visitor's browser could submit paid checks with no person
+        # proven behind them.
+        warnings.append("[startup] PUBLIC_HOSTS is set but Turnstile is not: visitors' "
+                        "paid checks are not challenged. Set TURNSTILE_SITE_KEY and "
+                        "TURNSTILE_SECRET_KEY in .env (decided 2026-10-15).")
+    if not settings.contact_email.strip():
+        # The privacy notice promises deletion and corrections on request.
+        warnings.append("[startup] PUBLIC_HOSTS is set but CONTACT_EMAIL is not: the "
+                        "privacy notice and the terms give visitors no one to write to. "
+                        "Set CONTACT_EMAIL (and OPERATOR_NAME) in .env.")
+    return warnings
+
+
 @asynccontextmanager
 async def _serving():
     import asyncio
@@ -384,14 +407,8 @@ async def _serving():
     stale = _ytdlp_staleness()
     if stale:
         print(stale)
-    from app.providers import turnstile
-
-    if settings.public_hosts.strip() and not turnstile.enabled():
-        # Going live without it is silent otherwise: every visitor's browser
-        # could submit paid checks with no person proven behind them.
-        print("[startup] PUBLIC_HOSTS is set but Turnstile is not: visitors' paid "
-              "checks are not challenged. Set TURNSTILE_SITE_KEY and "
-              "TURNSTILE_SECRET_KEY in .env (decided 2026-10-15).")
+    for warning in _going_live_warnings():
+        print(warning)
     tasks = [asyncio.create_task(_housekeeping_loop()), asyncio.create_task(_sweep_loop())]
     try:
         yield
@@ -423,6 +440,8 @@ app.include_router(router)
 app.include_router(stream_router)
 # Local-only; see app/api/dashboard.py. Before the static mount so it wins.
 app.include_router(dashboard_router)
+# The privacy notice and the terms (app/api/legal.py) — public.
+app.include_router(legal_router)
 
 
 @app.get("/health")

@@ -202,6 +202,7 @@
   .human { display: flex; justify-content: center; }
   .hint { max-width: 720px; margin: 8px auto 0; color: var(--ink-3);
           font-size: .74rem; text-align: center; }
+  .hint a { color: inherit; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -218,7 +219,8 @@
     <h2>Send me something to check.</h2>
     <p>A forwarded message, a screenshot, a voice note, or a link to a reel —
        in any language. I'll check it against fact-checkers and official
-       sources, and tell you plainly what I find.</p>
+       sources, and tell you plainly what I find. When nobody reliable has
+       covered something, I'll say so instead of guessing.</p>
     <div class="chips">
       <button class="chip" type="button" data-fill="Drinking hot water kills the coronavirus">Drinking hot water kills the coronavirus</button>
       <button class="chip" type="button" data-fill="NASA confirmed the Earth will have 6 days of total darkness">NASA confirmed 6 days of total darkness</button>
@@ -254,9 +256,12 @@
          unless Cloudflare needs the person to tick a box. -->
     <div class="human" id="human"></div>
   </div>
-  <p class="hint">Answers cite fact-checkers and official sources. I can be
-     wrong — open the sources. When nobody reliable has covered something,
-     I'll say so instead of guessing.</p>
+  <!-- The AI line (Anthropic's Usage Policy) and 18+ (policy-legal.md):
+       on screen whenever a check can be sent. -->
+  <p class="hint">I'm an AI (Claude), and I can be wrong — open the sources
+     before you rely on an answer. For ages 18+. Sending something means you
+     accept the <a href="terms">terms</a> and the
+     <a href="privacy">privacy notice</a>.</p>
 </div>
 
 <script>
@@ -504,10 +509,13 @@ function drawFooter(report) {
     ? `<span class="basis">· answer was cut short</span>` : "";
   const cached = report.cached
     ? `<span class="basis">· from cache</span>` : "";
+  // On the answer itself, not only on the page: a screenshot of one answer
+  // is forwarded without the page around it.
   const foot = document.createElement("div");
   foot.className = "foot";
   foot.innerHTML = `${conf}<span class="pill ${tier}">${label}</span>`
-                 + `<span class="basis">${basis}</span>${cut}${cached}`;
+                 + `<span class="basis">${basis}</span>${cut}${cached}`
+                 + `<span class="basis">· AI-written</span>`;
   turn.answer.appendChild(foot);
 }
 

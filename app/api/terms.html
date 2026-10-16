@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Terms of use — Information Verifier</title>
+<!-- Served by app/api/legal.py, which fills in every double-brace marker
+     from settings (who runs the service, where to write). -->
+<style>
+  :root {
+    --bg: #fbfbfa; --surface: #ffffff; --ink: #16181d; --ink-2: #5b6270;
+    --ink-3: #8b93a1; --line: #e6e6e3; --accent: #1d4ed8; --accent-soft: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0f13; --surface: #161920; --ink: #e9ebef; --ink-2: #a3abba;
+      --ink-3: #737b8a; --line: #262b35; --accent: #7aa2ff; --accent-soft: #1a2136;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Noto Sans", "Noto Sans Devanagari", sans-serif;
+    font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  header { border-bottom: 1px solid var(--line);
+           padding: 12px max(16px, env(safe-area-inset-left)); }
+  header a { color: var(--ink); text-decoration: none; font-weight: 650; }
+  main { max-width: 720px; margin: 0 auto;
+         padding: 24px max(16px, env(safe-area-inset-left)) 48px; }
+  h1 { font-size: 1.6rem; letter-spacing: -.02em; margin: 0 0 4px; }
+  h2 { font-size: 1.08rem; margin: 30px 0 8px; letter-spacing: -.01em; }
+  p, li { color: var(--ink-2); }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 1.25em; }
+  li { margin-bottom: 8px; }
+  strong { color: var(--ink); font-weight: 650; }
+  a { color: var(--accent); }
+  .meta { color: var(--ink-3); font-size: .88rem; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<header><a href="./">🔎 Information Verifier</a></header>
+<main>
+  <h1>Terms of use</h1>
+  <p class="meta">Last updated 16 October 2026 · See also the <a href="privacy">privacy notice</a></p>
+
+  <h2>What this is</h2>
+  <p>Information Verifier checks claims — forwarded messages, screenshots,
+     voice notes and video links — against fact-checkers and other sources,
+     and explains what it finds. It is free, and it is run on a best-effort
+     basis by {{operator}}.</p>
+
+  <h2>Answers are written by AI</h2>
+  <p>Every answer is written by an AI: Claude, made by Anthropic. It can be
+     wrong, incomplete or out of date, even when it sounds sure.
+     <strong>Don't rely on an answer without checking the linked sources
+     yourself.</strong> When nothing reliable covers a claim, the answer is
+     meant to say so — and that is an answer too.</p>
+
+  <h2>Not professional advice</h2>
+  <p>Answers are general information about whether a claim is supported.
+     They are not medical, legal or financial advice. For a decision about
+     your health, your money or your legal rights, ask a qualified
+     professional.</p>
+
+  <h2>Sources belong to others</h2>
+  <p>The pages an answer links to belong to other people. We don't control
+     them, and neither they nor Google endorse this service or its
+     answers.</p>
+
+  <h2>Limits</h2>
+  <p>Each person gets a few checks a day, and everyone shares one daily
+     budget. The service may slow down, pause or stop at any time, with or
+     without notice.</p>
+
+  <h2>Using it fairly</h2>
+  <ul>
+    <li>You must be 18 or older.</li>
+    <li>Don't use it to break the law, or to harass or harm anyone.</li>
+    <li>Don't send other people's private information that isn't needed to
+        check a claim.</li>
+    <li>Don't try to get around the limits, to automate it, or to disrupt
+        it.</li>
+  </ul>
+
+  <h2>No warranty</h2>
+  <p>The service is provided free and "as is", without any warranty. As far
+     as the law allows, we are not liable for any loss that comes from using
+     it or from relying on an answer.</p>
+
+  <h2>Corrections and takedowns</h2>
+  <p>If an answer is wrong, or something here should be taken down, write to
+     {{contact}}. We aim to reply within 7 days.</p>
+
+  <h2>Privacy</h2>
+  <p>The <a href="privacy">privacy notice</a> explains what happens to what
+     you send.</p>
+
+  <h2>Law</h2>
+  <p>These terms are governed by the laws of India.</p>
+
+  <h2>Changes</h2>
+  <p>These terms may change; the date at the top says when they last did.
+     Using the service after a change means you accept the new terms.</p>
+</main>
+</body>
+</html>

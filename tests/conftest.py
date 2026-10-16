@@ -22,6 +22,10 @@ os.environ["TURNSTILE_SECRET_KEY"] = ""
 # No owner alerts from a test (app/providers/alerts.py): tests/test_alerts.py
 # turns them on against a fake Telegram.
 os.environ["OWNER_CHAT_ID"] = ""
+# No published contact unless a test sets one: .env will hold the real one,
+# and the legal pages' tests pin what an unset one looks like.
+os.environ["CONTACT_EMAIL"] = ""
+os.environ["OPERATOR_NAME"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
