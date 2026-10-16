@@ -98,7 +98,9 @@ the code's own settings, an AI line on every answer on every surface, the
 bot's /privacy and /delete, a deletion tool for the owner, and an
 installable app; drafting the notice against the code found the limiter
 keeping visitors' addresses for weeks, and the bot billing unknown
-commands as claims (§7). **1230 tests.**
+commands as claims (§7). Its review found 18 more, all fixed the same night;
+step 4 is ready for the owner (`docs/go-live.md`, `scripts/serve_forever.py`).
+**1291 tests.**
 
 **Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
 **the WhatsApp bot**, and the remaining to-dos.
@@ -440,6 +442,72 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-16 (late night) — Step 5 reviewed: 18 findings, each reproduced, all fixed; step 4 made ready
+
+An adversarial review of step 5
+([review-step5.md](docs/research/2026-10-16/review-step5.md)) found 18
+defects: 7 medium, 11 low, 16 of them reproduced. **Five were my own
+fixes** that covered the case they named and missed the rule behind it
+— 2026-09-22's lesson, again. By theme:
+
+- **The notice promised what the code did not do:**
+  - Sarvam's zero retention. It is now a switch the owner throws after
+    the dashboard change (ebbe0aa).
+  - "At most a day" for the bot's pending file. It now expires while
+    the bot runs (df14115).
+  - Who asked, held after the day: the bot's locks (df14115), and the
+    limiter around midnight (2e4562c).
+  - Deleted bytes left in the file and the WAL. Fixed with
+    secure_delete, a WAL truncate, and one VACUUM at the next start.
+  - Job ids in the "content-free" backups. They now carry a one-way
+    reference.
+  - An answer replayed from memory after its deletion.
+  - Voice notes left in %TEMP% by a hard stop. Work now goes in
+    data/tmp, emptied at startup.
+    (The last four: 344ef13.)
+  - Two overstated sentences (ae85077).
+- **The deletion tool could not find, or over-deleted:**
+  - a reel could not be found, because the stored message was
+    overwritten; run_check now keeps what was sent;
+  - a pasted #job= address matched nothing;
+  - a cache repeat saved twice, undoing a deletion;
+  - one viral forward was deleted for everyone who sent it.
+  (All ed88772.)
+- **The bot (df14115):**
+  - "/privacy?" and "/stop." were still PAID checks;
+  - claims starting "/startup…" were eaten as help;
+  - "Hi" plus a claim left the claim unchecked;
+  - "/status" stopped delivering a waiting answer;
+  - the public bot had no contact warning.
+- **Copies of the real database** in Claude's scratch folders: three,
+  one mine from the deletion tool's dry run. All deleted. CLAUDE.md now
+  says a real copy is deleted when its measurement ends (300f375).
+
+The interleaving explorer from 2026-09-22 turned up in an old scratch
+folder. It is now `scripts/bot_explorer.py`, free.
+- Before the bot fix, over 300 seeds: chat locks kept in 291,
+  "prompted" without a pending answer in 3, and a "hi" left
+  unanswered in 13. That last one predates step 5 and is fixed too.
+- After the fix: 2,000 seeds, no violations.
+
+**Step 4, ready for the owner:**
+- `scripts/serve_forever.py` (8a15b30) runs the app and the bot with
+  nobody signed in:
+  - it restarts either one with doubling pauses;
+  - it logs to logs/;
+  - its children die with it, through a Windows job object;
+  - children get UTF-8, because piped, the first Devanagari print
+    would kill the app.
+  Measured on a real uvicorn: a graceful CTRL_BREAK stop in 0.2 s.
+  Exit code 3 turned out to mean several things, so the code no longer
+  reads it.
+- `docs/go-live.md` (800d26c, kept current since) is the owner's half,
+  as exact steps, each with its check.
+
+**For Vinayak to know:** the next app start rewrites the real database
+once (VACUUM). It is lossless and logged, so nothing deleted earlier
+lingers in the file.
 
 ### 2026-10-16 (night) — Step 5 of the launch: privacy notice, terms, the AI line, deletion, an installable app
 
