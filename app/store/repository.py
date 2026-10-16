@@ -471,6 +471,32 @@ class AnswerRepository:
             ).fetchone()
         return Answer.model_validate_json(row["payload"]) if row else None
 
+    def record_progress(self, job_id: str, usage) -> bool:
+        """A RUNNING check's bill so far, onto its row (audit-ops OPS-04: a
+        check killed mid-flight restarted with usage=None, and what it had
+        already bought never reached the ledger). Only while the row is
+        still QUEUED/PROCESSING — in the statement itself — so a checkpoint
+        landing late can never overwrite a finished answer. -> written?"""
+        from app.models.answer import Answer
+
+        live = "status IN ('QUEUED', 'PROCESSING')"
+        with get_conn() as conn:
+            row = conn.execute(f"SELECT payload FROM answers WHERE job_id = ? AND {live}",
+                               (job_id,)).fetchone()
+            if row is None:
+                return False
+            answer = Answer.model_validate_json(row["payload"])
+            answer.usage = usage
+            cur = conn.execute(f"UPDATE answers SET payload = ? WHERE job_id = ? AND {live}",
+                               (answer.model_dump_json(), job_id))
+            return cur.rowcount == 1
+
+    def _record_abandoned(self, answer) -> None:
+        """The ledger row of a check the sweeps fail: what its checkpoints
+        say it had bought (record_progress). The money was spent either way."""
+        if answer.usage is not None:
+            self.ledger.record(answer, _provable_kind(answer), overwrite=False)
+
     def sweep_orphans(self) -> int:
         """Fail jobs left mid-flight by a restart.
 
@@ -494,6 +520,7 @@ class AnswerRepository:
             answer.error = "The server restarted while this check was running."
             answer.completed_at = datetime.now(timezone.utc)
             self.save(answer)
+            self._record_abandoned(answer)
             healed += 1
         return healed
 
@@ -528,6 +555,7 @@ class AnswerRepository:
             answer.error = "This check didn't finish. Please send the message again."
             answer.completed_at = datetime.now(timezone.utc)
             self.save(answer)
+            self._record_abandoned(answer)
             healed += 1
         return healed
 

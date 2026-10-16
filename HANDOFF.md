@@ -57,10 +57,12 @@ cookie — 3 checks a day per web device, the bot and this machine never
 challenged (b6daec5, f724156, b79bb2a; run end to end in real headless
 Chrome with Cloudflare's test keys).
 
-**NEXT — the brief's §6 step 3: restarts, the ledger, monitoring**
-([audit-ops.md](docs/research/2026-10-15/audit-ops.md)): OPS-06 run_check's
-final save is unguarded (a stuck job, a lost paid answer); OPS-04 a check
-killed mid-flight loses its spend from the ledger; OPS-07 the bot forgets
+**NOW — the brief's §6 step 3: restarts, the ledger, monitoring**
+([audit-ops.md](docs/research/2026-10-15/audit-ops.md)). DONE: OPS-06
+b7d4ced (a check always ends — saved, billed, its stream closed — and a
+5-minute sweep fails rows stuck mid-flight that nothing here still runs);
+OPS-04 (a running check's bill so far is checkpointed onto its row, so a
+killed one still reaches the ledger). NEXT: OPS-07 the bot forgets
 in-flight checks on restart (+ §11 26); OPS-05 a second copy on the same
 database; OPS-18 /health is a constant (+ §11 19); OPS-19 no monitoring or
 alerting; OPS-20 print() is block-buffered on a host; OPS-11 logs keep IPs

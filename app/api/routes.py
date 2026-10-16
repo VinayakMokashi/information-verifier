@@ -6,6 +6,7 @@ Clients poll GET /reports/{job_id}. A web PWA and a WhatsApp webhook consume
 the exact same two-call contract.
 """
 import asyncio
+import contextlib
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -105,6 +106,11 @@ class _Spend:
     def begin(self) -> None:
         """Call immediately BEFORE the first paid call of the request."""
         self.started = True
+
+
+# How often a running job's bill so far is saved onto its row (_checkpoint):
+# a few small writes per check, only when the bill has grown.
+_CHECKPOINT_EVERY_S = 5.0
 
 
 # A web visitor proves a person is asking (decided 2026-10-15): the page sends
@@ -261,14 +267,43 @@ def _engine_kwargs(quota: _Spend | None) -> dict:
     return {"mode": quota.mode, "on_finished": quota.release}
 
 
+async def _checkpoint(job_id: str, repo, meter: UsageMeter) -> None:
+    """Every few seconds while a job runs, its bill so far onto its row —
+    whenever it has grown. REPRODUCED (audit-ops OPS-04): a check killed
+    mid-flight (a closed window, a crash, a reboot; a redeploy on a host)
+    restarted as FAILED with usage=None, and the passes, searches and
+    transcription it had bought never reached the ledger, the spend truth.
+    The sweeps that fail such a row now write its ledger row from this."""
+    last = None
+    while True:
+        await asyncio.sleep(_CHECKPOINT_EVERY_S)
+        usage = meter.snapshot()
+        if usage.estimated_usd > 0 and usage.model_dump() != last:
+            if await safe_cache_call(repo.record_progress, job_id, usage):
+                last = usage.model_dump()
+
+
+@asynccontextmanager
+async def _checkpointing(job_id: str, repo, meter: UsageMeter):
+    task = asyncio.create_task(_checkpoint(job_id, repo, meter))
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 async def _run_check_job(job_id: str, text: str, repo, stream=None, *,
                          quota: _Spend | None = None, **check) -> None:
     """The background job of /verify/text and /verify/image: the check, then
     its day settled (`_finish`), however the check ended."""
     for key, value in _engine_kwargs(quota).items():
         check.setdefault(key, value)
+    meter = check.setdefault("meter", UsageMeter())
     try:
-        await run_check(job_id, text, repo, stream, **check)
+        async with _checkpointing(job_id, repo, meter):
+            await run_check(job_id, text, repo, stream, **check)
     finally:
         await _finish(job_id, repo, quota)
 
@@ -349,8 +384,9 @@ async def _run_media_job(
     """The background job of /verify/media. Whatever ends it — an answer, a
     transcription failure, a crash — settles its day (`_finish`)."""
     try:
-        await _media_job(job_id, wav, duration, repo, meter, stream, language=language,
-                         **_engine_kwargs(quota))
+        async with _checkpointing(job_id, repo, meter):
+            await _media_job(job_id, wav, duration, repo, meter, stream, language=language,
+                             **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
 
@@ -608,23 +644,25 @@ async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
                         language: str | None = None) -> None:
     """The background job of /verify/link; settles its day (`_finish`)
     however it ends."""
+    meter = UsageMeter()   # here, so the transcription it pays for is checkpointed
     try:
-        await _link_job(job_id, info, repo, stream, language=language,
-                        **_engine_kwargs(quota))
+        async with _checkpointing(job_id, repo, meter):
+            await _link_job(job_id, info, repo, stream, language=language,
+                            meter=meter, **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
                     language: str | None = None, mode: str = "full",
-                    on_finished=None) -> None:
+                    on_finished=None, meter: UsageMeter | None = None) -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
     renders those), never a silent PROCESSING-forever. run_check guards
     itself; this guard covers the fetch/ASR work before it.
     """
-    meter = UsageMeter()
+    meter = meter or UsageMeter()
     key = transcript_key(info)
     # A cache failure degrades to doing the work (invariant 6), never to a
     # failed check — so the lookup and the store both go through
