@@ -127,6 +127,13 @@ without it). **And outside .env:** Sarvam's data retention set to 0 days
 Sarvam account is set to keep none of it", which is true only once that is
 done.
 
+**Step 4, ready for the owner:** [docs/go-live.md](docs/go-live.md) — every
+owner step in order, each with its check: the settings, the domain, the
+tunnel (with the /dashboard fence), the first test from a phone, then
+cloudflared as a service and `scripts/serve_forever.py` (8a15b30: runs the
+app and the bot unattended, restarts either, logs to logs/, children die
+with it) as a boot task.
+
 **Owner actions waiting on Vinayak** (free; the brief has details): set
 Sarvam's data retention to 0 days; a separate Anthropic workspace with a
 monthly spend limit for the public key; buy the .com (if Cloudflare declines
