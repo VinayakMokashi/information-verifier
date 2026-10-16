@@ -13,7 +13,10 @@ asyncio.to_thread so the event loop never blocks on a transcode.
 import os
 import re
 import subprocess
-import tempfile
+
+# Working files under the data folder, which startup empties — never %TEMP%,
+# where a hard stop left people's voice notes for good (review S5-17).
+from app.store import scratch
 
 _TIMEOUT_S = 120           # a crafted file must not pin a worker forever
 # \Z, not $: in Python `$` also matches before a trailing newline, so
@@ -84,7 +87,7 @@ def normalize_to_wav(
     first, and ffmpeg is additionally told to stop at the limit in case the
     container lies or the probe cannot read it.
     """
-    with tempfile.TemporaryDirectory() as tmp:
+    with scratch.workdir() as tmp:
         src = os.path.join(tmp, "src" + _safe_suffix(filename))
         wav = os.path.join(tmp, "out.wav")
         try:
@@ -124,7 +127,7 @@ def normalize_to_wav(
 
 def split_wav(wav_bytes: bytes, chunk_seconds: int) -> list[bytes]:
     """Split a WAV into <=chunk_seconds pieces (for the 30 s sync ASR limit)."""
-    with tempfile.TemporaryDirectory() as tmp:
+    with scratch.workdir() as tmp:
         src = os.path.join(tmp, "in.wav")
         with open(src, "wb") as f:
             f.write(wav_bytes)

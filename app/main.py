@@ -394,6 +394,18 @@ async def _serving():
     init_db()
     # Alerts raised on worker threads (the limiter's pool) go through this loop.
     alerts.attach(asyncio.get_running_loop())
+    # What a hard stop left mid-decode — a voice note, its WAV, a reel's audio
+    # (review S5-17). Safe here: this process holds the database's lock.
+    from app.store import scratch
+
+    left = scratch.clear()
+    if left:
+        print(f"[startup] removed {left} working file(s) a stopped run left behind")
+    from app.store.db import vacuum_once
+
+    if await asyncio.to_thread(vacuum_once):
+        print("[startup] the database was rewritten once: what was deleted before "
+              "secure_delete leaves no trace in the file")
     # BackgroundTasks die with the process, so any QUEUED/PROCESSING row here
     # is dead by definition — it would otherwise be polled forever by a page
     # that will never get an answer. (Only once this process holds the

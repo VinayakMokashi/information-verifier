@@ -25,6 +25,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.store.db import get_conn
+from app.store.repository import ledger_ref
 
 KEEP_DAYS = 14
 _TABLES = ("spend_ledger", "daily_checks", "daily_budget")
@@ -55,7 +56,13 @@ def backup_ledger() -> Path | None:
             if schema is None:
                 continue
             copy.execute(schema[0])
-            rows = [tuple(r) for r in live.execute(f"SELECT * FROM {table}")]
+            cursor = live.execute(f"SELECT * FROM {table}")
+            rows = [tuple(r) for r in cursor]
+            if table == "spend_ledger" and rows:
+                # Never a job id in a copy that leaves this machine: each
+                # opens that person's message for 30 days (review S5-12).
+                at = [d[0] for d in cursor.description].index("job_id")
+                rows = [r[:at] + (ledger_ref(r[at]),) + r[at + 1:] for r in rows]
             if rows:
                 marks = ", ".join("?" * len(rows[0]))
                 copy.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
@@ -77,8 +84,10 @@ def prune_backups() -> int:
 
 
 def restore_ledger(path) -> int:
-    """Put back the ledger rows the live database lacks. INSERT OR IGNORE on
-    the job id, so restoring twice never doubles the money. -> rows added."""
+    """Put back the ledger rows the live database lacks, matched by
+    ledger_ref() — a copy carries that, never the job id (review S5-12) — so
+    restoring twice, or beside rows that survived, never doubles the money.
+    -> rows added."""
     source = sqlite3.connect(path)
     source.row_factory = sqlite3.Row
     try:
@@ -89,10 +98,9 @@ def restore_ledger(path) -> int:
         return 0
     columns = rows[0].keys()
     with get_conn() as live:
-        before = live.execute("SELECT COUNT(*) FROM spend_ledger").fetchone()[0]
+        have = {ledger_ref(r[0]) for r in live.execute("SELECT job_id FROM spend_ledger")}
+        missing = [tuple(r) for r in rows if ledger_ref(r["job_id"]) not in have]
         live.executemany(
             f"INSERT OR IGNORE INTO spend_ledger ({', '.join(columns)}) "
-            f"VALUES ({', '.join('?' * len(columns))})",
-            [tuple(r) for r in rows])
-        after = live.execute("SELECT COUNT(*) FROM spend_ledger").fetchone()[0]
-    return after - before
+            f"VALUES ({', '.join('?' * len(columns))})", missing)
+    return len(missing)

@@ -179,6 +179,17 @@ async def stream_answer(job_id: str, request: Request):
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+    if stream.done:
+        # Finished, so its row is saved — unless a deletion request has taken
+        # it since (forget.py runs beside the app): then this copy in memory
+        # must not go on serving the answer (review S5-16). A read that fails
+        # proves nothing, and serves as before.
+        try:
+            exists = await asyncio.to_thread(_repo.get, job_id) is not None
+        except Exception:  # noqa: BLE001 — see above
+            exists = True
+        if not exists:
+            raise HTTPException(404, "No such check.")
 
     # EventSource resends this automatically on reconnect; honouring it is
     # what stops a dropped connection from duplicating the whole answer.

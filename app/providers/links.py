@@ -475,9 +475,9 @@ def download_link_audio(url: str, max_bytes: int) -> tuple[bytes, str]:
     the finished file is measured again, because fragmented (DASH) downloads
     report progress per-fragment and could under-count.
     """
-    import tempfile
-
     import yt_dlp
+
+    from app.store import scratch     # not %TEMP%: startup empties it (S5-17)
 
     if allowed_link_host(url) is None:   # the route checks too; fail closed here anyway
         raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
@@ -493,7 +493,7 @@ def download_link_audio(url: str, max_bytes: int) -> tuple[bytes, str]:
             state["too_slow"] = True
             raise yt_dlp.utils.DownloadError("download deadline exceeded")
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with scratch.workdir() as tmp:
         opts = {
             **_base_opts(),
             # Audio-only when the platform offers it (all three do —

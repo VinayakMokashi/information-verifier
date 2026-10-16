@@ -40,6 +40,54 @@ def _answer(days_old: float, status=JobStatus.COMPLETE, text="a private forward"
     )
 
 
+def test_a_deleted_message_leaves_no_bytes_in_the_database_files(repo, monkeypatch):
+    """REPRODUCED by review S5-11: secure_delete was off, so forget() and the
+    30-day prune made a message unreadable through the app while its bytes
+    stayed in the database file (twice: the row and its cached copy) until
+    SQLite happened to reuse those pages — and in every copy of the file."""
+    from pathlib import Path
+
+    from app.store.repository import housekeeping
+
+    monkeypatch.setattr(settings, "answer_retention_days", 30)
+    fresh = _answer(1, text="Mera number 98200 11111 hai, REMNANT-ONE")
+    old = _answer(45, text="Purana forward, REMNANT-TWO")
+    repo.save(fresh)
+    repo.cache.put("k1", "trusted", fresh.model_dump_json())
+    repo.save(old)
+    repo.forget([fresh])                      # a deletion request
+    housekeeping()                            # the 30-day prune takes `old`
+    files = [Path(settings.db_path), Path(settings.db_path + "-wal")]
+    data = b"".join(p.read_bytes() for p in files if p.exists())
+    assert b"REMNANT-ONE" not in data and b"REMNANT-TWO" not in data
+
+
+def test_what_was_deleted_before_secure_delete_is_gone_after_one_start(repo):
+    """secure_delete covers deletions from now on. The real database already
+    held earlier ones' bytes in its free pages (the answer cache had been
+    pruning messages for weeks), so the first start rewrites the file once."""
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    raw = sqlite3.connect(settings.db_path)          # the old way: no secure_delete
+    raw.execute("PRAGMA secure_delete = OFF")
+    raw.execute("INSERT INTO answer_cache (key, tier, payload, created_at) "
+                "VALUES ('k', 'trusted', 'OLD-REMNANT ' || hex(randomblob(2000)), '2026-01-01')")
+    raw.commit()
+    raw.execute("DELETE FROM answer_cache")
+    raw.commit()
+    raw.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    raw.close()
+    assert b"OLD-REMNANT" in Path(settings.db_path).read_bytes(), "nothing to remove"
+    with TestClient(app):
+        pass
+    files = [Path(settings.db_path), Path(settings.db_path + "-wal")]
+    assert b"OLD-REMNANT" not in b"".join(p.read_bytes() for p in files if p.exists())
+
+
 def test_old_answers_are_deleted_and_recent_ones_kept(repo, monkeypatch):
     monkeypatch.setattr(settings, "answer_retention_days", 30)
     old, recent = _answer(45), _answer(2)

@@ -123,7 +123,43 @@ def get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(f"PRAGMA busy_timeout={int(_BUSY_TIMEOUT_S * 1000)}")
+    # Deleted is gone from the FILE too, not only from the app's view
+    # (review S5-11: a deleted message's bytes stayed in verifier.db, twice,
+    # until SQLite happened to reuse the pages). A per-connection setting.
+    conn.execute("PRAGMA secure_delete = ON")
     return conn
+
+
+_VACUUMED = "secure_delete_vacuumed"
+
+
+def vacuum_once() -> bool:
+    """Rewrite the file once, so what was deleted BEFORE secure_delete was
+    on leaves its free pages too: the answer cache had been pruning
+    messages for weeks (review S5-11). Recorded in `meta`; called at startup
+    only, while this process alone holds the database. -> whether it ran."""
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM meta WHERE key = ?", (_VACUUMED,)).fetchone():
+            return False
+    conn = get_conn()
+    try:
+        conn.execute("VACUUM")
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                     (_VACUUMED,))
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    return True
+
+
+def truncate_wal() -> None:
+    """After a deletion: fold the write-ahead log into the database and
+    empty it, so the deleted content's earlier page versions do not linger
+    in verifier.db-wal either (review S5-11). Waits for readers up to the
+    busy timeout; called off the event loop."""
+    with get_conn() as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def _drop_legacy(conn: sqlite3.Connection) -> None:

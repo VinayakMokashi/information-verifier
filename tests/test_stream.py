@@ -181,6 +181,22 @@ def test_a_finished_job_with_no_live_stream_replays_from_the_store():
     assert body.rstrip().endswith('data: {"replayed": true}')
 
 
+def test_a_deleted_check_is_not_replayed_from_memory(client):
+    """REPRODUCED by review S5-16: forget.py deleted the row and /reports
+    said 404 — but /stream replayed the whole answer from memory until the
+    stream was pruned, up to hours later on a quiet night."""
+    from app.store.repository import AnswerRepository
+
+    job_id = client.post("/api/v1/verify/text",
+                         json={"text": "5G se corona phailta hai"}).json()["job_id"]
+    repo = AnswerRepository()
+    answer = repo.get(job_id)
+    assert answer.status is JobStatus.COMPLETE and S.get(job_id) is not None
+    repo.forget([answer])
+    assert client.get(f"/api/v1/reports/{job_id}").status_code == 404
+    assert client.get(f"/api/v1/stream/{job_id}").status_code == 404
+
+
 def test_the_sse_frame_is_well_formed():
     frame = S._sse(7, "text", {"text": "हिंदी"})
     assert frame.startswith("id: 7\nevent: text\ndata: ")

@@ -22,7 +22,7 @@ from typing import NamedTuple
 from pydantic import ValidationError
 
 from app.config import settings
-from app.store.db import get_conn
+from app.store.db import get_conn, truncate_wal
 
 
 def _now_iso() -> str:
@@ -180,6 +180,19 @@ class TranscriptCache:
             return cur.rowcount or 0
 
 
+def ledger_ref(job_id: str) -> str:
+    """A one-way reference to a check, for copies that leave this machine.
+
+    A job id opens /reports/{job_id} — the person's whole message — for 30
+    days, to anyone holding it, and the "content-free" daily backups (meant
+    for a synced folder) held every one (review S5-12). The SHA-256 still
+    matches a row on restore and opens nothing. Idempotent: a reference (64
+    hex) is returned as it is; a job id is 32."""
+    if len(job_id) == 64:
+        return job_id
+    return hashlib.sha256(job_id.encode("utf-8")).hexdigest()
+
+
 _LOOKS_LIKE_A_BARE_URL = re.compile(r"https?://\S+$", re.IGNORECASE)
 
 
@@ -273,13 +286,16 @@ class SpendLedger:
                 "ON s.job_id = a.job_id WHERE s.job_id IS NULL "
                 "AND a.status IN ('COMPLETE', 'FAILED')"
             ).fetchall()
+            # Rows put back from a backup carry ledger_ref(), not the id.
+            restored = {r[0] for r in conn.execute(
+                "SELECT job_id FROM spend_ledger WHERE length(job_id) = 64")}
         added = 0
         for row in rows:
             try:
                 answer = Answer.model_validate_json(row["payload"])
             except ValidationError:
                 continue
-            if answer.usage is None:
+            if answer.usage is None or ledger_ref(answer.job_id) in restored:
                 continue
             self.record(answer, _provable_kind(answer), overwrite=False)
             added += 1
@@ -532,6 +548,7 @@ class AnswerRepository:
                     transcripts += conn.execute(
                         "DELETE FROM transcript_cache WHERE key = ?",
                         (row["key"],)).rowcount or 0
+        truncate_wal()           # its earlier page versions too (review S5-11)
         return Forgotten(gone, copies, transcripts)
 
     def record_progress(self, job_id: str, usage) -> bool:
@@ -639,6 +656,9 @@ def housekeeping() -> dict[str, int]:
                        ("answers_deleted", repo.prune),
                        ("answer_cache_expired", repo.cache.prune),
                        ("transcripts_expired", repo.transcripts.prune),
+                       # What those deleted, out of the write-ahead log too
+                       # (review S5-11). 0: it reports nothing of its own.
+                       ("wal_truncated", lambda: truncate_wal() or 0),
                        # The money record, daily (audit-ops OPS-10).
                        ("ledger_backed_up", lambda: int(backup.backup_ledger() is not None)),
                        ("old_backups_deleted", backup.prune_backups)):

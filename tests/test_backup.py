@@ -19,7 +19,7 @@ from app.config import settings
 from app.models.answer import Answer, AnswerSection, JobStatus, ReportUsage
 from app.store import backup
 from app.store.db import get_conn, init_db
-from app.store.repository import AnswerRepository
+from app.store.repository import AnswerRepository, ledger_ref
 
 
 @pytest.fixture()
@@ -87,6 +87,31 @@ def test_one_a_day_and_only_the_last_fortnight(live):
     backup.prune_backups()
     kept = sorted(p.name for p in folder.glob("ledger-*.db"))
     assert len(kept) == backup.KEEP_DAYS and first.name in kept
+
+
+def test_a_backup_cannot_open_anyones_message(live):
+    """REPRODUCED by review S5-12: the content-free copy kept every job id,
+    and /reports/{job_id} opens that person's message for 30 days — to
+    whoever can read the synced folder the copies go to."""
+    answer = _paid_check()
+    made = backup.backup_ledger()
+    with sqlite3.connect(made) as conn:
+        ids = [r[0] for r in conn.execute("SELECT job_id FROM spend_ledger")]
+    assert ids == [ledger_ref(answer.job_id)] and ids != [answer.job_id]
+    assert answer.job_id.encode() not in made.read_bytes()
+
+
+def test_a_restore_beside_surviving_answers_never_counts_twice(live):
+    """Restored rows carry the one-way reference, not the id: the backfill
+    must know them, or every check whose answer survived is counted twice."""
+    for _ in range(2):
+        _paid_check()
+    made = backup.backup_ledger()
+    with get_conn() as conn:                        # only the ledger was lost
+        conn.execute("DELETE FROM spend_ledger")
+    assert backup.restore_ledger(made) == 2
+    assert AnswerRepository().ledger.backfill_from_answers() == 0
+    assert _rows(settings.db_path) == 2
 
 
 def test_a_restore_brings_the_ledger_back(live):

@@ -50,11 +50,13 @@ reel link filled the box with no /verify request).
 real-database copies deleted + a CLAUDE.md rule), S5-7/S5-8/S5-18 ed88772
 (forget.py finds reels, pasted addresses; one save; no wholesale deletion);
 the bot's six (S5-1, S5-2, S5-5, S5-6, S5-9, S5-13) in one commit, checked
-by scripts/bot_explorer.py — now in the repo — over 2,000 interleavings.
-NEXT, in this order: S5-11 (secure_delete), S5-12 (job ids in the ledger
-backups), S5-16 (stream replay after a deletion), S5-17 (decode temp
-files); then S5-14 (two overstated sentences), S5-15 (iOS in-app
-browsers). Each: failing test
+by scripts/bot_explorer.py — now in the repo — over 2,000 interleavings;
+S5-11, S5-12, S5-16, S5-17 in one commit (deleted is gone from the file:
+secure_delete + a WAL truncate + a ONE-TIME VACUUM of the real database at
+the next app start; backups carry a one-way reference, never a job id; a
+deleted check's stream is not replayed; working files under data/tmp,
+emptied at startup).
+NEXT: S5-14 (two overstated sentences), S5-15 (iOS in-app browsers). Each: failing test
 first, its own commit, then this list updated. Then the owner's list
 below; then WhatsApp.
 
