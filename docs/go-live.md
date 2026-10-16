@@ -158,7 +158,11 @@ started.
 
 ## If something goes wrong
 
-- **Everything stops:** sign in, run `start.cmd`, and read its windows.
+- **Everything stops:** first read `logs\supervisor-<today>.log`. If it
+  shows the app and the bot running, they are fine: check the tunnel
+  (`Get-Service cloudflared`) and the internet instead. Only if the
+  supervisor is not running: sign in, run `start.cmd`, and read its
+  windows. A second bot refuses to start anyway; only one may run.
 - **One part keeps restarting:** your phone gets an alert. Read
   `logs\app-<today>.log` or `logs\bot-<today>.log`.
 - **Taking it offline:** in the project folder,

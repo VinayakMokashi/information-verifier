@@ -161,6 +161,26 @@ def delete_text() -> str:
             f"apni copy apne niyamon se rakhte hain).\n{how}")
 
 
+def bot_lock_path() -> str:
+    """Beside the app's database, like the app's own lock (OPS-05)."""
+    return os.path.join(os.path.dirname(os.path.abspath(settings.db_path)), "telegram_bot")
+
+
+def take_the_bot_lock() -> bool:
+    """One bot at a time, whoever starts it and as whatever account.
+    Telegram allows one poller: two split every chat's burst between them
+    and rewrite one pending file from two memories (re-check F-9). start.cmd
+    looked for a running bot by its command line, which Windows hides when
+    another account runs it (the unattended runner's). -> whether it is ours."""
+    from app.store import instance
+
+    try:
+        instance.acquire(bot_lock_path())
+        return True
+    except instance.AlreadyRunning:
+        return False
+
+
 def startup_warnings() -> list[str]:
     """What a public service must have, said at the bot's start. The bot
     answers anyone (decided 2026-10-15), so it is public by construction —
@@ -772,6 +792,13 @@ class PendingStore(dict):
         super().__init__()
         self._path = path
         self._at: dict[int, float] = {}
+        # Every chat dropped since expire() last reported — whoever's write
+        # dropped it (re-check F-2: another chat's write did, the list was
+        # thrown away, and the chat's "prompted" mark was never let go).
+        self._expired: list[int] = []
+        # Told at once of each drop (the Dispatcher lets go of the chat), so
+        # nothing waits for the next tidy() either.
+        self.on_expire = None
         try:
             with open(path, encoding="utf-8") as f:
                 saved = json.load(f)
@@ -794,14 +821,18 @@ class PendingStore(dict):
         for chat in old:
             super().pop(chat, None)
             self._at.pop(chat, None)
+        self._expired.extend(old)
+        if old and self.on_expire is not None:
+            self.on_expire(old)
         return old
 
     def expire(self) -> list[int]:
-        """Drop what is past its day. -> the chats dropped."""
-        old = self._drop_expired()
-        if old:
+        """Drop what is past its day. -> every chat dropped since the last
+        call, here or by any write in between."""
+        if self._drop_expired():
             self._write()
-        return old
+        gone, self._expired = self._expired, []
+        return gone
 
     def __setitem__(self, chat_id, job_id) -> None:
         super().__setitem__(chat_id, job_id)
@@ -1030,6 +1061,8 @@ class Dispatcher:
         # do not care keep the plain in-memory dict.
         self.pending: dict[int, str] = (PendingStore(pending_path) if pending_path
                                         else {})
+        if isinstance(self.pending, PendingStore):
+            self.pending.on_expire = self._forget      # at once, any write
         self.locks: dict[int, asyncio.Lock] = {}
         self.prompted: set[int] = set()   # chats asked for "any message"
         self.in_flight: dict[int, int] = {}      # submitting handlers per chat
@@ -1100,7 +1133,11 @@ class Dispatcher:
         """While the bot runs: drop pending entries past their day, and
         whatever of those chats nothing still uses (review S5-1, S5-2)."""
         expire = getattr(self.pending, "expire", None)
-        for chat_id in (expire() if callable(expire) else []):
+        self._forget(expire() if callable(expire) else [])
+
+    def _forget(self, chats) -> None:
+        """Chats whose pending entry had its day: their marks go now."""
+        for chat_id in chats:
             self.prompted.discard(chat_id)
             if not self.active.get(chat_id):
                 self.locks.pop(chat_id, None)
@@ -1116,6 +1153,12 @@ class Dispatcher:
             task.add_done_callback(self._tasks.discard)
 
     async def _deliver_late(self, chat_id: int, job_id: str) -> None:
+        # Work in flight for this chat, like any handler of it, and the
+        # decide-and-deliver under its lock (re-check F-6): handed over
+        # outside both, a message arriving mid-hand-over looked like a fresh
+        # start and was checked and paid for.
+        self.in_flight[chat_id] = self.in_flight.get(chat_id, 0) + 1
+        self.active[chat_id] = self.active.get(chat_id, 0) + 1
         try:
             try:
                 report = await self.app.wait_for_report(job_id)
@@ -1124,18 +1167,26 @@ class Dispatcher:
                 if self.pending.get(chat_id) == job_id:
                     self.pending.pop(chat_id, None)
                 return
-            if self.pending.get(chat_id) != job_id:
-                return            # the person's own message collected it meanwhile
-            if report is None:
-                self.prompted.add(chat_id)       # the next message IS the poke
-                await self.tg.send(chat_id, _STILL_RUNNING)
-                return
-            self.pending.pop(chat_id, None)
-            await self.tg.send(chat_id, _DONE_EARLIER)
-            await self.tg.send(chat_id, format_reply(report))
+            async with self.locks.setdefault(chat_id, asyncio.Lock()):
+                if self.pending.get(chat_id) != job_id:
+                    return        # the person's own message collected it meanwhile
+                if report is None:
+                    self.prompted.add(chat_id)   # the next message IS the poke
+                    await self.tg.send(chat_id, _STILL_RUNNING)
+                    return
+                self.pending.pop(chat_id, None)
+                await self.tg.send(chat_id, _DONE_EARLIER)
+                await self.tg.send(chat_id, format_reply(report))
         except Exception as exc:  # noqa: BLE001 — one chat must not stop the rest
             print(f"[bot] delivering a check after a restart failed: "
                   f"{type(exc).__name__}: {exc}")
+        finally:
+            left = self.in_flight.get(chat_id, 1) - 1
+            if left > 0:
+                self.in_flight[chat_id] = left
+            else:
+                self.in_flight.pop(chat_id, None)
+            self._let_go(chat_id)
 
     async def drain(self) -> None:
         """Wait for everything in flight (tests; a graceful shutdown).
@@ -1227,6 +1278,10 @@ async def main() -> None:
             return
         if "--check-token" in sys.argv:
             print(">> --check-token: nothing started, nothing spent.")
+            return
+        if not take_the_bot_lock():
+            print(">> The bot is already running (another window, or the unattended "
+                  "runner) — Telegram allows one; not starting a second.")
             return
 
         status = await app_status(http)

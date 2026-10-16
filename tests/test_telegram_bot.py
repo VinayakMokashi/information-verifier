@@ -8,6 +8,7 @@ every failure becomes words in the chat.
 """
 import asyncio
 import json
+import os
 
 import pytest
 
@@ -1398,7 +1399,9 @@ def test_a_pending_check_is_forgotten_after_a_day_while_the_bot_runs(tmp_path, m
     store[888] = "job2"                       # the next write of anyone's
     assert 777 not in store and "777" not in json.loads(path.read_text())
     clock[0] += B.PendingStore._TTL_S + 1
-    assert store.expire() == [888]            # and with no write at all
+    # And with no write at all — reporting 777 too, which 888's write
+    # dropped: the caller lets go of every one (re-check F-2).
+    assert store.expire() == [777, 888]
     assert json.loads(path.read_text()) == {}
 
 
@@ -1411,6 +1414,92 @@ def test_the_dispatcher_lets_go_of_a_chat_whose_entry_expired(tmp_path, monkeypa
     clock[0] += B.PendingStore._TTL_S + 1
     bot.tidy()
     assert 777 not in bot.pending and 777 not in bot.prompted
+
+
+def test_a_chat_dropped_during_another_chats_write_is_still_let_go(tmp_path, monkeypatch):
+    """REPRODUCED by re-check F-2: an entry past its day was dropped by the
+    NEXT write of any chat, which threw the list away — so tidy() found
+    nothing to report, and the chat's "prompted" mark (its Telegram id)
+    stayed in memory for the life of the process."""
+    clock = [1_000_000.0]
+    monkeypatch.setattr(B.PendingStore, "_clock", staticmethod(lambda: clock[0]))
+    bot = B.Dispatcher(StubApp(), StubTG(), pending_path=str(tmp_path / "p.json"))
+    bot.pending[777] = "job1"
+    bot.prompted.add(777)
+    clock[0] += B.PendingStore._TTL_S + 1
+    bot.pending[888] = "job2"                 # another chat writes first
+    bot.tidy()
+    assert 777 not in bot.prompted
+
+
+def test_a_chat_dropped_by_any_write_is_let_go_at_once(tmp_path, monkeypatch):
+    """Found by the restarts explorer once F-2's fix was in (10 of 2,000
+    seeds): between another chat's write dropping an entry and the next
+    tidy() — one long poll, up to ~50 s — the chat's mark outlived its day.
+    The store now says so the moment it drops one."""
+    clock = [1_000_000.0]
+    monkeypatch.setattr(B.PendingStore, "_clock", staticmethod(lambda: clock[0]))
+    bot = B.Dispatcher(StubApp(), StubTG(), pending_path=str(tmp_path / "p.json"))
+    bot.pending[777] = "job1"
+    bot.prompted.add(777)
+    clock[0] += B.PendingStore._TTL_S + 1
+    bot.pending[888] = "job2"                 # no tidy() at all
+    assert 777 not in bot.prompted
+
+
+def test_a_message_during_a_restarts_hand_over_is_not_checked(tmp_path):
+    """REPRODUCED by re-check F-6 (its extended explorer: 10 of 6,000 seeds):
+    after a restart the bot handed the previous answer over outside the
+    chat's lock and its in-flight count, so a message arriving during the
+    hand-over looked like a fresh start, and was checked and paid for."""
+    async def scenario():
+        app = StubApp()
+        gate, sending = asyncio.Event(), asyncio.Event()
+
+        class GatedTG(StubTG):
+            async def send(self, chat_id, text):
+                if text == B._DONE_EARLIER:
+                    sending.set()
+                    await gate.wait()         # the hand-over, mid-send
+                return await super().send(chat_id, text)
+
+        bot = B.Dispatcher(app, GatedTG(), pending_path=str(tmp_path / "p.json"))
+        bot.pending[7] = "job1"               # what the previous run waited for
+        await bot.resume()
+        await asyncio.wait_for(sending.wait(), 5)
+        bot.dispatch(_msg(7, "WHO ne kaha 5G se corona"))
+        gate.set()
+        await asyncio.wait_for(bot.drain(), 10)
+        return app
+
+    app = asyncio.run(scenario())
+    assert app.submissions == [], "a message during the hand-over was paid for"
+
+
+def test_a_second_bot_refuses_to_start(tmp_path, monkeypatch):
+    """Re-check F-9: Telegram allows one poller, and two bots split every
+    chat's burst between them and rewrite one pending file from two
+    memories. start.cmd found the unattended runner's bot by its command
+    line, which Windows hides when another account runs it."""
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "data" / "verifier.db"))
+    (tmp_path / "data").mkdir()
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys, time; sys.path.insert(0, sys.argv[1]);"
+         "from app.store import instance; instance.acquire(sys.argv[2]);"
+         "print('held', flush=True); time.sleep(60)",
+         str(B.ROOT) if hasattr(B, "ROOT") else ".", B.bot_lock_path()],
+        stdout=subprocess.PIPE, text=True, cwd=os.path.dirname(os.path.dirname(
+            os.path.abspath(B.__file__))))
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        assert B.take_the_bot_lock() is False
+    finally:
+        holder.kill()
+        holder.wait(10)
 
 
 def test_a_public_bot_without_a_contact_says_so(monkeypatch):
