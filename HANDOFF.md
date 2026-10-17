@@ -18,6 +18,36 @@
 > A research file whose top says **"status: in progress"** means its agent
 > died: re-run that one task, seeded from the file.
 
+**The 2026-10-18 session — IN FLIGHT (kept current as it moves):**
+- **Resume verified, free:**
+  - git clean, `main` = `origin/main` at 97244ee;
+  - 1316 passed, pytest exit 0 (6 min 18 s: another project's indexing
+    job shared the CPU);
+  - nothing of this project running;
+  - `data\verifier.db` 1,273,856 bytes, 2026-10-12 05:21:10, the same
+    after the suite;
+  - both 2026-10-16 review files say complete.
+- **Vinayak chose two of §0's three offers:** the fresh reviewer and one
+  real local check. Not the fresh-venv suite.
+- **In flight: a reviewer agent** on the third-round fixes
+  (1ae3cc3..09dc74d). It writes as it goes to
+  [docs/research/2026-10-18/review-fixes-round3.md](docs/research/2026-10-18/review-fixes-round3.md).
+  First the real database's first start (the one-time VACUUM), then
+  go-live.md §5's admin commands, then the rest. If its top still says
+  "status: in progress" after this session, it died: re-run it from that
+  file.
+- **The real check: after go-live §1 item 2** (the new Anthropic
+  workspace key), so it proves that key too. Vinayak sends this to the
+  bot from his phone, exactly: "UNESCO declared Jana Gana Mana the best
+  national anthem in the world".
+  - The free probe on 2026-10-18 found 5 trusted reviews in Google's
+    fact-check database, all False (Fact Crescendo, Vishvas News,
+    Snopes, Factly, India Today). Expect the ~$0.0084 shortcut.
+  - NASA "6 days of darkness" was 2026-10-11's claim, so it is not
+    reused.
+  - Not run yet. Ask first.
+- **Next:** docs/go-live.md with Vinayak, one step at a time.
+
 **State at the end of the 2026-10-17 session: nothing in flight.** No
 agents running, no half-done edits, no research file "in progress". `main`
 is clean and pushed; the session's last commits are its handoff docs, all
