@@ -23,6 +23,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app import files
 from app.config import settings
 from app.store.db import get_conn
 from app.store.repository import ledger_ref
@@ -71,7 +72,7 @@ def backup_ledger() -> Path | None:
         live.rollback()
         live.close()
         copy.close()
-    os.replace(temporary, target)              # whole or not at all
+    files.replace(temporary, target)           # whole or not at all
     return target
 
 

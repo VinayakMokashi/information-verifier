@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx  # noqa: E402
 
+from app import files  # noqa: E402
 from app.api.legal import public_url, sarvam_line  # noqa: E402
 from app.api.limits import SUBJECT_HEADER  # noqa: E402
 from app.config import settings  # noqa: E402
@@ -796,6 +797,7 @@ class PendingStore(dict):
         # dropped it (re-check F-2: another chat's write did, the list was
         # thrown away, and the chat's "prompted" mark was never let go).
         self._expired: list[int] = []
+        self._unsaved = False                # the last save never landed
         # Told at once of each drop (the Dispatcher lets go of the chat), so
         # nothing waits for the next tidy() either.
         self.on_expire = None
@@ -827,9 +829,10 @@ class PendingStore(dict):
         return old
 
     def expire(self) -> list[int]:
-        """Drop what is past its day. -> every chat dropped since the last
-        call, here or by any write in between."""
-        if self._drop_expired():
+        """Drop what is past its day, and write again a save that never
+        landed. -> every chat dropped since the last call, here or by any
+        write in between."""
+        if self._drop_expired() or self._unsaved:
             self._write()
         gone, self._expired = self._expired, []
         return gone
@@ -860,9 +863,16 @@ class PendingStore(dict):
         try:
             with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-            os.replace(temporary, self._path)
+            files.replace(temporary, self._path)
+            self._unsaved = False
         except OSError as exc:
-            print(f"[bot] could not save the pending checks: {type(exc).__name__}")
+            # The file is what a restart resumes from: left behind, it
+            # re-delivers an answer already sent or loses a check just
+            # submitted (review G-8, which found this swallowed). The next
+            # tidy-up — every long poll — writes it again.
+            self._unsaved = True
+            print(f"[bot] could not save the pending checks ({type(exc).__name__}); "
+                  "trying again at the next poll")
 
 
 def pending_path() -> str:

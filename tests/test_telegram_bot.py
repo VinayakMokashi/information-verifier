@@ -1447,6 +1447,53 @@ def test_a_chat_dropped_by_any_write_is_let_go_at_once(tmp_path, monkeypatch):
     assert 777 not in bot.prompted
 
 
+def _refusing_replace(monkeypatch, times):
+    """os.replace refused `times` times, as Windows did (review G-8: "access
+    denied" swapping onto a file written a moment ago — 12 of 60 writes half
+    a second apart, in this project's folder); then the real one. times=None
+    refuses until `state["refuse"]` is set False."""
+    real, state = os.replace, {"left": times, "refuse": True}
+
+    def replace(src, dst):
+        if state["left"] is None:
+            refuse = state["refuse"]
+        else:
+            refuse = state["left"] > 0
+            if refuse:
+                state["left"] -= 1
+        if refuse:
+            raise PermissionError(13, "Access is denied")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    return state
+
+
+def test_a_pending_save_windows_refuses_for_a_moment_still_lands(tmp_path, monkeypatch):
+    """REPRODUCED by review G-8 (the restarts explorer's I10 on HEAD): the
+    one refused swap was printed and dropped, so the file kept the previous
+    state — a restart then re-delivered an answer already sent, or lost a
+    check just submitted."""
+    path = tmp_path / "pending.json"
+    store = B.PendingStore(str(path))
+    _refusing_replace(monkeypatch, 2)
+    store[7] = "job1"
+    assert json.loads(path.read_text())["7"]["job"] == "job1"
+
+
+def test_a_pending_save_that_never_landed_is_written_at_the_next_tidy(tmp_path, monkeypatch):
+    """G-8's rule: the file must come back to what memory says, not wait for
+    some chat's next write — a quiet bot may not write again for hours."""
+    path = tmp_path / "p.json"
+    bot = B.Dispatcher(StubApp(), StubTG(), pending_path=str(path))
+    state = _refusing_replace(monkeypatch, None)
+    bot.pending[7] = "job1"
+    assert "7" not in json.loads(path.read_text())    # refused throughout
+    state["refuse"] = False
+    bot.tidy()                                        # each long poll
+    assert json.loads(path.read_text())["7"]["job"] == "job1"
+
+
 def test_a_message_during_a_restarts_hand_over_is_not_checked(tmp_path):
     """REPRODUCED by re-check F-6 (its extended explorer: 10 of 6,000 seeds):
     after a restart the bot handed the previous answer over outside the

@@ -8,6 +8,7 @@ A backup holds only the content-free tables (the ledger, the day's counter
 and budget): a full copy would keep people's messages past the 30-day
 promise for as long as the copy lived.
 """
+import os
 import shutil
 import sqlite3
 import uuid
@@ -65,6 +66,24 @@ def test_a_backup_taken_while_the_app_writes_is_complete(live):
     holder.close()
     assert made is not None and _rows(made) == 3
     assert copied != 3, "the plain copy was complete after all: the WAL case is not shown"
+
+
+def test_a_backup_windows_refuses_to_swap_in_for_a_moment_still_lands(live, monkeypatch):
+    """Review G-8's rule, here too: on this PC the swap of a file written a
+    moment ago is refused now and then ("access denied"), and a refused
+    backup waited six hours for the next housekeeping."""
+    _paid_check()
+    real, left = os.replace, [2]
+
+    def replace(src, dst):
+        if left[0]:
+            left[0] -= 1
+            raise PermissionError(13, "Access is denied")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    target = backup.backup_ledger()
+    assert target is not None and _rows(target) == 1
 
 
 def test_a_backup_holds_no_message(live):
