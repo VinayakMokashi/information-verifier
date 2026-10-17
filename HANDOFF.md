@@ -29,13 +29,20 @@
   - both 2026-10-16 review files say complete.
 - **Vinayak chose two of §0's three offers:** the fresh reviewer and one
   real local check. Not the fresh-venv suite.
-- **In flight: a reviewer agent** on the third-round fixes
-  (1ae3cc3..09dc74d). It writes as it goes to
+- **The fresh review of the third-round fixes (1ae3cc3..09dc74d) is
+  COMPLETE:**
   [docs/research/2026-10-18/review-fixes-round3.md](docs/research/2026-10-18/review-fixes-round3.md).
-  First the real database's first start (the one-time VACUUM), then
-  go-live.md §5's admin commands, then the rest. If its top still says
-  "status: in progress" after this session, it died: re-run it from that
-  file.
+  - **First start: safe.** Measured on a synthetic database built by the
+    2026-10-11 code, in the real file's state. Two of its claims were
+    re-checked here: uvicorn 0.51 runs the lifespan before it binds, and
+    the bot never opens the database.
+    Expect after the start: the rewrite line once; answers from before
+    2026-09-18 pruned (the 30 days); the ledger still **$1.7437**.
+  - **go-live.md §5: correct**, except that the fallback account is not
+    granted BACKUP_DIR (G-2).
+  - **8 findings, all low** (G-1 … G-8). None of them blocks the first
+    start. Next for Claude: fix them, each failing-first, one commit
+    each, between the owner's steps.
 - **The real check: after go-live §1 item 2** (the new Anthropic
   workspace key), so it proves that key too. Vinayak sends this to the
   bot from his phone, exactly: "UNESCO declared Jana Gana Mana the best
