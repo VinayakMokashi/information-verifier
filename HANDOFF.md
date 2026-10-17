@@ -6,7 +6,7 @@
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log, §11 the to-do
 > list) and [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-10-16**. Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-10-17** (end of session). Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -15,17 +15,193 @@
 
 > If a session ended mid-task (usage limit, network drop), start here.
 > Verify first (CLAUDE.md, "Interruptions"), then continue from **Next**.
+> A research file whose top says **"status: in progress"** means its agent
+> died: re-run that one task, seeded from the file.
 
-**Task in hand (2026-10-16):** §11 A–C — the public launch, built in the
-order of the decision brief's §6; then WhatsApp; then the rest of §11.
+**State at the end of the 2026-10-17 session: nothing in flight.** No
+agents running, no half-done edits, no research file "in progress". `main`
+is clean and pushed (the handoff commit right after a6c3fe6); **1316 tests
+pass** (pytest exit 0). The app and the bot are NOT running and have not
+run since 2026-10-12: `data\verifier.db` is 1,273,856 bytes, last written
+2026-10-12 05:21, its `-wal` empty, so the ledger's total is still
+**$1.7437**. `scripts\find_db_copies.py` finds no copy of the real
+database anywhere.
 
-**NOW — the brief's §6 step 5 (step 4 waits on owner actions below):** a
-privacy notice and terms pages, an "answers are written by AI" line on
-every surface, an 18+ line beside submit, the bot's /privacy, and the
-installable-app manifest + icons (no service worker). Built in this
-session, no agents in flight; each part is its own pushed commit, listed
-here as it lands. The owner's published name and contact are placeholders
-until Vinayak says what to publish. Landed: 60beff7 (the limiter forgets
+**The task (Vinayak's startup prompt, §1):** (A) the public website/app,
+(B) the WhatsApp bot, (C) the rest of PROJECT_PLAN §11, in value order.
+
+- **A: the code is DONE.** Of the decision brief's §6 build order, steps
+  1 (the pre-public blockers), 2 (the dollar budget, per-person limits,
+  Turnstile), 3 (restarts, the ledger, monitoring) and 5 (privacy notice,
+  terms, the AI line, a deletion tool, an installable app) are built and
+  pushed. Each was adversarially reviewed, and so were the fixes: 31
+  step-5 findings, all fixed (the record below). **Step 4, running 24/7
+  on this PC at its own .com, is ready and waits on Vinayak.**
+  [docs/go-live.md](docs/go-live.md) is his runbook, every step with its
+  check.
+- **B: WhatsApp is not started.** The slow applications are his and can
+  start now (owner item 12 below). The build needs A's public address.
+- **C: the rest of §11**, in the value order of §6 below.
+
+**Next, for Claude:**
+1. **Step 4, with Vinayak, when he is ready.** He does the owner's steps
+   in docs/go-live.md; Claude answers, checks, and fixes whatever the
+   first real run shows. At the first app start, expect two things:
+   - a one-time VACUUM of the real database, logged and lossless (it is
+     what makes earlier deletions final);
+   - a startup warning for each going-live setting not yet in `.env`.
+   One thing no document settled: whether Cloudflare streams the answer
+   or buffers it (go-live.md §4).
+2. **Offer these; don't do them unasked:**
+   - **One real check before the public one** (~$0.01–0.17, only with his
+     yes). Nothing has spent real money since 2026-10-11. So the dollar
+     budget's reserve-and-settle, the per-person counts, the ledger's new
+     reference and the owner alerts have met only fakes. Note that
+     go-live.md §4's phone check is itself a paid check.
+   - **A fresh reviewer for the third round of fixes** (1ae3cc3 … 09dc74d,
+     free). They were proven by failing-first tests, mutants and 6,000
+     explorer seeds, but no reviewer has read them. Twice now, a review of
+     fixes found new defects in the fixes themselves.
+   - **The suite in a fresh venv built from requirements.lock, on today's
+     HEAD** (free). It last ran at a66cf5e: 1131 passed, exit 0. The lock
+     has not changed since.
+3. **B, WhatsApp.** The owner's applications come first (item 12 below).
+   Then the build:
+   - a webhook route and a WhatsApp formatter;
+   - media through the Graph API into the existing image and voice paths;
+   - the Telegram bot's per-chat logic;
+   - the provider in `fake_stages.py`, with its credential neutralised
+     (invariant 9);
+   - a human escalation path, which Meta's Business Policy requires.
+4. **C:** §11 in the order of §6 below. Each item gets a failing test
+   first and its own commit, pushed, and then this section is updated.
+
+**Owner actions waiting on Vinayak**, in [docs/go-live.md](docs/go-live.md)'s
+order; each one's check is there. All are free except the domain (~$10.46
+the first year).
+1. **Sarvam:** set data retention to 0 days (Settings → Workspace → Data
+   retention). THEN put `SARVAM_ZERO_RETENTION=true` in `.env`. Only then
+   does the privacy notice say Sarvam keeps none of it (review S5-4).
+   Until then it says Sarvam may keep it, and startup warns.
+2. **Anthropic:** a separate workspace with a monthly spend limit; its key
+   goes in `.env` as `ANTHROPIC_API_KEY`.
+3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
+   restarts, the budget and failures reach his phone.
+4. **`BACKUP_DIR=`** a OneDrive (or USB) folder, so the daily copies of
+   the spend record leave this laptop.
+5. **What the privacy notice publishes:** `CONTACT_EMAIL` (the notice and
+   the terms give it as the place to write for deletion, corrections and
+   complaints) and, if he wants a name shown, `OPERATOR_NAME`. A role
+   address avoids a personal one. It is his decision, never guessed and
+   never in the repo; startup warns without it.
+6. **This PC:**
+   - Device encryption on (Settings → Privacy & security → Device
+     encryption). Telegram's bot terms want stored data encrypted at rest.
+     If Windows Home doesn't offer it, §11 29 has the other way.
+   - Sleep: Never when plugged in. Lid close: Do nothing.
+   - Windows Update active hours: 07:00–01:00.
+7. **The .com:**
+   - Buy it at Cloudflare Registrar, with a Visa, Mastercard or Amex
+     enabled for international payments with 3-D Secure. If the card is
+     declined, use any registrar plus Cloudflare's nameservers.
+   - Turn Bot Fight Mode OFF.
+   - Add a free Turnstile widget and put its keys in `.env` as
+     `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`. Without them startup
+     warns, and visitors are not challenged.
+8. **The tunnel:**
+   - login, create, route dns, then `config.yml` with the `/dashboard`
+     fence first;
+   - `PUBLIC_HOSTS=<the .com>` in `.env`. Without it every visitor is
+     refused, and the server prints each refused name once;
+   - the first test from his phone on mobile data.
+9. **@BotFather:** set the bot's privacy policy to
+   `https://<the .com>/privacy`.
+10. **Running unattended:**
+    - cloudflared as a service, WITH the registry ImagePath edit. Without
+      it the service runs no tunnel (re-check F-5).
+    - The Task Scheduler task that runs `scripts\serve_forever.py` at boot.
+11. **Two yes-or-no questions:** update yt-dlp (it is 2026.8.19; startup
+    says when it is over 30 days old)? Install deno, the JS runtime yt-dlp
+    wants for YouTube? Ask before either.
+12. **WhatsApp, the slow items** ([decision-brief §4](docs/research/2026-10-15/decision-brief.md),
+    [whatsapp.md](docs/research/2026-10-15/whatsapp.md) "Start TODAY"):
+    - a new SIM that has never been on WhatsApp, kept recharged;
+    - a free Udyam registration, in exactly the name Meta and the site
+      will show. Business verification takes ~7 business days after it
+      and is optional at first;
+    - the Meta developer account, then an app, a business portfolio and a
+      WhatsApp Business Account, in **INR**;
+    - a card in Billing Hub. Without one, replies stop after the free
+      1,000 a month.
+
+    The risk: Meta's terms §4.7 bar AI providers whose primary function is
+    AI, at Meta's discretion. The Quint launched an AI fact-check bot on
+    WhatsApp in India in May 2026. Asking Meta for a written view before
+    the build is optional.
+13. **Decisions recorded for him:**
+    - §11 24: for a link plus a short question, check the link?
+    - §11 28: DPDP Rule 8(3)'s one-year retention against the 30-day
+      deletion. Needed before 13 May 2027.
+
+---
+
+### The record, newest first — what was done, with its commits
+
+**2026-10-17: the RE-CHECK of the step-5 fixes and of step 4's runner and
+runbook, COMPLETE:**
+[docs/research/2026-10-16/review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md),
+13 findings (4 medium, 9 low). FIXED: F-12 1ae3cc3 (the bot's notice:
+"our copy", Sarvam by the switch); F-4 + F-8 5acbbad (the supervisor in
+its own job first; a stop file for an orderly unattended stop); F-1
+1f23fc2 (two more real-database copies deleted; scripts/find_db_copies.py
+finds copies by what they are); F-2 + F-6 + F-9 c584e1d (bot: chats let
+go the moment their day ends; the restart hand-over locked and counted;
+one bot at a time; scripts/bot_explorer_restarts.py); F-3 + F-7 + F-11 +
+F-13 e039852 (store: scratch folder per database file; a WAL truncate
+that never stalls the app and tells the truth; the one-time VACUUM
+guarded; the one ledger writer knows restored rows); F-5 + F-10 09dc74d
+(go-live.md: the cloudflared ImagePath step without which the service
+runs no tunnel; what a fallback service account needs); the docs,
+a6c3fe6. **ALL 13 are closed; 1316 tests.** These third-round fixes were
+proven by failing-first tests, mutants and 6,000 explorer seeds — not yet
+by a fresh reviewer. The review's "notes, not findings" are at the end of
+its file and in PROJECT_PLAN §11 32.
+
+**2026-10-16 (late night): the review of step 5, COMPLETE:**
+[docs/research/2026-10-16/review-step5.md](docs/research/2026-10-16/review-step5.md),
+18 findings (7 medium, 11 low), each reproduced. FIXED: S5-3
+2e4562c (midnight), S5-4 ebbe0aa (Sarvam switch), S5-10 300f375 (three
+real-database copies deleted + a CLAUDE.md rule), S5-7/S5-8/S5-18 ed88772
+(forget.py finds reels, pasted addresses; one save; no wholesale deletion);
+the bot's six (S5-1, S5-2, S5-5, S5-6, S5-9, S5-13) in one commit,
+df14115, checked by scripts/bot_explorer.py — now in the repo — over
+2,000 interleavings; S5-11, S5-12, S5-16, S5-17 in one commit, 344ef13
+(deleted is gone from the file: secure_delete + a WAL truncate + a
+ONE-TIME VACUUM of the real database at the next app start; backups carry
+a one-way reference, never a job id; a deleted check's stream is not
+replayed; working files under data/tmp, emptied at startup); S5-14 +
+S5-15 (the notice says "we delete OUR copy"; the iOS Install button only
+where Add to Home Screen exists). ALL 18 findings are closed (ae85077).
+
+**2026-10-16 (late night): step 4 made ready for the owner:**
+[docs/go-live.md](docs/go-live.md) (800d26c, kept current since) — every
+owner step in order, each with its check: the settings, the domain, the
+tunnel (with the /dashboard fence), the first test from a phone, then
+cloudflared as a service and `scripts/serve_forever.py` as a boot task
+(8a15b30: runs the app and the bot unattended, restarts either, logs to
+logs/, children die with it; since 5acbbad, `New-Item
+data\serve_forever.stop` stops it in order, letting running checks
+finish).
+
+**2026-10-16 (night): step 5 of the brief's §6, built.** It added:
+- a privacy notice and terms pages;
+- an "answers are written by AI" line on every surface;
+- an 18+ line beside submit;
+- the bot's /privacy;
+- the installable-app manifest and icons (no service worker).
+
+Each part is its own pushed commit. The operator's published name and
+contact stay unset until Vinayak says what to publish. Landed: 60beff7 (the limiter forgets
 who asked after the day it counts — found while drafting the notice; it
 kept IP addresses in memory for weeks); dfb16b7 (`/privacy`, `/terms`,
 served by app/api/legal.py with the periods read from settings; the AI +
@@ -43,75 +219,9 @@ share target that only FILLS the box; no service worker — headless Chrome
 over DevTools: no manifest errors, no installability errors, and a shared
 reel link filled the box with no /verify request).
 69e7d6d (the pages' markers filled in one pass).
-**The review of step 5 is COMPLETE** (no agent in flight):
-[docs/research/2026-10-16/review-step5.md](docs/research/2026-10-16/review-step5.md),
-18 findings (7 medium, 11 low), each reproduced. FIXED so far: S5-3
-2e4562c (midnight), S5-4 ebbe0aa (Sarvam switch), S5-10 300f375 (three
-real-database copies deleted + a CLAUDE.md rule), S5-7/S5-8/S5-18 ed88772
-(forget.py finds reels, pasted addresses; one save; no wholesale deletion);
-the bot's six (S5-1, S5-2, S5-5, S5-6, S5-9, S5-13) in one commit, checked
-by scripts/bot_explorer.py — now in the repo — over 2,000 interleavings;
-S5-11, S5-12, S5-16, S5-17 in one commit (deleted is gone from the file:
-secure_delete + a WAL truncate + a ONE-TIME VACUUM of the real database at
-the next app start; backups carry a one-way reference, never a job id; a
-deleted check's stream is not replayed; working files under data/tmp,
-emptied at startup); S5-14 + S5-15 (the notice says "we delete OUR
-copy"; the iOS Install button only where Add to Home Screen exists). ALL
-18 findings are closed (ae85077).
-**The RE-CHECK of those fixes and of step 4's runner and runbook is
-COMPLETE** (2026-10-17):
-[docs/research/2026-10-16/review-fixes-step5.md](docs/research/2026-10-16/review-fixes-step5.md),
-13 findings (4 medium, 9 low). FIXED: F-12 1ae3cc3 (the bot's notice:
-"our copy", Sarvam by the switch); F-4 + F-8 5acbbad (the supervisor in
-its own job first; a stop file for an orderly unattended stop); F-1
-1f23fc2 (two more real-database copies deleted; scripts/find_db_copies.py
-finds copies by what they are); F-2 + F-6 + F-9 c584e1d (bot: chats let
-go the moment their day ends; the restart hand-over locked and counted;
-one bot at a time; scripts/bot_explorer_restarts.py); F-3 + F-7 + F-11 +
-F-13 e039852 (store: scratch folder per database file; a WAL truncate
-that never stalls the app and tells the truth; the one-time VACUUM
-guarded; the one ledger writer knows restored rows); F-5 + F-10 09dc74d
-(go-live.md: the cloudflared ImagePath step without which the service
-runs no tunnel; what a fallback service account needs). **ALL 13 are
-closed; 1316 tests.** These third-round fixes were proven by failing-first
-tests, mutants and 6,000 explorer seeds — not yet by a fresh reviewer.
-NEXT: the owner's list below (step 4 is ready: docs/go-live.md); then
-WhatsApp (B); then the rest of §11 (C). Each: failing test
-first, its own commit, then this list updated. Then the owner's list
-below; then WhatsApp.
 
-**Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
-63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
-Telegram file gets the real reason) · ee49622 (docs; translated Hindi lookups
-measured, 3/12 → 7/12) · ca76538 (Facebook reel and share links resolve in the
-app — they never did) · ad79c00 (the research, persisted in
-[docs/research/2026-10-15/](docs/research/2026-10-15/README.md)).
-
-A research file whose top says **"status: in progress"** means its agent died:
-re-run that one task, seeded from the file.
-
-**DECIDED (Vinayak, 2026-10-15, PROJECT_PLAN §7):** this PC now behind a
-Cloudflare named tunnel, a VM later · a $1/day dollar budget with per-person
-limits · the bot open to anyone, 5 a day each · a .com via Cloudflare. The
-research is complete and verified (except `whatsapp.md`, complete but
-unverified), and the brief is corrected:
-[docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md).
-
-**Done 2026-10-15/16, all pushed** (PROJECT_PLAN §7 has the why and every
-measurement): the brief's §6 steps 1 and 2 — the five reproduced
-pre-public blockers (50dcf3b, 1080d2d, 020e26f); per-person limits
-(55d3de0); the $1/day DOLLAR budget, cheaper as the day drains, repeats
-free (20e882d, 0951150); the review of those fixes, R1–R15, all fixed or
-deferred (R10, R12 → §11 25–26; table in
-[review-blockers.md](docs/research/2026-10-15/review-blockers.md)) and a
-re-check of the fixes that found five more (dc3ebd4 … 56c3990); Anthropic
-refusing for MONEY pauses checking at no cost (f545885, dbd5f08); the
-dashboard shows the day's money (42d1dd9); Turnstile + the signed device
-cookie — 3 checks a day per web device, the bot and this machine never
-challenged (b6daec5, f724156, b79bb2a; run end to end in real headless
-Chrome with Cloudflare's test keys).
-
-**DONE — the brief's §6 step 3: restarts, the ledger, monitoring**
+**2026-10-16 (evening): the brief's §6 step 3 — restarts, the ledger,
+monitoring — DONE**
 ([audit-ops.md](docs/research/2026-10-15/audit-ops.md)): OPS-06
 b7d4ced (a check always ends — saved, billed, its stream closed — and a
 5-minute sweep fails rows stuck mid-flight that nothing here still runs);
@@ -129,60 +239,57 @@ IPs and job ids; platform errors logged without URL or post id; `--workers
 daily content-free backup of the spend record — never a message — last 14
 kept in data/backups or BACKUP_DIR; a tested restore) 2581d1e; OPS-24
 a66cf5e (requirements.lock: the 29 exact tested packages — a fresh venv
-from it passed the whole suite; caps on majors; pytest in
+from it passed the whole suite, 1131 tests; caps on majors; pytest in
 requirements-dev.txt); OPS-25 (yt-dlp warnings logged once, scrubbed;
-startup says when yt-dlp is >30 days old — it is 58 today: ASK Vinayak
-before `pip install -U yt-dlp`, and before installing deno, the JS runtime
-yt-dlp wants for YouTube) 6c74d76; OPS-19 (owner alerts on Telegram:
-paused for money, the budget running low or spent, 3 failures in a row, a
-restart or a sweep that failed checks — to OWNER_CHAT_ID, each kind at
-most hourly; the bot's /id tells anyone their chat id). Step 3's remaining
-audit items are for a cloud host or later steps (OPS-09 pool starvation on
-1 vCPU, OPS-21 config from the working directory — the service recipe of
-step 4 must set it, OPS-26 slow memory growth). Step (4), running 24/7
-here — the domain, cloudflared as a service, auto-start — needs the owner
-actions below first; (5) is NOW; then WhatsApp. Each step: failing test
-first, commit + push, update this section.
+startup says when yt-dlp is >30 days old — it was 58 days on 2026-10-16:
+ASK Vinayak before `pip install -U yt-dlp`, and before installing deno,
+the JS runtime yt-dlp wants for YouTube) 6c74d76; OPS-19 (owner alerts on
+Telegram: paused for money, the budget running low or spent, 3 failures in
+a row, a restart or a sweep that failed checks — to OWNER_CHAT_ID, each
+kind at most hourly; the bot's /id tells anyone their chat id). Step 3's
+remaining audit items are for a cloud host: OPS-09 (pool starvation on 1
+vCPU) and OPS-26 (slow memory growth). OPS-21 (config read from the
+working directory) is covered: `serve_forever.py` runs its children from
+the project folder, and go-live.md's task sets it too.
 
-**Going live needs, in .env:** `PUBLIC_HOSTS=<the .com>` — without it every
-visitor is refused (the server prints each refused name once) — and
-`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` from a free Turnstile widget
-for the .com in the Cloudflare dashboard (without them startup warns, and
-visitors are not challenged); `CONTACT_EMAIL` (and `OPERATOR_NAME`) — what
-the privacy notice and terms publish as the place to write for deletion,
-corrections and complaints; Vinayak decides what to publish (startup warns
-without it); Sarvam's data retention set to 0 days in its dashboard
-(Settings → Workspace → Data retention), THEN `SARVAM_ZERO_RETENTION=true`
-— only then does the privacy notice say Sarvam keeps none of it (review
-S5-4; until then it says Sarvam may keep it, and startup warns).
+**2026-10-15/16: the brief's §6 steps 1 and 2, DONE, all pushed**
+(PROJECT_PLAN §7 has the why and every measurement). The five reproduced
+pre-public blockers
+([audit-security.md](docs/research/2026-10-15/audit-security.md)), each
+fixed (50dcf3b, 1080d2d, 020e26f):
+- one stranger could use up the day's cap;
+- a 25 MB text post froze the server for 10–19 s;
+- the bot answered anyone, even with no public URL;
+- any website could make its visitors submit paid image/voice checks
+  (cross-site);
+- concurrent refunded link resolves locked everyone out, free and
+  untraceably.
 
-**Step 4, ready for the owner:** [docs/go-live.md](docs/go-live.md) — every
-owner step in order, each with its check: the settings, the domain, the
-tunnel (with the /dashboard fence), the first test from a phone, then
-cloudflared as a service and `scripts/serve_forever.py` (8a15b30: runs the
-app and the bot unattended, restarts either, logs to logs/, children die
-with it) as a boot task.
+Then: per-person limits
+(55d3de0); the $1/day DOLLAR budget, cheaper as the day drains, repeats
+free (20e882d, 0951150); the review of those fixes, R1–R15, all fixed or
+deferred (R10, R12 → §11 25–26; table in
+[review-blockers.md](docs/research/2026-10-15/review-blockers.md)) and a
+re-check of the fixes that found five more (dc3ebd4 … 56c3990); Anthropic
+refusing for MONEY pauses checking at no cost (f545885, dbd5f08); the
+dashboard shows the day's money (42d1dd9); Turnstile + the signed device
+cookie — 3 checks a day per web device, the bot and this machine never
+challenged (b6daec5, f724156, b79bb2a; run end to end in real headless
+Chrome with Cloudflare's test keys).
 
-**Owner actions waiting on Vinayak** (free; the brief has details): set
-Sarvam's data retention to 0 days; a separate Anthropic workspace with a
-monthly spend limit for the public key; buy the .com (if Cloudflare declines
-the card, any registrar + Cloudflare nameservers); once the .com exists, a
-free Turnstile widget for it (Cloudflare dashboard → Turnstile: two keys
-for .env); `OWNER_CHAT_ID=` your Telegram chat id in .env (send /id to the bot), so
-trouble reaches your phone; `BACKUP_DIR=` a OneDrive (or USB) folder in .env, so the daily
-copies of the spend record leave this laptop; for WhatsApp, a new SIM and
-a free Udyam registration. From step 5: decide what the privacy notice
-publishes as the operator's name and contact (`OPERATOR_NAME`,
-`CONTACT_EMAIL` — a role address avoids a personal one); once the .com
-exists, set the bot's privacy policy in @BotFather to
-`https://<the .com>/privacy`; check that this PC's disk is encrypted
-(Settings → Privacy & security → Device encryption — Telegram's bot terms
-want stored data encrypted at rest, PROJECT_PLAN §11 29). Pre-public **blockers**
-already established ([audit-security.md](docs/research/2026-10-15/audit-security.md)):
-one stranger can use up the day's cap; a 25 MB text post freezes the server
-for 10–19 s; the bot answers anyone, even with no public URL; any website can
-make its visitors submit paid image/voice checks (cross-site); concurrent
-refunded link resolves lock everyone out, free and untraceably.
+**DECIDED (Vinayak, 2026-10-15, PROJECT_PLAN §7):** this PC now behind a
+Cloudflare named tunnel, a VM later · a $1/day dollar budget with per-person
+limits · the bot open to anyone, 5 a day each · a .com via Cloudflare. The
+research is complete and verified (except `whatsapp.md`, complete but
+unverified), and the brief is corrected:
+[docs/research/2026-10-15/decision-brief.md](docs/research/2026-10-15/decision-brief.md).
+
+**Done, all pushed (2026-10-15):** e4a9822 (no key in any `Settings` repr, §11 17) ·
+63f8049 (the bot token never reaches a log line) · 9a737bd (an over-20 MB
+Telegram file gets the real reason) · ee49622 (docs; translated Hindi lookups
+measured, 3/12 → 7/12) · ca76538 (Facebook reel and share links resolve in the
+app — they never did) · ad79c00 (the research, persisted in
+[docs/research/2026-10-15/](docs/research/2026-10-15/README.md)).
 
 ---
 
@@ -202,12 +309,12 @@ FIRST, read these in order:
                      a session ended mid-task — verify, then resume there.
 2. CLAUDE.md       — how we work here: money rules, the 10 invariants, conventions.
 3. PROJECT_PLAN.md — depth. §0 status, §7 decisions log (newest first: read the
-   2026-10-11, 2026-10-10 and 2026-09-29 entries), §8 MEASURED costs,
+   2026-10-17, 2026-10-16 and 2026-10-15 entries), §8 MEASURED costs,
    §11 THE TODO LIST (A: website, B: WhatsApp, C: the rest).
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1145 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1316 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -241,6 +348,80 @@ What I want to do now (PROJECT_PLAN §11 A-C):
   (C) And the remaining to-dos in §11, in value order.
 ```
 
+**Where (A)–(C) stand on 2026-10-17.** This note sits outside the prompt;
+the prompt stays in Vinayak's words. (A) was decided on 2026-10-15 and is
+built; step 4 waits on the owner (§0). (B) is next, then (C). A session
+started with this prompt takes §0 as its current task, not (A)'s "lay out
+the choices".
+
+### 1b. The resume prompt for the session after 2026-10-17
+
+Written by Claude at the end of the 2026-10-17 session, for picking up
+exactly where it stopped. The next session updates or replaces it when it
+ends.
+
+```
+Continuing my "Information Verifier" project at
+c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier
+(private repo: https://github.com/VinayakMokashi/Information_Verifier).
+The last session ended cleanly on 2026-10-17. Pick up exactly where it
+stopped.
+
+FIRST, read these in order:
+1. HANDOFF.md - its §0 is the resume point: the state, what's next for
+   you, and my list of owner actions.
+2. CLAUDE.md - the money rules, the 10 invariants, and how we work.
+3. PROJECT_PLAN.md - §0; §7 newest first (the 2026-10-17 and 2026-10-16
+   entries); §11, the to-do list.
+4. docs/go-live.md - step 4, my runbook for putting it online.
+Your memory has entries for this project too.
+
+THEN verify, all free, and tell me what you find before doing anything else:
+- git is clean, and main equals origin/main at the 2026-10-17 handoff
+  commit (git log -3).
+- .\.venv\Scripts\python.exe -m pytest tests -q gives 1316 passed. Read
+  pytest's OWN exit code (0), never through a pipe.
+- No stray python, uvicorn or cloudflared processes.
+- data\verifier.db is 1,273,856 bytes, last written 2026-10-12 05:21. If
+  I've started the app since, expect the one-time VACUUM line in its
+  output instead. Don't open or copy that file: its size and date are
+  the check.
+- Both files in docs\research\2026-10-16\ say "status: complete".
+
+Where we are:
+(A) The public website/app is BUILT. Steps 1-3 and 5 of the build order
+    are done and were reviewed twice (31 findings, all fixed). Step 4,
+    running 24/7 on this PC at its own .com, waits on MY actions in
+    docs/go-live.md.
+(B) WhatsApp is not started. Its slow applications (a new SIM, Udyam, the
+    Meta account) are mine.
+(C) After that, the rest of PROJECT_PLAN §11, in the value order of
+    HANDOFF §6.
+
+What I want now:
+1. Ask me which of the three offers in HANDOFF §0 ("Offer these; don't do
+   them unasked") to do.
+2. When I say I'm ready, walk me through docs/go-live.md one step at a
+   time, checking each step's result with me.
+3. Then (B), then (C).
+
+Money: I'm cost-conscious. Never run anything paid without asking me
+first: smoke_test.py, link_smoke.py, ab_models.py, asr_probe.py,
+crawl_probe.py, or a real check through the app. CLAUDE.md's table of
+free paths covers nearly everything.
+Privacy: never read or print .env. What the privacy notice publishes (my
+name and contact) is my call, never guessed.
+
+Work the way we have been:
+- layered commits, pushed after each one;
+- adversarial review, including of the fixes;
+- measure, don't assume, and read what a failing run printed before
+  naming a cause;
+- every new test seen failing first.
+Keep HANDOFF §0 and PROJECT_PLAN current at every step. Save every result
+to a repo file the moment it exists, so a session limit costs nothing.
+```
+
 ---
 
 ## 2. What it is, in plain words
@@ -259,10 +440,17 @@ NASA, Snopes, Full Fact… 57 trusted domains, 43 searchable) and only then the
 **open web**, which it labels clearly as such. It is allowed to say "nobody
 reliable has covered this" — that is a real answer here, not a failure.
 
-**Surfaces:** a chat web page (on this PC only, for now), a **Telegram bot**
-(@Information_Verifier_bot, live since 2026-09-29, usable from any device
-while this PC runs it), a local-only spending dashboard, and console scripts.
-**Next: a public website/app, then a WhatsApp bot** (§6).
+**Surfaces:**
+- **A chat web page.** It is on this PC only until step 4 puts it at its
+  own .com. Everything for the public is built: a Turnstile challenge, the
+  privacy notice and terms, an AI line on every answer, and an
+  installable-app manifest.
+- **A Telegram bot** (@Information_Verifier_bot), live since 2026-09-29. It
+  works from any device while this PC runs it, and is open to anyone at 5
+  checks a day each.
+- A local-only spending dashboard, and console scripts.
+
+**Next: going public (step 4, the owner's), then a WhatsApp bot** (§6).
 
 ---
 
@@ -278,18 +466,32 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 | **Sep 23** | The reader's two controls: a **skimmable summary** and a **reply-language chooser**. |
 | **Sep 29** | **The Telegram bot goes live** from Vinayak's phone; summary and language chooser proven on the real model. Failed searches recorded per check; the cap goes to **5 a day**; the free test suite caught **refilling the real daily cap** (fixed with a canary). |
 | **Oct 10** | **One-click launcher** `start.cmd`. Found: the app and bot had kept running unseen for a week after the session that started them. |
-| **Oct 15** | Before going public: no credential reaches any printed line (§11 17, and the bot token's leak through error text); an over-20 MB Telegram file gets the real reason; translated Hindi lookups double Google fact-check matches (3/12 → 7/12). Public-launch options researched (§11 A). |
 | **Oct 11** | **Three cost cuts, measured:** the Google fact-check shortcut (**$0.0084, 6.7 s** for a covered hoax, was ~$0.05 and 28–51 s); pass 1 says "not covered" in one sentence (318 tokens, was an essay); "hi"/"ok"/"thanks" cost nothing. A second test leak (late claims landing in other tests' databases) fixed — after a wrong first fix was reverted. |
+| **Oct 15** | Before going public: no credential reaches any printed line (§11 17, and the bot token's leak through error text); an over-20 MB Telegram file gets the real reason; translated Hindi lookups double Google fact-check matches (3/12 → 7/12). Public-launch options researched (§11 A). **Vinayak decides how it goes public:** this PC behind a named Cloudflare tunnel (a VM later), a $1-a-day dollar budget, the bot open to anyone at 5 a day each, a .com. |
+| **Oct 15–16** | **The public launch, built** in the brief's order. Step 1: the five pre-public blockers. Step 2: per-person limits, the dollar budget (cheaper as the day drains), Turnstile and a device cookie (3 a day per web device). Step 3: restarts, the ledger, monitoring (owner alerts, daily backups, `/ready`, pinned requirements). Step 5: a privacy notice and terms, an AI line on every answer, the bot's /privacy and /delete, a deletion tool, an installable app. Reviewed: R1–R15 plus 5 more on steps 1–2, then 18 on step 5. All fixed. |
+| **Oct 17** | **A re-check of the fixes** found 13 more, all fixed (1316 tests). Step 4's runner and runbook (`serve_forever.py`, `docs/go-live.md`) are ready. Going live now waits on the owner's steps. |
 
 ---
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **1145 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **1316 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
+- **Ready for the public, waiting on the owner** (§0, `docs/go-live.md`).
+  The app and the bot are not running now; nothing has run since
+  2026-10-12.
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
   Google fact-check shortcut and the one-sentence pass 1.
+- **Not yet met real money or real keys.** Everything built since
+  2026-10-11 is proven only with fakes and test keys:
+  - the dollar budget's reserve-and-settle, and the per-person counts;
+  - Turnstile with real keys, and the device cookie;
+  - the ledger's new reference, and the owner alerts;
+  - the tunnel's streaming;
+  - the unattended runner across a real reboot.
+  Step 4's checks cover them; one real local check first is on §0's
+  list of offers.
 - **Spent to date: $1.7437** — the spend ledger's own total, 17 rows (the
   ledger, not anyone's sum, is the truth: it once caught a $0.26 check the
   docs had missed). Watch it at `http://127.0.0.1:8000/dashboard`.
@@ -298,9 +500,18 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
   longer than the bot waits (items 21, 23); Google's lookup misses Hindi and
   Hinglish forwards entirely (20); source narrowing is per *domain*, so a big
   site brings unrelated pages (15); there is no eval set, so quality
-  trade-offs can't yet be tested safely (22); the bot answers anyone (18).
-  (17, keys in a `Settings` repr, was fixed 2026-10-15 — with the bot
-  token's own leak through error text.)
+  trade-offs can't yet be tested safely (22). Fixed: 17 (keys in a
+  `Settings` repr, 2026-10-15, with the bot token's own leak through error
+  text) and 18 (the bot answers anyone — now on purpose, 5 a day each,
+  2026-10-15/16).
+- **Open from the launch work** (§11 24–32): a question for Vinayak on
+  "is this true? <link>" (24); two per-person hardenings to make before
+  the setup changes (25, 27); the DPDP one-year-retention decision before
+  13 May 2027 (28); encryption at rest (29, an owner check first);
+  declining individualised medical, legal and financial advice (30;
+  Anthropic's policy from 12 Nov 2026; a prompt change, so one paid check
+  — ask); a "report this answer" control only for the Play Store (31);
+  the re-check's small notes (32).
 
 **Measured costs** (Sonnet 5):
 
@@ -317,13 +528,26 @@ while this PC runs it), a local-only spending dashboard, and console scripts.
 instructions, ~5,900 the web-search tool's own. That is why the shortcut,
 which sends no tool, is so cheap.
 
-**Safety settings in force:** a $1-a-day dollar budget deployment-wide
-(each check reserves its kind's worst case and settles at its real cost;
-cheaper as the day drains; 40 checks a day at most as a backstop; persisted
-in SQLite, India's day, shared by page and bot, fails closed); per person,
-one check at a time and 5 a day (Telegram, WhatsApp; 20 per IPv4 address);
-messages deleted after 30 days with costs kept content-free; the dashboard
-is refused to anything that is not this machine.
+**Safety settings in force** (the numbers are in `app/config.py`, pinned by
+tests):
+- **Deployment-wide: $1 a day.** Each check reserves its kind's worst case
+  and settles at its real cost. It gets cheaper as the day drains: below
+  40% left, no open-web pass; below 15%, only Google's published
+  fact-checks. 40 checks a day at most, as a backstop. Persisted in
+  SQLite, India's day, shared by page and bot, and it fails closed. When
+  Anthropic refuses for money, checking pauses at no cost.
+- **Per person:**
+  - one check at a time (3 at once per IPv4 address, which NAT shares);
+  - 10 an hour;
+  - per day: 5 per Telegram user and WhatsApp number, 3 per web device
+    (the cookie a Turnstile pass earns), and without a cookie 5 per IPv6
+    /64 or 20 per IPv4 address.
+  Who someone is stays in memory only, cleared after the day it counts.
+- **Kept:** messages for 30 days; the answer cache 7 days (1 for
+  open-web answers); reel transcripts 30 days; costs forever, with no
+  content. Deletions are secure (secure_delete, then a WAL truncate). The
+  dashboard and the admin routes refuse anything that is not this
+  machine.
 
 ---
 
@@ -352,24 +576,46 @@ The ten invariants are in [CLAUDE.md](CLAUDE.md); these are the ones that bite:
 
 ---
 
-## 6. The next steps (agreed 2026-10-11)
+## 6. The next steps (agreed 2026-10-11; where each stands on 2026-10-17)
 
 Vinayak: *"We need to make this into an app/website which anyone can access
 and also a whatsapp bot. And also work on the remaining todo's."*
 PROJECT_PLAN §11 A–C has the detail.
 
-- **A. A website/app anyone can use.** Decide first: where it runs 24/7 (a
-  small cloud host with a disk, or this PC behind a named Cloudflare Tunnel),
-  the daily budget and per-person limits for strangers (the 5/day cap is
-  deployment-wide and would run out in minutes), and a bot shield. §11 17
-  is fixed (2026-10-15); decide §11 18 before any public URL. A
-  web-app manifest makes the page installable on phones — the cheap "app".
+- **A. A website/app anyone can use: DECIDED 2026-10-15, BUILT by
+  2026-10-17.** Only step 4 is left, and it is the owner's
+  (`docs/go-live.md`). The original framing, kept for the record: decide
+  first where it runs 24/7 (a small cloud host with a disk, or this PC
+  behind a named Cloudflare Tunnel), the daily budget and per-person
+  limits for strangers (the old 5/day cap was deployment-wide and would
+  have run out in minutes), and a bot shield; fix §11 17 and decide §11
+  18 before any public URL; a web-app manifest makes the page installable
+  on phones — the cheap "app". All done. After launch, see on a real
+  Android phone the install prompt and what WhatsApp's share sheet
+  offers.
 - **B. The WhatsApp bot**, once A gives it a public webhook: Meta Cloud API,
   business verification (slow — start early), a WhatsApp formatter, the
-  Telegram bot's per-chat logic reused.
-- **C. The remaining to-dos**, value order: the eval set (22) — it gates
-  every quality-for-cost trade-off — then the basic-search-tool A/B (21),
-  Hindi queries for the Google lookup (20), and the rest of §11.
+  Telegram bot's per-chat logic reused. What the owner starts first is
+  item 12 of §0's owner list. The research
+  ([whatsapp.md](docs/research/2026-10-15/whatsapp.md)) is complete but
+  was never independently verified, so re-check Meta's pricing and terms
+  before building.
+- **C. The remaining to-dos, in value order:**
+  1. **30, declining individualised advice.** It is time-bound: Anthropic's
+     policy takes effect on 12 Nov 2026, and the app may be public by
+     then. It is a prompt change, so one paid check — ask first.
+  2. **The eval set (22).** It gates every quality-for-cost trade-off.
+  3. **The basic-search-tool A/B (21)**, which may also settle 15 and 23.
+  4. **Hindi queries for the Google lookup (20).** Measured: 3/12 → 7/12.
+  5. **23**, pass 2 outlasting the bot's wait, unless 21 settles it.
+  6. **25 and 27**, the per-person hardenings, before the setup they
+     guard changes.
+  7. Then the rest: 9a, 10, 11, 4–16. The cloud-only items (OPS-09,
+     OPS-26) wait for the VM.
+
+  Vinayak's to answer: 24 (a link plus a short question) and 28 (DPDP
+  retention, before 13 May 2027). 29 (encryption at rest) starts with his
+  Device-encryption check.
 
 ---
 
@@ -380,12 +626,18 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 1145 tests, ~2 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 1316 tests, ~2-3 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
 .\.venv\Scripts\python.exe scripts\telegram_bot.py --check-token
+.\.venv\Scripts\python.exe scripts\bot_explorer.py            # 2,000 random bot interleavings
+.\.venv\Scripts\python.exe scripts\bot_explorer_restarts.py   # the same, with restarts and expiry
+.\.venv\Scripts\python.exe scripts\find_db_copies.py          # any copy of the real database? (slow: scans %TEMP%)
+.\.venv\Scripts\python.exe scripts\forget.py --job <id>       # a deletion request: lists first, --yes deletes
 ```
+
+CLAUDE.md's table has every free path, and what each proves.
 
 **Real (spends money — ask first; the app's $1-a-day budget):**
 
@@ -407,6 +659,15 @@ app keeps the code it started with. By hand, the same two steps:
 real check from the console and print the bill (`--raw`: every API request's
 usage, which is how the shortcut's single no-tool call was confirmed).
 
+**Unattended (step 4, once the owner sets it up):** `scripts\serve_forever.py`
+runs the app and the bot from a Task Scheduler task at boot. It restarts
+either if it stops, logs to `logs\` (14 days kept), and tells the owner's
+phone of each restart. `New-Item data\serve_forever.stop` stops it in order:
+the bot first, then the app once running checks finish (up to 5 minutes).
+Close `start.cmd`'s windows before starting it: only one app and one bot
+may run. [docs/go-live.md](docs/go-live.md) has the setup and "if something
+goes wrong".
+
 ---
 
 ## 8. Where the code lives
@@ -423,6 +684,28 @@ the local-only spending page, `app/api/limits.py` the daily cap,
 `app/hosts.py` the ONE place a URL's host is read. `static/index.html` is the
 whole web page; `scripts/telegram_bot.py` the bot; `start.ps1`/`start.cmd`
 the launcher; `scripts/fake_stages.py` the fakes that make it free to test.
+
+Added for the public launch (2026-10-15/17):
+- **Limits and identity.** `app/api/limits.py` now also holds the dollar
+  budget and the per-person limits. `app/api/local.py` is the one "is this
+  request from this machine?" rule. `app/api/device.py` is the signed
+  device cookie, and `app/providers/turnstile.py` the challenge that earns
+  it.
+- **Legal pages.** `app/api/legal.py` serves `/privacy` and `/terms` from
+  `privacy.html` and `terms.html`, with their periods read from the
+  settings the deleting code uses.
+- **Operations.**
+  - `app/providers/alerts.py`: the owner's Telegram alerts.
+  - `app/store/backup.py`: the daily content-free ledger backup.
+  - `app/store/instance.py`: one server per database.
+  - `app/store/scratch.py`: working files under `data/tmp`.
+  - `scripts/serve_forever.py`: the unattended runner.
+- **The app's files.** `static/manifest.webmanifest`, and the icons
+  `scripts/make_icons.py` draws.
+- **Owner's tools.** `scripts/forget.py` (deletion requests),
+  `scripts/find_db_copies.py`, and `scripts/lock_requirements.py` (writes
+  `requirements.lock`).
+- **The owner's runbook:** `docs/go-live.md`.
 
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` →
 poll `/reports/{job_id}`, with an optional `/stream/{job_id}` for live text.

@@ -2,12 +2,26 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-10-15**
-> (secrets out of every printed line; the public-launch choices — see §7, §11 A).
+> Keep it updated as the project moves. Last updated: **2026-10-17**
+> (the public launch is built and reviewed twice; going live waits on the
+> owner's steps — §0, §7, §11 A; HANDOFF.md §0 is the resume point).
 
 ---
 
 ## 0. Where we are right now (read this first)
+
+**Right now (2026-10-17, end of session):**
+- **The public website/app is built.** Steps 1–3 and 5 of the decision
+  brief's build order are done, pushed and reviewed twice (§7, 2026-10-15
+  to 2026-10-17). The step-5 reviews alone found 31 defects, all fixed.
+- **Step 4, running it 24/7 on this PC at its own .com, waits on
+  Vinayak's owner steps** in `docs/go-live.md`.
+- **1316 tests pass.** Nothing is in flight. The app and the bot have not
+  run since 2026-10-12, and the ledger stands at $1.7437.
+- Everything built since 2026-10-11 has met only fakes and test keys,
+  never real money.
+
+HANDOFF.md §0 has the owner's list and the next steps in order.
 
 **The new engine has now run for real (2026-09-22) — and it works.** One
 prose answer per submission, the way Claude would answer if you pasted the
@@ -35,17 +49,20 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
   (it was a count: 2 a day, then 5 from 2026-09-29).
   Persisted in SQLite, so a restart cannot refill it; resets at midnight
   India time; a check served free from cache gives everything back.
-- **Per person:** one check at a time; 5 paid checks a day per Telegram
-  user (and WhatsApp number, to come); web visitors by address until
-  device cookies exist (§7, 2026-10-16).
+- **Per person:** one check at a time (3 at once per IPv4 address) and 10
+  an hour. Per day: 5 paid checks per Telegram user (and per WhatsApp
+  number, to come), and 3 per web device, by the signed cookie a
+  Turnstile pass earns (since 2026-10-16). Without a cookie, a visitor
+  counts by address: 5 per IPv6 /64, 20 per IPv4 address (§7, 2026-10-16).
 - Messages are deleted after **30 days**; what they cost is kept, with no
   content, in a spend ledger.
 - A **spending dashboard** at `http://127.0.0.1:8000/dashboard` — this
   machine only (a 404 to anyone else, including through the share tunnel).
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**688 tests pass** (`.venv\Scripts\python.exe -m pytest tests -q`, free —
-every paid seam is faked).
+**1316 tests pass** today (688 on 2026-09-22;
+`.venv\Scripts\python.exe -m pytest tests -q`, free — every paid seam is
+faked).
 
 **Reviewed adversarially the same evening, twice:** two independent reviews
 of the day's work found 13 defects — among them a trust-label bypass, a
@@ -102,8 +119,12 @@ commands as claims (§7). Its review found 18 more, all fixed the same night;
 step 4 is ready for the owner (`docs/go-live.md`, `scripts/serve_forever.py`).
 A re-check of those fixes found 13 more (2026-10-17), all fixed. **1316 tests.**
 
-**Next** (§11, agreed 2026-10-11): make it **a website/app anyone can use**,
-**the WhatsApp bot**, and the remaining to-dos.
+**Next** (2026-10-17; the goals were agreed 2026-10-11):
+1. **Step 4** of going public. It is Vinayak's owner steps in
+   `docs/go-live.md`; Claude checks and fixes what the first real run
+   shows.
+2. **The WhatsApp bot** (§11 B). His slow applications can start now.
+3. **The remaining to-dos** (§11 C), in HANDOFF §6's value order.
 
 ---
 
@@ -2044,7 +2065,7 @@ Quick reference:
 
 ## 11. Open items
 
-### THE TODO LIST (updated 2026-10-11 — the authoritative one)
+### THE TODO LIST (updated 2026-10-17 — the authoritative one)
 
 **THE NEXT STEPS, agreed 2026-10-11 (Vinayak: "We need to make this into an
 app/website which anyone can access and also a whatsapp bot. And also work
@@ -2054,8 +2075,18 @@ A. **A website / app anyone can use.** **DECIDED 2026-10-15** (§7): this PC
    behind a Cloudflare named tunnel now, a Mumbai VM later; a $1/day dollar
    budget with per-person limits; the bot open to anyone at 5 a day each; a
    .com via Cloudflare. The research and the reproduced audits behind it are
-   in `docs/research/2026-10-15/`; the brief's §6 is the build order. The
-   original framing, kept for the record — decisions first, then code:
+   in `docs/research/2026-10-15/`; the brief's §6 is the build order.
+   **STATUS 2026-10-17: BUILT, except step 4, which is the owner's.**
+   - Steps 1 (the blockers), 2 (budget, per-person limits, Turnstile), 3
+     (restarts, the ledger, monitoring) and 5 (privacy, terms, the AI line,
+     deletion, the installable app) are done and reviewed twice. The
+     step-5 reviews found 18 + 13, all fixed (§7).
+   - Step 4, running it 24/7 here at the .com, is `docs/go-live.md`,
+     waiting on Vinayak. HANDOFF §0 lists his steps.
+   - Never yet met reality: Cloudflare streaming the answer (or buffering
+     it), a real reboot under Task Scheduler, the budget against a real
+     bill.
+   The original framing, kept for the record — decisions first, then code:
    - **Where it runs, 24/7.** Options: a small cloud host (Render, Railway,
      Fly.io, or a ₹400–800/month VPS) with a persistent disk for SQLite and
      ffmpeg + yt-dlp installed — ONE worker (in-memory stream registry and
@@ -2089,7 +2120,30 @@ B. **The WhatsApp bot.** Meta's WhatsApp Business Platform (Cloud API):
    Graph API into the existing image/voice paths, and the bot's per-chat
    lock + pending-report logic. A sandbox (Meta's test number, or a provider
    like Twilio) can be built against before verification completes.
-C. **The remaining to-dos** — items 4–23 below, in roughly value order.
+   **Researched again 2026-10-15** (`docs/research/2026-10-15/whatsapp.md`,
+   complete but not independently verified; decision-brief §4).
+   - **Cost:** a reply inside the 24-hour window is ₹0.115, but each number
+     gets 1,000 free service messages a month, so at the $1-a-day ceiling
+     Meta's bill is ₹0. No company is needed to launch.
+   - **What Vinayak can start now, in order:**
+     1. a new SIM that has never been on WhatsApp, kept recharged;
+     2. a free Udyam sole-proprietorship registration, in exactly the name
+        Meta and the site will show (business verification follows, ~7
+        business days, optional at first);
+     3. the Meta developer account, an app, a business portfolio and a
+        WhatsApp Business Account, in INR, built against the free test
+        number (5 phones);
+     4. a card in Billing Hub;
+     5. a human escalation path, which Meta's Business Policy requires and
+        the bot does not have yet.
+     The privacy page already exists (step 5); its public URL comes with
+     step 4.
+   - **The risk** is Meta's terms §4.7 (AI providers whose primary
+     function is AI are barred, at Meta's discretion). The Quint runs an AI
+     fact-check bot on WhatsApp in India (May 2026). A written view from
+     Meta before the build is optional.
+C. **The remaining to-dos** — items 4–32 below. Their value order is in
+   HANDOFF §6.
 
 **Running it (with Vinayak present):**
 
@@ -2102,6 +2156,10 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
    backlog the bot will process on start (the cap bounds its cost).
    **After pulling new code, restart both windows** — a running app keeps
    the code it started with.
+   **Unattended (step 4):** `scripts\serve_forever.py`, run by a Task
+   Scheduler task at boot (`docs/go-live.md` §5). It replaces `start.cmd`'s
+   windows, since only one app and one bot may run. `New-Item
+   data\serve_forever.stop` stops it in order.
 
 **On hold until A exists:**
 
@@ -2111,6 +2169,8 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
 
 3. ~~**Raise the cap when ready.**~~ **5 a day since 2026-09-29.** Decide
    again after the quality checks: back to 2, or keep 5 for real users.
+   **Superseded 2026-10-15:** the money is bounded by the $1-a-day budget,
+   and the count stays only as a 40-a-day backstop.
 4. **Answer quality on genuinely fresh rumours.** One two-pass run so far
    (Nagpur Metro) — excellent, but one. A handful more across health, science
    and Indian politics would say whether `chat_effort="medium"` is the right
@@ -2284,6 +2344,21 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
 31. **A "report this answer" control** — required only if the app ever
    goes on the Play Store (Play's AI-content policy; pwa-app.md F9).
    Deferred with the Play route itself.
+32. **The re-check's "notes, not findings"** (2026-10-17, the end of
+   `docs/research/2026-10-16/review-fixes-step5.md`). All low; none blocks
+   launch.
+   - Task Scheduler's default priority 7 runs the app, the bot and ffmpeg
+     below normal priority, on a PC the owner also uses.
+   - `forget.py` does not find a bare job id typed in capitals. The page
+     does not accept one either.
+   - An unknown command followed by one or two words ("/check 5G se")
+     gets the help text, not a check; with three or more it is checked.
+     MEASURED 2026-10-17 (`classify_message`, offline): "/check 5G se
+     corona", the review's own example, IS checked as text.
+   - A claim stalled for more than 5 minutes is judged on an emptied
+     per-person table, because `forget_idle` clears without re-dating.
+     Only a sleeping machine stalls that long, and go-live.md sets sleep
+     to Never.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.
@@ -2308,7 +2383,10 @@ C. **The remaining to-dos** — items 4–23 below, in roughly value order.
 
 - `.env` holds `ANTHROPIC_API_KEY`, `GOOGLE_FACTCHECK_API_KEY`, `SARVAM_API_KEY`,
   `HF_TOKEN`, `DB_PATH`, `TELEGRAM_BOT_TOKEN`. Never commit it;
-  `.env.example` stays blank.
+  `.env.example` stays blank. Going live adds `PUBLIC_HOSTS`,
+  `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `CONTACT_EMAIL`,
+  `OPERATOR_NAME`, `SARVAM_ZERO_RETENTION`, `OWNER_CHAT_ID` and
+  `BACKUP_DIR` (HANDOFF §0, the owner's list).
 - Installed: Python 3.12, git, gh, winget, ffmpeg (Gyan 8.1.2),
   cloudflared 2026.7.3 (at `C:\Program Files (x86)\cloudflared\`).
 - Still on disk but **no longer used or required**: `sqlite-vec`,
@@ -2325,6 +2403,9 @@ when done (the link dies with the process). `-DemoMode` gives the same UI for $0
 with simulated verdicts.
 
 ### WhatsApp notes (researched 2026-07-25; on hold — the Telegram bot was built instead)
+
+*Superseded by the 2026-10-15 research (`docs/research/2026-10-15/whatsapp.md`,
+summarised under §11 B). Kept for the record.*
 
 Researched 2026-07-25; re-check pricing before relying on it:
 - **WhatsApp Cloud API** — a free **test number** allows exactly **5 verified

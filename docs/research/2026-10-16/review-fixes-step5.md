@@ -628,3 +628,8 @@ bot and ffmpeg below normal priority on a PC the owner also uses. A bare
 job id typed in capitals is not found by forget.py, but the page does not
 accept one either. An unknown command plus two words ("/check 5G se
 corona") gets the help text, not a check.
+
+Correction (2026-10-17, measured offline with `classify_message`): the
+example has three words, and "/check 5G se corona" IS checked as text.
+The help text comes for one or two words after an unknown command
+("/check 5G se"), as `_COMMAND_WORDS_MAX = 2` intends.

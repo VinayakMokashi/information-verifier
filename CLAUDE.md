@@ -23,8 +23,8 @@ is how to work here.
 - **The deployment spends at most $1 a day** (Vinayak, 2026-10-15; it
   replaced a count — 2 a day from 2026-09-22, 5 from 2026-09-29 — kept as
   a 40-a-day backstop). Each check reserves its kind's worst case and
-  settles at its real cost; per person, one at a time and 5 a day on
-  Telegram (PROJECT_PLAN §7, 2026-10-16). Persisted in SQLite, India's
+  settles at its real cost; per person, one at a time, 5 a day on
+  Telegram and 3 a day per web device (PROJECT_PLAN §7, 2026-10-16). Persisted in SQLite, India's
   day, shared by the web page and the Telegram bot; tests pin the
   defaults. Operator scripts (`smoke_test.py`, `ab_models.py`) do not go
   through it — they are still paid, so still ask.
@@ -70,7 +70,9 @@ Secrets live only in `.env` (git-ignored): `ANTHROPIC_API_KEY`,
 `TELEGRAM_BOT_TOKEN`; going live, also `TURNSTILE_SITE_KEY`,
 `TURNSTILE_SECRET_KEY` and the settings `PUBLIC_HOSTS`, `CONTACT_EMAIL` and
 `OPERATOR_NAME` (HANDOFF §0; the last two are what the privacy notice
-publishes — Vinayak's call, never guessed). The test suite never loads a
+publishes — Vinayak's call, never guessed), `SARVAM_ZERO_RETENTION` (true
+only once Sarvam's dashboard says 0 days — the notice reads it),
+`OWNER_CHAT_ID` (alerts) and `BACKUP_DIR`. The test suite never loads a
 real key (dummies, set in `tests/conftest.py` before the app is imported;
 Turnstile left off, no contact).
 
@@ -195,9 +197,13 @@ limiter are both in-memory.
 - **Review the fix, not just the bug.** On 2026-09-22 a third of the defects
   came from the fixes for earlier defects, and two more were found only by
   running a reviewer's randomized interleaving search against the FIXED bot
-  (`scratchpad/fixrev_money/bot_explorer_real*.py`, 2,000 seeds each). A fix
-  that addresses the mechanism a finding named, rather than the rule behind
-  it, leaves the hole open.
+  (2,000 seeds each). That search is now `scripts/bot_explorer.py`, and
+  `scripts/bot_explorer_restarts.py` adds restarts and expiry: run both
+  after ANY change to the bot's concurrency. A fix that addresses the
+  mechanism a finding named, rather than the rule behind it, leaves the
+  hole open. It happened again in both step-5 reviews (2026-10-16/17):
+  five of 18 findings, then six of 13, were fixes that covered only the
+  case they named.
 - **Interruptions must cost nothing that was finished** (Vinayak, 2026-10-15:
   "if we again reach the session limit, it does not affect us … throughout the
   project"). That day a usage limit and then a network drop each killed agents
@@ -253,6 +259,18 @@ in `app/engine/chat_prompts.py`, whose fingerprint keys the answer cache.
 the live SSE preview; `app/api/dashboard.py` the local-only spending page;
 `app/hosts.py` is the ONE place a URL's host is read (both the trust label and
 the link fetcher depend on it).
+
+For the public launch:
+- `app/api/limits.py` holds the dollar budget and the per-person limits.
+- `app/api/local.py` is the one "from this machine?" rule.
+- `app/api/device.py` and `app/providers/turnstile.py` are the web
+  visitor's cookie and challenge.
+- `app/api/legal.py` serves `/privacy` and `/terms`, with their periods
+  read from the settings the deleting code uses. A notice is a set of
+  promises: check each against the code.
+- `scripts/serve_forever.py` runs the app and the bot unattended. A stop
+  file, `data\serve_forever.stop`, stops it in order.
+- `docs/go-live.md` is the owner's runbook for step 4.
 
 The REST contract is deliberately surface-agnostic: submit → `{job_id}` →
 poll `/reports/{job_id}`, with an optional `/stream/{job_id}` for live text.
