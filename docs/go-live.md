@@ -156,21 +156,27 @@ Register-ScheduledTask -TaskName "Information Verifier" -Action $action `
 ```
 
 A password is needed to run with nobody signed in. With a Microsoft
-account, give that account's password, not the PIN.
+account, give that account's password, not the PIN. `Read-Host` shows
+it as you type, so make sure nobody is watching the screen.
 
 If that is refused, the fallback is a separate **local** standard account
 for the service. It needs more than the project folder (re-check F-10):
-Python and ffmpeg live in YOUR profile, which only you can read, so the
-task would fail before anything starts. As administrator, with the
-account's name:
+Python, ffmpeg and your BACKUP_DIR live in YOUR profile, which only you
+can read. Without Python and ffmpeg the task fails before anything
+starts. Without BACKUP_DIR every backup fails (review G-2). Run this in
+the SAME administrator window as the block above, because it uses its
+`$dir`. Put in the account's name and your BACKUP_DIR exactly as it is
+in `.env`:
 
 ```powershell
 $account = "<the service account>"
+$backup = "<your BACKUP_DIR>"
 $python = ((Get-Content "$dir\.venv\pyvenv.cfg") -match '^home') -replace '^home\s*=\s*', ''
 $ffmpeg = Split-Path (Get-Command ffmpeg).Source
 icacls $dir /grant "${account}:(OI)(CI)M"
 icacls $python /grant "${account}:(OI)(CI)RX"
 icacls $ffmpeg /grant "${account}:(OI)(CI)RX"
+icacls $backup /grant "${account}:(OI)(CI)M"
 [Environment]::SetEnvironmentVariable("Path",
   [Environment]::GetEnvironmentVariable("Path", "Machine") + ";$ffmpeg", "Machine")
 ```
@@ -178,10 +184,16 @@ icacls $ffmpeg /grant "${account}:(OI)(CI)RX"
 Then register the task with `-User $account` and that account's password.
 
 **Check, before any restart:** `Start-ScheduledTask "Information Verifier"`.
-Within a minute `logs\supervisor-<today>.log` shows both started, and
-http://127.0.0.1:8000/ready says `"ready"`. That covers ffmpeg too, as
-whatever account the task runs as. Then restart the PC and don't sign
-in: from your phone, the site answers and the bot replies.
+Within a minute:
+- `logs\supervisor-<today>.log` shows both started;
+- http://127.0.0.1:8000/ready says `"ready"`, which covers ffmpeg too,
+  as whatever account the task runs as;
+- today's `ledger-<date>.db` is in BACKUP_DIR, and `logs\app-<today>.log`
+  has no "housekeeping … failed" line. A failing step also alerts your
+  phone.
+
+Then restart the PC and don't sign in: from your phone, the site answers
+and the bot replies.
 
 ## If something goes wrong
 
@@ -199,3 +211,9 @@ in: from your phone, the site answers and the bot replies.
   `Stop-Service cloudflared`. Task Scheduler's **End** is a hard kill:
   checks in flight are lost but still paid for, so use it only if the stop
   file is ignored.
+- **Bringing it back:** `Start-Service cloudflared`, then
+  `Start-ScheduledTask "Information Verifier"` (or restart the PC). The
+  supervisor removes any stop file left behind.
+- **Changing the tunnel's config.yml later:** the service reads its own
+  copy in `C:\Windows\System32\config\systemprofile\.cloudflared\`. Edit
+  that copy, then `Restart-Service cloudflared`.

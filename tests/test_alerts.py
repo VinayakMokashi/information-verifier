@@ -108,6 +108,31 @@ def test_an_alert_from_a_plain_script_is_sent_before_it_returns(telegram, monkey
     assert sent and sent[0]["text"].endswith("from a script")
 
 
+def test_a_failed_housekeeping_step_tells_the_owner(telegram, tmp_path, monkeypatch):
+    """REPRODUCED by review G-2: under the runbook's fallback service account
+    the daily backup to a OneDrive BACKUP_DIR fails at every run — printed to
+    a log nobody reads — and the money record never leaves the laptop. Any
+    housekeeping step that raises (the 30-day prune above all) now reaches
+    the owner; the log keeps the detail, which can carry a path."""
+    from app.store import backup
+    from app.store.db import init_db
+    from app.store.repository import housekeeping
+
+    sent, _, _ = telegram
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "verifier.db"))
+    init_db()
+
+    def refused():
+        raise PermissionError(13, "Access is denied", r"C:\Users\someone\OneDrive\backups")
+
+    monkeypatch.setattr(backup, "backup_ledger", refused)
+    monkeypatch.setattr(alerts, "_loop", [None])      # sent before it returns
+    done = housekeeping()
+    assert done["ledger_backed_up"] == -1
+    assert len(sent) == 1 and "ledger_backed_up" in sent[0]["text"]
+    assert "OneDrive" not in sent[0]["text"]
+
+
 def test_paused_for_money_tells_the_owner(telegram):
     from app.providers.llm import tell_owner_paused
 

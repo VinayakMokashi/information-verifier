@@ -22,6 +22,7 @@ from typing import NamedTuple
 from pydantic import ValidationError
 
 from app.config import settings
+from app.providers import alerts
 from app.store.db import get_conn, truncate_wal
 
 
@@ -681,4 +682,11 @@ def housekeeping() -> dict[str, int]:
         except Exception as exc:  # noqa: BLE001 — see docstring
             print(f"[housekeeping] {name} failed: {type(exc).__name__}: {exc}")
             done[name] = -1
+            # A log line alone was all a failing step left (review G-2: a
+            # backup the service account could not write failed at every
+            # run). The owner hears of it; the line above keeps the detail,
+            # which can carry a path. Runs are hours apart, so once a run.
+            alerts.notify(f"housekeeping-{name}",
+                          f"Housekeeping could not do '{name}' ({type(exc).__name__}). "
+                          "The app's log says why; it is tried again at the next run.")
     return done
