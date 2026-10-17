@@ -20,8 +20,8 @@
 
 **State at the end of the 2026-10-17 session: nothing in flight.** No
 agents running, no half-done edits, no research file "in progress". `main`
-is clean and pushed (the handoff commit right after a6c3fe6); **1316 tests
-pass** (pytest exit 0). The app and the bot are NOT running and have not
+is clean and pushed; the session's last commits are its handoff docs, all
+after a6c3fe6 (`git log -5`). **1316 tests pass** (pytest exit 0). The app and the bot are NOT running and have not
 run since 2026-10-12: `data\verifier.db` is 1,273,856 bytes, last written
 2026-10-12 05:21, its `-wal` empty, so the ledger's total is still
 **$1.7437**. `scripts\find_db_copies.py` finds no copy of the real
