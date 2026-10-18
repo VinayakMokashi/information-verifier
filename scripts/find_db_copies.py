@@ -2,7 +2,7 @@
 
     .venv\\Scripts\\python.exe scripts\\find_db_copies.py              # %TEMP% and this folder
     .venv\\Scripts\\python.exe scripts\\find_db_copies.py D:\\folder
-    .venv\\Scripts\\python.exe scripts\\find_db_copies.py --all        # the small ones too
+    .venv\\Scripts\\python.exe scripts\\find_db_copies.py --all        # pytest's own too
 
 A copy of the database is people's messages, and every deletion the privacy
 notice promises misses a copy in a scratch folder (CLAUDE.md). A search by
@@ -12,14 +12,19 @@ reads each file's first 16 bytes for SQLite's header, and for a SQLite file
 only its table names (read-only and immutable; a WAL-only schema read-only)
 — never a row — and deletes nothing: the owner decides.
 
-What it shows: the real database and the app's own backups, marked; any
-file the real database's exact size ("almost certainly a copy"); any of
-this project's at least half its size. The many small ones that tests and
-reviews make (synthetic data) are only counted, unless --all.
+What it shows: the real database and the app's own backups, marked; EVERY
+other database of this project's schema, whatever its size — the real
+file's exact size is only an extra mark. By size, a compacted copy hid at
+once, and every copy would once the real file grew (review G-1). Also a
+write-ahead log whose database is gone: it holds pages of whatever was
+written last, and has no SQLite header to find. Only pytest's own folders
+under %TEMP%, which the test suite alone writes, are counted rather than
+listed, unless --all.
 """
 import os
 import sqlite3
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -29,10 +34,12 @@ from app.config import settings  # noqa: E402
 from scripts.render import force_utf8_stdout  # noqa: E402
 
 _MAGIC = b"SQLite format 3\x00"
+_WAL_MAGIC = (b"\x37\x7f\x06\x82", b"\x37\x7f\x06\x83")     # SQLite's WAL header
 # Tables only this project's databases have, in any schema it ever used.
 _OURS = {"answers", "answer_cache", "spend_ledger", "transcript_cache",
          "reports", "claim_cache", "claim_vecs"}
 _SKIP = {".venv", ".git", "node_modules", "__pycache__", ".mypy_cache"}
+_TEMP = Path(tempfile.gettempdir()).resolve()    # a seam: the tests move it
 
 
 def _read_tables(uri: str) -> set[str]:
@@ -57,11 +64,25 @@ def _tables(path: Path) -> set[str]:
         return set()
 
 
-def _is_sqlite(path: Path) -> bool:
+def _starts_with(path: Path, magic: tuple[bytes, ...]) -> bool:
     try:
         with open(path, "rb") as f:
-            return f.read(16) == _MAGIC
+            return f.read(len(magic[0])) in magic
     except OSError:
+        return False
+
+
+def _orphaned_wal(path: Path) -> bool:
+    """A -wal whose database is gone: nothing will ever fold it back in."""
+    return (path.name.endswith("-wal") and not Path(str(path)[:-4]).exists()
+            and _starts_with(path, _WAL_MAGIC))
+
+
+def _made_by_the_suite(resolved: Path) -> bool:
+    """Under %TEMP%\\pytest-of-<user>\\: where pytest puts each test's tmp_path."""
+    try:
+        return resolved.relative_to(_TEMP).parts[0].startswith("pytest-of-")
+    except (ValueError, IndexError):
         return False
 
 
@@ -75,33 +96,44 @@ def main(argv: list[str] | None = None) -> int:
     real_size = real.stat().st_size if real.exists() else None
     backups = (Path(settings.backup_dir) if settings.backup_dir
                else real.parent / "backups").resolve()
-    shown, small = [], 0
+    shown, suites = [], 0
     for root in filter(None, roots):
         for folder, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if d not in _SKIP]
             for name in files:
                 path = Path(folder) / name
-                if not _is_sqlite(path) or not _tables(path) & _OURS:
+                if _starts_with(path, (_MAGIC,)):
+                    if not _tables(path) & _OURS:
+                        continue
+                    wal = False
+                elif _orphaned_wal(path):
+                    wal = True
+                else:
                     continue
-                size = path.stat().st_size
-                resolved = path.resolve()
+                try:
+                    stat, resolved = path.stat(), path.resolve()
+                except OSError:
+                    continue                      # gone while the walk ran
                 if resolved == real:
                     what = "the real database"
                 elif backups in resolved.parents:
                     what = "the app's own backup"
-                elif real_size and size == real_size:
-                    what = "SAME SIZE AS THE REAL DATABASE — almost certainly a copy: delete it"
-                elif real_size and size >= real_size // 2 or show_all:
-                    what = "this project's — a copy, or a test's? check before deleting"
-                else:
-                    small += 1
+                elif _made_by_the_suite(resolved) and not show_all:
+                    suites += 1
                     continue
-                shown.append((size, path.stat().st_mtime, path, what))
+                elif wal:
+                    what = ("a write-ahead log whose database is gone — it can hold pages "
+                            "of messages: check what made it before deleting")
+                elif real_size and stat.st_size == real_size:
+                    what = "SAME SIZE AS THE REAL DATABASE — almost certainly a copy: delete it"
+                else:
+                    what = "this project's — a copy, or a test's? check before deleting"
+                shown.append((stat.st_size, stat.st_mtime, path, what))
     for size, mtime, path, what in sorted(shown, key=lambda s: -s[0]):
         print(f"{size:>10}  {datetime.fromtimestamp(mtime):%Y-%m-%d %H:%M}  {path}  [{what}]")
-    if small:
-        print(f"+ {small} small database(s) of this project's schema — what tests and "
-              "reviews make; --all lists them.")
+    if suites:
+        print(f"+ {suites} database(s) in pytest's own folders under %TEMP% — what the "
+              "test suite makes; --all lists them.")
     print("Nothing was deleted.")
     return 0
 
