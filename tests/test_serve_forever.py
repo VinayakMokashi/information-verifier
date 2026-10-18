@@ -258,6 +258,61 @@ def test_the_supervisor_is_inside_its_job_before_it_starts_anything(tmp_path):
     assert out.strip() == "inside", out
 
 
+_MAIN_DRIVER = """
+import sys
+from pathlib import Path
+
+root, repo = Path(sys.argv[1]), sys.argv[2]
+sys.path.insert(0, repo)
+from scripts import serve_forever as S
+
+events = root / "events.txt"
+
+
+def note(what):
+    with open(events, "a", encoding="utf-8") as f:
+        f.write(what + "\\n")
+
+
+real_contain = S.contain_self
+S.contain_self = lambda: (note("contained"), real_contain())[1]
+S.ROOT, S.STOP_FILE, S._TICK_S = root, root / "data" / "serve_forever.stop", 0.05
+# Never the real logs folder, the real app's /ready (it writes to the real
+# database) or the owner's phone: those defaults are bound at definition.
+S.Child.__init__.__defaults__ = (root / "logs",)
+S.Supervisor.__init__.__kwdefaults__.update(ready=lambda: True, notify=lambda k, t: None)
+child = ("import time; open({events!r}, 'a', encoding='utf-8').write('{name} up\\\\n'); "
+         "time.sleep(60)")
+S.app_argv = lambda: [sys.executable, "-c", child.format(events=str(events), name="app")]
+S.bot_argv = lambda: [sys.executable, "-c", child.format(events=str(events), name="bot")]
+sys.exit(S.main())
+"""
+
+
+def test_main_contains_itself_first_and_a_stale_stop_file_does_not_stop_the_boot(tmp_path):
+    """REPRODUCED by review G-7 (mutants M14, M15): F-4's and F-8's lines
+    live in main(), which no test ran — deleting either left the suite
+    green. This runs main() itself, in a subprocess, on a scratch root."""
+    (tmp_path / "data").mkdir()
+    stale = tmp_path / "data" / "serve_forever.stop"
+    stale.write_text("", encoding="utf-8")                # an orderly stop's leftover
+    events = tmp_path / "events.txt"
+    driver = subprocess.Popen([sys.executable, "-c", _MAIN_DRIVER, str(tmp_path), str(ROOT)],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        assert _wait(lambda: events.exists() and {"app up", "bot up"} <= set(
+            events.read_text("utf-8").splitlines()), timeout=30), "the boot never started both"
+        said = events.read_text("utf-8").split()
+        assert said[0] == "contained", said
+        stale.write_text("", encoding="utf-8")            # now an orderly stop
+        assert driver.wait(60) == 0
+    finally:
+        if driver.poll() is None:
+            driver.kill()
+        out = driver.communicate(timeout=30)[0]
+    assert "stopped" in out, out
+
+
 _GRANDPARENT = (
     "import os, subprocess, sys, time\n"
     "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"

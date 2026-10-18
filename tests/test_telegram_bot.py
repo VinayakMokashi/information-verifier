@@ -1447,6 +1447,61 @@ def test_a_chat_dropped_by_any_write_is_let_go_at_once(tmp_path, monkeypatch):
     assert 777 not in bot.prompted
 
 
+_HOLD_THE_LOCK = """
+import sys
+from app.store import instance
+instance.acquire(sys.argv[1])
+print("held", flush=True)
+sys.stdin.readline()
+"""
+
+
+def test_main_never_starts_a_second_bot(tmp_path, monkeypatch, capsys):
+    """REPRODUCED by review G-7 (mutant M13): F-9's lock is taken in main(),
+    which no test ran — deleting that check left the whole suite green.
+    Here another process really holds the lock, and main() itself runs:
+    it must say so and never reach the Dispatcher."""
+    import subprocess
+    import sys
+    import threading
+    from pathlib import Path
+
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "verifier.db"))
+    monkeypatch.setattr(settings, "telegram_bot_token", "123:not-a-real-token")
+    monkeypatch.setattr(sys, "argv", ["telegram_bot.py"])
+
+    async def token_ok(http, token):
+        return True, "@a_test_bot"
+
+    async def ready(http):                # nothing else may stop main() first
+        return "ready"
+
+    class Reached(Exception):
+        pass
+
+    def dispatcher(*args, **kwargs):
+        raise Reached("a second bot started polling")
+
+    monkeypatch.setattr(B, "check_token", token_ok)
+    monkeypatch.setattr(B, "app_status", ready)
+    monkeypatch.setattr(B, "Dispatcher", dispatcher)
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    holder = subprocess.Popen([sys.executable, "-c", _HOLD_THE_LOCK, B.bot_lock_path()],
+                              cwd=tmp_path, env=env, text=True,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    said = []
+    reader = threading.Thread(target=lambda: said.append(holder.stdout.readline()),
+                              daemon=True)
+    reader.start()
+    reader.join(60)
+    try:
+        assert said and said[0].strip() == "held", "the holder never took the lock"
+        asyncio.run(B.main())
+    finally:
+        holder.communicate("\n", timeout=30)
+    assert "already running" in capsys.readouterr().out
+
+
 def _refusing_replace(monkeypatch, times):
     """os.replace refused `times` times, as Windows did (review G-8: "access
     denied" swapping onto a file written a moment ago — 12 of 60 writes half
