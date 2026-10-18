@@ -58,8 +58,18 @@
   - 2 in scratch `09bde991…`, and 1 at the top of %TEMP%.
 
   None is the real file's size. The largest is 274 KB, against the
-  real file's 1.27 MB. Deleting them is Vinayak's call: ASK, then delete
-  with their -wal/-shm.
+  real file's 1.27 MB.
+  - Vinayak said to do what is best: delete them.
+  - A dry run re-checked all 283 listed paths, 19.6 MB with their
+    sidecars. Each is a SQLite file with this project's tables, inside
+    %TEMP%, outside pytest's folders and the project. Six had their
+    schema only in a live -wal.
+  - The deletion itself was **blocked by Claude Code's permission
+    check** (a sweep of other sessions' scratch folders). Not worked
+    around. It waits on Vinayak: run it himself, or allow it.
+  - The script is the session scratch's `delete_leftovers.py`. If that
+    is gone, re-run find_db_copies on %TEMP% and delete what it lists,
+    with each file's -wal, -shm and -journal.
 - **The real check: after go-live §1 item 2** (the new Anthropic
   workspace key), so it proves that key too. Vinayak sends this to the
   bot from his phone, exactly: "UNESCO declared Jana Gana Mana the best
