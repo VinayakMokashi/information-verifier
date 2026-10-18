@@ -42,6 +42,7 @@ _STABLE_S = 600.0            # a run this long resets the pause
 _TICK_S = 1.0
 _STOP_GRACE_S = 15.0         # then it is killed
 _ORDERLY_GRACE_S = 300.0     # a stop file: a long check gets to finish (~5 min max)
+_CONSUME_PAUSES_S = (0.0, 0.1, 0.5, 1.0)   # deleting the stop file, if refused
 STOP_FILE = ROOT / "data" / "serve_forever.stop"
 _ALREADY_RUNNING = 3         # this script's own exit code when a copy already runs
 _HEALTH = "http://127.0.0.1:8000/health"
@@ -281,13 +282,24 @@ class Supervisor:
     def _stop_requested(self) -> bool:
         if self.stop_file is None or not self.stop_file.exists():
             return False
-        try:
-            self.stop_file.unlink()          # consumed: the next boot starts
-        except OSError:
-            pass
         self._log(f"stop requested ({self.stop_file.name})")
         self._orderly = True
         return True
+
+    def _consume_stop_file(self) -> None:
+        """Gone once the stop is done, so the next boot starts. Deleted the
+        moment it was seen, Windows refused while its writer still held it
+        — New-Item's own instant, an editor, the antivirus — and that was
+        swallowed (review G-4). By now the writer is long gone; if it is
+        not, the log says so, and main() removes it at the next start."""
+        for pause in _CONSUME_PAUSES_S:
+            time.sleep(pause)
+            try:
+                self.stop_file.unlink(missing_ok=True)
+                return
+            except OSError:
+                continue
+        self._log("the stop file could not be removed; the next start removes it")
 
     def _log(self, text: str) -> None:
         stamp = datetime.now()
@@ -348,6 +360,8 @@ class Supervisor:
             # An orderly stop gives running checks time to finish: uvicorn's
             # graceful shutdown waits for them (their stream connections).
             self.app.stop(_ORDERLY_GRACE_S if self._orderly else None)
+            if self._orderly:
+                self._consume_stop_file()
             self._log("stopped")
 
 

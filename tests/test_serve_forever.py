@@ -158,15 +158,22 @@ def test_a_stop_file_stops_both_in_order_and_is_consumed(tmp_path, quick):
     Ctrl+C — End and a reboot are hard kills — so its ordered stop never
     ran. A file it watches is a stop it can receive unattended."""
     stop_file = tmp_path / "serve_forever.stop"
-    app = S.Child("app", _py("import time; time.sleep(60)"), tmp_path)
-    bot = S.Child("bot", _py("import time; time.sleep(60)"), tmp_path)
+    # Stopped only once each child is truly up, as in real use. MEASURED
+    # (review G-4's follow-up, 12 of 12 runs): a CTRL_BREAK sent within
+    # moments of a start never reaches the child, which the venv's launcher
+    # has not started yet, so the bot was killed at its 15 s grace every
+    # time and the test failed whenever the app then took a moment too.
+    up = {name: tmp_path / f"{name}.up" for name in ("app", "bot")}
+    app, bot = (S.Child(name, _py(f"import pathlib, time; pathlib.Path({str(up[name])!r})"
+                                  ".write_text('up'); time.sleep(60)"), tmp_path)
+                for name in ("app", "bot"))
     supervisor = S.Supervisor(app, bot, ready=lambda: True, notify=lambda k, t: None,
                               stop_file=stop_file)
     thread = threading.Thread(target=supervisor.run, args=(threading.Event(),),
                               daemon=True)
     thread.start()
     try:
-        assert _wait(lambda: app.running() and bot.running())
+        assert _wait(lambda: all(path.exists() for path in up.values()))
         stop_file.write_text("", encoding="utf-8")
         thread.join(30)
         assert not thread.is_alive(), "the stop file did not stop it"
@@ -176,6 +183,53 @@ def test_a_stop_file_stops_both_in_order_and_is_consumed(tmp_path, quick):
     finally:
         app.stop(1)
         bot.stop(1)
+
+
+def _stop_file_held_open(tmp_path, refusals):
+    """A stop file whose deletion Windows refuses `refusals` times, as it
+    does while its writer still holds it — New-Item's own instant, an
+    editor, the antivirus (review G-4: the stop test failed so in a full
+    run, and the file stayed behind without a word)."""
+    class HeldOpen(type(tmp_path)):
+        left = refusals
+
+        def unlink(self, missing_ok=False):
+            if HeldOpen.left:
+                HeldOpen.left -= 1
+                raise PermissionError(13, "The process cannot access the file")
+            return super().unlink(missing_ok=missing_ok)
+
+    path = HeldOpen(tmp_path / "serve_forever.stop")
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+def _stop_with(tmp_path, stop_file):
+    app = S.Child("app", _py("import time; time.sleep(60)"), tmp_path)
+    bot = S.Child("bot", _py("import time; time.sleep(60)"), tmp_path)
+    supervisor = S.Supervisor(app, bot, ready=lambda: True, notify=lambda k, t: None,
+                              stop_file=stop_file)
+    thread = threading.Thread(target=supervisor.run, args=(threading.Event(),),
+                              daemon=True)
+    thread.start()
+    try:
+        thread.join(30)
+        assert not thread.is_alive(), "the stop file did not stop it"
+    finally:
+        app.stop(1)
+        bot.stop(1)
+
+
+def test_a_stop_file_held_open_when_seen_is_still_consumed(tmp_path, quick):
+    stop_file = _stop_file_held_open(tmp_path, 1)
+    _stop_with(tmp_path, stop_file)
+    assert not stop_file.exists(), "a stale stop file would stop the next boot"
+
+
+def test_a_stop_file_that_cannot_be_removed_is_said_so(tmp_path, quick):
+    stop_file = _stop_file_held_open(tmp_path, 99)
+    _stop_with(tmp_path, stop_file)
+    assert "the next start removes it" in _log(tmp_path, "supervisor")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the Windows job object")
