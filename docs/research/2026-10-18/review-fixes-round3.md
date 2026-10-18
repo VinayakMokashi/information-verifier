@@ -53,6 +53,23 @@ Fixes that covered the case named but not the rule: G-1 (F-1), G-2
 G-1, G-4, G-5. Tests that pass against the broken wiring: G-7. Found by
 the range's own new explorer, pre-existing: G-8.
 
+## Fixed (2026-10-18, the same session)
+
+Each one was reproduced first, then fixed with a test seen failing
+against the old code, with mutants run, and pushed alone. The full suite
+was run on each commit in a separate worktree before its push.
+
+| ID | Commit | What changed |
+|---|---|---|
+| G-8 | 82b0708 | `app/files.replace()` retries a refused swap (measured on this PC: 631 of 1,000 back-to-back swaps refused; with 10–200 ms retries, 860 of 860 landed). A save that never lands is rewritten at the next poll. The backup uses it too. |
+| G-2 | 6eb2e57 | A housekeeping step that raises alerts the owner. The fallback block grants BACKUP_DIR, and its check proves a backup landed. Also the go-live notes: same window, Read-Host, bringing it back, the service's own config.yml. |
+| G-4 | 4838389 | The stop file is consumed once the stop is done, retried, and the log says if it could not be. A second flake was MEASURED: a CTRL_BREAK sent just after a start never reaches the child (12 of 12), so the test now waits for both children to be up. |
+| G-5 | aaf5398 | A `--yes` run that matches nothing finishes the file (empties the WAL) and says whether it is clean. |
+| G-1 | f9fd678 | Every database of this project's schema is listed, whatever its size; only pytest's own folders are collapsed. Orphaned `-wal` files are found by their header. |
+| G-3 | 486a795 | Working files go in a folder per process id; an app start clears only the folders of dead processes. "Access denied" counts as alive. |
+| G-7 | 7f35db8 | The bot's main() runs with the lock really held by another process, and serve_forever's main() runs in a subprocess. M13, M14 and M15 are each caught. |
+| G-6 | ea2e82c | Under the runner (VERIFIER_SUPERVISED=1), the app contains itself at startup, so its ffmpeg dies with it; the job code lives in `app/processes.py`, shared. |
+
 ## First-start verdict
 
 **Safe to start.** Nothing in the first start can lose or damage data the
@@ -649,7 +666,17 @@ block before it, so run it in the same window.
   that is left.
 - **find_db_copies**: a `-wal` left after its main file was deleted holds
   pages of messages and is not found (no SQLite header); `path.stat()`
-  is not guarded against a file vanishing mid-walk.
+  is not guarded against a file vanishing mid-walk. For the record, a
+  metadata-only `find` (names and sizes, nothing opened) lists non-empty
+  `*.db-wal` files left in %TEMP% outside pytest's folders by earlier
+  sessions and tools: `…\4b88200f-…\scratchpad\pwa-check-1\demo.db-wal`,
+  `…\4b88200f-…\scratchpad\supervise-smoke-1\demo.db-wal`,
+  `…\09bde991-…\scratchpad\launcher_test.db-wal`,
+  `%TEMP%\live_nn356c7i\live.db-wal`, `%TEMP%\tmptd0t0sn1\demo.db-wal`,
+  `%TEMP%\freeze_*\t.db-wal` (two), plus Chrome's GPU caches. By their
+  names they are demo or test databases, not the real one (none was
+  opened); a `demo.db` holds whatever was typed into the free demo, so
+  the owner may simply delete those folders.
 - **One more full-suite failure, not reproduced:**
   `tests/test_logs.py::test_a_startup_line_reaches_a_piped_log_at_once`
   saw no startup line within its 20 s in the same loaded run as G-4, and

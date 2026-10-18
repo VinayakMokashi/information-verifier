@@ -2,7 +2,7 @@
 
 > **This file is the single source of truth.** Any new work session (human or AI)
 > should read this first to understand what we're building and exactly where we are.
-> Keep it updated as the project moves. Last updated: **2026-10-17**
+> Keep it updated as the project moves. Last updated: **2026-10-18**
 > (the public launch is built and reviewed twice; going live waits on the
 > owner's steps — §0, §7, §11 A; HANDOFF.md §0 is the resume point).
 
@@ -10,13 +10,15 @@
 
 ## 0. Where we are right now (read this first)
 
-**Right now (2026-10-17, end of session):**
+**Right now (2026-10-18):**
 - **The public website/app is built.** Steps 1–3 and 5 of the decision
   brief's build order are done, pushed and reviewed twice (§7, 2026-10-15
   to 2026-10-17). The step-5 reviews alone found 31 defects, all fixed.
 - **Step 4, running it 24/7 on this PC at its own .com, waits on
   Vinayak's owner steps** in `docs/go-live.md`.
-- **1316 tests pass.** Nothing is in flight. The app and the bot have not
+- **1333 tests pass.** A fresh reviewer for the third round of fixes
+  found 8 low defects, all fixed the same day (§7, 2026-10-18); it
+  judged the first real start safe. The app and the bot have not
   run since 2026-10-12, and the ledger stands at $1.7437.
 - Everything built since 2026-10-11 has met only fakes and test keys,
   never real money.
@@ -60,7 +62,7 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
   machine only (a 404 to anyone else, including through the share tunnel).
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**1316 tests pass** today (688 on 2026-09-22;
+**1333 tests pass** today (688 on 2026-09-22;
 `.venv\Scripts\python.exe -m pytest tests -q`, free — every paid seam is
 faked).
 
@@ -463,6 +465,64 @@ tests/               pytest suite — always free, every paid seam faked
 *Newest first. This is the "why", and the most useful section to skim before
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
+
+### 2026-10-18 — A fresh reviewer for the third round: the first start is safe; 8 low findings, all fixed
+
+Vinayak took two of the three offers: a fresh reviewer, and one real
+local check, which waits for go-live §1's new key. A reviewer who had read
+none of 1ae3cc3..09dc74d attacked them, for free, in a `git archive`
+extract with no `.env` and no real data
+([review-fixes-round3.md](docs/research/2026-10-18/review-fixes-round3.md)).
+
+**The first real start since 2026-10-12 is safe.** It runs the one-time
+VACUUM, the sweep and the 30-day prune. It was measured on a synthetic
+database that the 2026-10-11 code built in the real file's state: an
+inert vec0 entry, an empty WAL, a stale -shm. Startup took 1.0 s and the
+integrity check passed. With a reader open, the start succeeded and
+the rewrite was redone next time. Two claims were re-checked by hand:
+uvicorn 0.51 runs the lifespan before it binds, and the bot never opens
+the database. **go-live.md §5 is correct**, checked against
+cloudflared's source at the installed 2026.7.3.
+
+**8 findings, all low; five more fixes that covered only their named
+case.** All fixed, each pushed alone (the table at the end of the
+review):
+- G-8 (82b0708) is the real one. MEASURED on this PC: `os.replace`
+  onto a file written a moment ago is refused ("access denied") on
+  631 of 1,000 back-to-back writes, 12 of 60 half a second apart, and
+  once in 20 even 2 s apart, in this project's folder. The bot
+  swallowed it, so a restart could re-deliver an answer or lose a
+  check. Retried at 10–200 ms, 860 of 860 landed (median 2 ms, worst
+  451 ms). A save that never lands is rewritten at the next poll.
+- G-2 (6eb2e57): a housekeeping step that raises now alerts the
+  owner. The fallback account gets BACKUP_DIR.
+- G-4 (4838389): the stop file is consumed once the stop is done. A
+  second flake in its test was MEASURED, not guessed: **a CTRL_BREAK
+  sent within moments of a start never reaches the child** (12 of 12;
+  the venv launcher has not started the interpreter yet), so the bot
+  was killed at its 15 s grace every time. Resending is no fix, because
+  uvicorn force-exits on a second one. The test now waits for both
+  children to be up (0.8 s, was 15–30 s).
+- G-5 (aaf5398): forget.py's "run the same command again" now
+  finishes the file.
+- G-1 (f9fd678): find_db_copies lists every database of this
+  project's schema, whatever its size, and orphaned WALs.
+  - Run on %TEMP% (the real file only stat'ed, never opened): **284**
+    synthetic and demo databases from earlier sessions' reviews,
+    probes and tests. None is the real file's size, and the largest is
+    274 KB against its 1.27 MB.
+- G-3 (486a795): working files per process id; a start clears only
+  dead processes' folders.
+- G-7 (7f35db8): both main()s are run by tests now. Mutants M13–M15
+  are caught.
+- G-6 (ea2e82c): under the runner the app contains itself, so its
+  ffmpeg dies with it. The job code moved to `app/processes.py`.
+
+**How the suite ran this time:** each fix was committed locally, and
+the full suite ran on exactly that commit in a git worktree in scratch
+(no `.env`, no data) while the next fix was written. Then it was
+pushed. A background command's "exit code 0" is its last pipe's, so
+pytest's own code was read from the `FULL_PYTEST_EXIT=` line it printed.
 
 ### 2026-10-17 — The fixes re-checked: 13 more, all fixed
 

@@ -168,6 +168,15 @@ limiter are both in-memory.
   matched nothing left §11 stale for a whole session.
 - **Check pytest's own exit code before committing** — never a piped `| tail`
   (it exits 0 whatever pytest did; a commit went in with a failing test).
+  A background command's "exit code" is its last pipe's too: print
+  pytest's (`code=$?; echo FULL_PYTEST_EXIT=$code`) and read that line.
+- **Test the commit, not the working tree** (2026-10-18). The suite takes
+  5–10 minutes here, and the next fix's failing-first tests are already in
+  the tree. So: commit locally, `git worktree add --detach <scratch>\wt HEAD`
+  (later `git -C <wt> checkout --detach <sha>`), and run the main venv's
+  pytest from inside the worktree. Imports resolve there, and it has no
+  `.env` and no data. Push once that run's own exit code is 0; keep
+  working meanwhile.
 - **Shell heredocs collapse doubled backslashes.** Write anything containing
   `\` (regexes, Windows paths, `\n` in source) with the Edit/Write tools. A test
   now fails any file with an invalid escape.

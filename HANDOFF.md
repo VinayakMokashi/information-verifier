@@ -6,7 +6,7 @@
 > [PROJECT_PLAN.md](PROJECT_PLAN.md) (§7 is the decisions log, §11 the to-do
 > list) and [CLAUDE.md](CLAUDE.md) (the invariants and how we work).
 >
-> Last updated: **2026-10-17** (end of session). Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
+> Last updated: **2026-10-18** (in session). Repo: `c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier`,
 > pushed to https://github.com/VinayakMokashi/Information_Verifier (private).
 
 ---
@@ -41,8 +41,25 @@
   - **go-live.md §5: correct**, except that the fallback account is not
     granted BACKUP_DIR (G-2).
   - **8 findings, all low** (G-1 … G-8). None of them blocks the first
-    start. Next for Claude: fix them, each failing-first, one commit
-    each, between the owner's steps.
+    start. **ALL 8 FIXED**, each failing-first, with mutants, and pushed
+    alone. The commits: G-8 82b0708, G-2 6eb2e57, G-4 4838389, G-5
+    aaf5398, G-1 f9fd678, G-3 486a795, G-7 7f35db8, G-6 ea2e82c (the
+    table at the end of the review file). **1333 tests.**
+  - **What it means for go-live:** go-live.md's fallback block now
+    grants BACKUP_DIR, and its check proves a backup landed. A failing
+    housekeeping step (the backup, the 30-day prune) now alerts your
+    phone.
+- **find_db_copies on %TEMP%** (the real file only stat'ed, never
+  opened): it found **284** synthetic and demo databases from earlier
+  sessions' reviews, probes and tests:
+  - 163 in scratch `4b88200f…` (2026-10-15/17);
+  - 93 in `%TEMP%\tmp*`-style folders (July to 2026-10-15);
+  - 24 in scratch `2be1a3d1…` (2026-09-22);
+  - 2 in scratch `09bde991…`, and 1 at the top of %TEMP%.
+
+  None is the real file's size. The largest is 274 KB, against the
+  real file's 1.27 MB. Deleting them is Vinayak's call: ASK, then delete
+  with their -wal/-shm.
 - **The real check: after go-live §1 item 2** (the new Anthropic
   workspace key), so it proves that key too. Vinayak sends this to the
   bot from his phone, exactly: "UNESCO declared Jana Gana Mana the best
@@ -53,7 +70,12 @@
   - NASA "6 days of darkness" was 2026-10-11's claim, so it is not
     reused.
   - Not run yet. Ask first.
-- **Next:** docs/go-live.md with Vinayak, one step at a time.
+- **Next:** docs/go-live.md with Vinayak, one step at a time. He has
+  been given §1 item 1 (Sarvam's retention, then
+  `SARVAM_ZERO_RETENTION=true`). The suggested order is 1 → 2 → 4 → 5
+  → 6, then 3 (`/id`), because 3 needs the bot and so the first app
+  start. Then the `/ready` check, then the real check. Nothing he has
+  done has been reported yet.
 
 **State at the end of the 2026-10-17 session: nothing in flight.** No
 agents running, no half-done edits, no research file "in progress". `main`
@@ -351,7 +373,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1316 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1333 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -401,22 +423,22 @@ ends.
 Continuing my "Information Verifier" project at
 c:\Users\Vinayak Mokashi\Python Sab\Information_Verifier
 (private repo: https://github.com/VinayakMokashi/Information_Verifier).
-The last session ended cleanly on 2026-10-17. Pick up exactly where it
+The last session was 2026-10-18; HANDOFF §0 says what it left. Pick up exactly where it
 stopped.
 
 FIRST, read these in order:
 1. HANDOFF.md - its §0 is the resume point: the state, what's next for
    you, and my list of owner actions.
 2. CLAUDE.md - the money rules, the 10 invariants, and how we work.
-3. PROJECT_PLAN.md - §0; §7 newest first (the 2026-10-17 and 2026-10-16
+3. PROJECT_PLAN.md - §0; §7 newest first (the 2026-10-18 and 2026-10-17
    entries); §11, the to-do list.
 4. docs/go-live.md - step 4, my runbook for putting it online.
 Your memory has entries for this project too.
 
 THEN verify, all free, and tell me what you find before doing anything else:
-- git is clean, and main equals origin/main at the 2026-10-17 handoff
+- git is clean, and main equals origin/main at the 2026-10-18 handoff
   commit (git log -3).
-- .\.venv\Scripts\python.exe -m pytest tests -q gives 1316 passed. Read
+- .\.venv\Scripts\python.exe -m pytest tests -q gives 1333 passed. Read
   pytest's OWN exit code (0), never through a pipe.
 - No stray python, uvicorn or cloudflared processes.
 - data\verifier.db is 1,273,856 bytes, last written 2026-10-12 05:21. If
@@ -512,7 +534,7 @@ reliable has covered this" — that is a real answer here, not a failure.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **1316 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **1333 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - **Ready for the public, waiting on the owner** (§0, `docs/go-live.md`).
   The app and the bot are not running now; nothing has run since
@@ -663,7 +685,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 1316 tests, ~2-3 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 1333 tests, ~3-10 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
