@@ -104,6 +104,29 @@ def test_forget_says_when_the_file_still_holds_the_old_copy(repo, monkeypatch, c
     assert "still" in out and "close any program" in out
 
 
+def test_running_forget_again_as_its_note_says_finishes_the_file(repo, capsys):
+    """REPRODUCED by review G-5: the NOTE said "close any program reading the
+    database and run this again" — but the second run found nothing, said
+    "No check matches", exited 1, and the deleted text stayed in the WAL.
+    Advice is tested by following it."""
+    from pathlib import Path
+
+    from scripts import forget
+
+    answer = _answer(1, text="Mera number 98200 22222 hai, REMNANT-G5")
+    repo.save(answer)
+    reader = _reader_holding_a_snapshot()
+    try:
+        assert forget.main(["--job", answer.job_id, "--yes"]) == 0
+        assert "close any program" in capsys.readouterr().out
+    finally:
+        reader.close()
+    forget.main(["--job", answer.job_id, "--yes"])          # as the NOTE says
+    assert "clean" in capsys.readouterr().out
+    files = [Path(settings.db_path), Path(settings.db_path + "-wal")]
+    assert b"REMNANT-G5" not in b"".join(p.read_bytes() for p in files if p.exists())
+
+
 def test_a_start_survives_a_rewrite_that_cannot_run(repo, monkeypatch, capsys):
     """REPRODUCED by re-check F-11: the one-time VACUUM was the only
     unguarded write at startup, so an open write transaction on the file

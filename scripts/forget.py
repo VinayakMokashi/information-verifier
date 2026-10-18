@@ -51,6 +51,24 @@ def _when(answer) -> str:
     return local.strftime("%Y-%m-%d %H:%M")
 
 
+_STILL_READ = ("NOTE: something is reading the database, so its file still holds the "
+               "deleted text's earlier copy until the next housekeeping (within 6 hours). "
+               "To finish it now, close any program reading the database and run the "
+               "same command again.")
+
+
+def _finish_the_file() -> None:
+    """Empty the write-ahead log, where a deletion's earlier copy waits
+    while anything reads the database (re-check F-7)."""
+    from app.store.db import truncate_wal
+
+    if truncate_wal():
+        print("The database file is clean now: no earlier copy of the deleted text "
+              "is left in it.")
+    else:
+        print(_STILL_READ)
+
+
 def _job_id(given: str) -> str:
     """An id, or the whole address it came in (review S5-7: pasted as sent,
     the address matched nothing)."""
@@ -87,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
               "screenshot by the words read from it; any check by its #job= address "
               f"(paste it whole). After {settings.answer_retention_days} days a check "
               "is deleted anyway.")
+        if args.yes:
+            # The NOTE's "run the same command again" lands here: nothing is
+            # left to delete, and the file still has to be finished (review
+            # G-5: this said only "No check matches", and the text stayed).
+            _finish_the_file()
         return 1
 
     print(f"{len(found)} check{'' if len(found) == 1 else 's'} match:")
@@ -115,11 +138,7 @@ def main(argv: list[str] | None = None) -> int:
           f"{gone.transcripts} transcript{'' if gone.transcripts == 1 else 's'} of a "
           "public post. The spend ledger keeps its rows: they never held a message.")
     if not gone.file_clean:
-        # Never reported as done when it is not (re-check F-7).
-        print("NOTE: something is reading the database, so its file still holds the "
-              "deleted text's earlier copy until the next housekeeping (within 6 "
-              "hours). To finish it now, close any program reading the database "
-              "and run this again.")
+        print(_STILL_READ)       # never reported as done when it is not (re-check F-7)
     return 0
 
 
