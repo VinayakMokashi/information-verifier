@@ -11,11 +11,11 @@ process still running is working on.
 """
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 from app.config import settings
+from app.processes import process_alive
 
 
 def root() -> Path:
@@ -42,36 +42,6 @@ def workdir() -> tempfile.TemporaryDirectory:
     return tempfile.TemporaryDirectory(dir=path)
 
 
-def _alive(pid: int) -> bool:
-    if sys.platform != "win32":
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
-    # Never os.kill here: on Windows any signal but CTRL_C/CTRL_BREAK is
-    # TerminateProcess.
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | query
-    if not handle:
-        # Another account's process (the fallback service account's app
-        # beside the owner's script) refuses to be opened, yet runs.
-        return ctypes.get_last_error() == 5                          # access denied
-    try:
-        return kernel32.WaitForSingleObject(handle, 0) == 0x102     # WAIT_TIMEOUT: running
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def clear() -> int:
     """Remove what stopped runs left behind; never what another live process
     is working on. Called at startup, so this process has nothing live of
@@ -81,7 +51,7 @@ def clear() -> int:
         return 0
     for entry in base.iterdir():
         if (entry.is_dir() and entry.name.isdigit() and int(entry.name) != os.getpid()
-                and _alive(int(entry.name))):
+                and process_alive(int(entry.name))):
             continue
         try:
             if entry.is_dir():

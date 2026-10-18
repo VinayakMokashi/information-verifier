@@ -313,6 +313,56 @@ def test_main_contains_itself_first_and_a_stale_stop_file_does_not_stop_the_boot
     assert "stopped" in out, out
 
 
+def test_the_runner_tells_its_children_they_are_supervised(tmp_path):
+    """The other half of G-6: the app contains itself only when told."""
+    child = S.Child("app", _py("import os; print('supervised=' + "
+                               "os.environ.get('VERIFIER_SUPERVISED', ''))"), tmp_path)
+    child.start(time.monotonic())
+    child.proc.wait(30)
+    assert _wait(lambda: "supervised=1" in _log(tmp_path, "app"))
+
+
+_CRASHING_APP = """
+import os, subprocess, sys
+from fastapi.testclient import TestClient
+from app.main import app
+with TestClient(app):                         # the app's own start, supervised
+    # Not the app's pipe: a survivor holding it would hang the test, not fail it.
+    kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+    print(f"PID {kid.pid}", flush=True)       # ffmpeg, mid-decode
+    os._exit(1)                               # a crash: no exit handler runs
+"""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows job object")
+def test_what_the_app_starts_dies_when_the_app_alone_dies(tmp_path):
+    """REPRODUCED by review G-6 (4 of 4): F-4's job holds the app's ffmpeg
+    only until the SUPERVISOR dies. When the app alone crashed — what
+    serve_forever restarts from — its ffmpeg lived on, past the 120 s
+    timeout only the app enforces, holding a voice note open in data/tmp.
+    Supervised, the app now puts itself in its own job at startup."""
+    env = dict(os.environ, VERIFIER_SUPERVISED="1", PYTHONPATH=str(ROOT),
+               DB_PATH=str(tmp_path / "data" / "verifier.db"))
+    app = subprocess.Popen([sys.executable, "-c", _CRASHING_APP], cwd=tmp_path, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        out = app.communicate(timeout=120)[0]
+    finally:
+        if app.poll() is None:
+            app.kill()
+    pids = [int(line.split()[1]) for line in out.splitlines() if line.startswith("PID ")]
+    assert pids, out
+    try:
+        assert _wait(lambda: not S.process_alive(pids[0]), timeout=10), \
+            "the app's child outlived the app"
+    finally:
+        if S.process_alive(pids[0]):
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pids[0])],
+                           capture_output=True)
+
+
 _GRANDPARENT = (
     "import os, subprocess, sys, time\n"
     "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"

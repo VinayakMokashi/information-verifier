@@ -5,6 +5,7 @@ Run locally:
 
 Interactive API docs at http://127.0.0.1:8000/docs
 """
+import os
 import re
 import shutil
 from contextlib import asynccontextmanager
@@ -391,6 +392,17 @@ async def _serving():
 
     from app.providers import alerts
 
+    if os.environ.get("VERIFIER_SUPERVISED") == "1":
+        # Before anything is started: the runner's job holds what this app
+        # starts only until the RUNNER dies. When this app alone crashed,
+        # its ffmpeg ran on, past the timeout only this process enforces,
+        # holding a voice note open (review G-6, 4 of 4). Only under the
+        # runner: in a test it would bind pytest itself to a job.
+        from app.processes import contain_self
+
+        if not contain_self():
+            print("[startup] could not put the app in its own job: a crash may "
+                  "leave a decode running")
     init_db()
     # Alerts raised on worker threads (the limiter's pool) go through this loop.
     alerts.attach(asyncio.get_running_loop())
