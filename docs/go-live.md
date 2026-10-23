@@ -31,6 +31,23 @@ check that fails.
      it stays until it is settled.
 2. **Anthropic:** a separate workspace for the public key, with a monthly
    spend limit; put that workspace's key in `.env` as `ANTHROPIC_API_KEY`.
+   Checked against Anthropic's docs on 2026-10-23:
+   - **Create the workspace:** platform.claude.com/settings/workspaces →
+     **Create workspace**, then name it and pick a colour. Only an
+     organisation admin can do it. The Default Workspace cannot take a
+     spend limit, which is why this one is new.
+   - **Spend limit:** on the same page, select the workspace → **Spend
+     limits**. Use about **$35 a month** with an alert at about $25.
+     The app's own $1 a day comes to $31 at most. A refusal at this
+     limit pauses checking at no cost ("workspace API usage limits",
+     app/providers/llm.py).
+   - **The key:** platform.claude.com/settings/keys → **Create key**.
+     Set Linked account to yourself, Expiration to **Never**, and
+     **scope it to the new workspace**. The app sends no
+     `anthropic-workspace-id` header, so an unscoped key fails every
+     check with a 400. The secret is shown once.
+   - Replace the value after `ANTHROPIC_API_KEY=` in `.env`. Disable the
+     old key only after the first real check works on the new one.
 3. **Telegram:** send `/id` to the bot; put the number in `.env` as
    `OWNER_CHAT_ID=` (restarts, budget and failures then reach your phone).
 4. **Backups:** `BACKUP_DIR=` a OneDrive (or USB) folder in `.env`.
