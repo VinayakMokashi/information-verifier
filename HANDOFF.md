@@ -175,7 +175,10 @@ the first year).
    `OneDrive\InformationVerifier-backups` exists, and the setting points
    to it (checked without printing it). The first app start should put
    a `ledger-<date>.db` there.
-5. **What the privacy notice publishes:** `CONTACT_EMAIL` (the notice and
+5. **DONE 2026-10-23** (checked without printing): `CONTACT_EMAIL` is a
+   Gmail address, and `OPERATOR_NAME` is set. The first app start shows
+   both on /privacy.
+   **What the privacy notice publishes:** `CONTACT_EMAIL` (the notice and
    the terms give it as the place to write for deletion, corrections and
    complaints) and, if he wants a name shown, `OPERATOR_NAME`. A role
    address avoids a personal one. It is his decision, never guessed and
