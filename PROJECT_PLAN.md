@@ -2393,6 +2393,12 @@ C. **The remaining to-dos** — items 4–32 below. Their value order is in
    encryption / BitLocker on this PC — an OWNER CHECK (Settings → Privacy &
    security → Device encryption); an encrypted disk on the VM later. Else
    encrypt the answer payloads with a key kept outside the database.
+   **MEASURED 2026-10-23:**
+   - Settings says "On", but `manage-bde -status C:` says **Protection
+     Off, Key Protectors: None Found**. The key sits unsecured beside
+     the data (a local account never activates it).
+   - Not met until a TPM and recovery-password protector are added and
+     enabled (HANDOFF §0 owner item 6).
 30. **Individualised advice** (Anthropic's Usage Policy from 12 Nov 2026:
    medical, legal and financial "High-risk AI Recommendations" need a
    qualified person's review; general information is excluded). "Is this

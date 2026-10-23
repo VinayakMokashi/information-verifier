@@ -197,6 +197,19 @@ the first year).
      7 (unmapped), so whether protection is truly on (a TPM protector,
      not "waiting for activation") needs `manage-bde -status C:`, run
      as admin.
+   - **MEASURED by him, as admin:** "Used Space Only Encrypted, 100%,
+     **Protection Off**, Key Protectors: **None Found**".
+     - The data is encrypted, but its key sits unsecured on the same
+       disk (Microsoft: `-protectors -enable` "removes the unsecured
+       encryption key").
+     - So it is **NOT protected at rest**, and Telegram §4.4(a) is not
+       met yet (§11 29).
+     - Plan, his to run as admin: add a recovery-password protector
+       first, saved off the PC; then a TPM protector (TPM-only, so
+       unattended reboots still unlock); then `manage-bde -protectors
+       -enable C:`.
+     - On Home, `manage-bde -protectors -add` may fail with 0x8031005a;
+       `Add-BitLockerKeyProtector` is the reported workaround.
    - **He signs in with a LOCAL account** (Get-LocalUser:
      PrincipalSource Local). So no recovery key was ever saved to a
      Microsoft account, and he found none there.
