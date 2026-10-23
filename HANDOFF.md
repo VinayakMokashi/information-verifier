@@ -170,6 +170,19 @@ the first year).
      then disable it.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
+   **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
+   04:00 IST, then restarted 04:03 with OWNER_CHAT_ID). Checked free:
+   - `/ready`: ready, real, database + keys + ffmpeg;
+   - /privacy shows his contact link and his name, and the "Sarvam may
+     keep" line;
+   - the dashboard's all-time total is **$1.7437**, 10 checks,
+     unchanged;
+   - verifier.db went from 1,273,856 to **217,088 bytes**: the
+     one-time rewrite plus the 30-day prune, with an empty -wal;
+   - `ledger-2026-10-23.db` (UTC date) landed in OneDrive;
+   - OWNER_CHAT_ID is set (digits); the app and the bot are running.
+   - From now on the real database changes all the time, so its size
+     is no check. **The ledger total on the dashboard is.**
 4. **`BACKUP_DIR=`** a OneDrive (or USB) folder, so the daily copies of
    the spend record leave this laptop. **DONE 2026-10-23:**
    `OneDrive\InformationVerifier-backups` exists, and the setting points
@@ -504,10 +517,10 @@ THEN verify, all free, and tell me what you find before doing anything else:
 - .\.venv\Scripts\python.exe -m pytest tests -q gives 1333 passed. Read
   pytest's OWN exit code (0), never through a pipe.
 - No stray python, uvicorn or cloudflared processes.
-- data\verifier.db is 1,273,856 bytes, last written 2026-10-12 05:21. If
-  I've started the app since, expect the one-time VACUUM line in its
-  output instead. Don't open or copy that file: its size and date are
-  the check.
+- The app runs now, so data\verifier.db changes all the time (217,088
+  bytes after its first start, 2026-10-24). Don't open or copy it. The
+  check is the dashboard's all-time total, http://127.0.0.1:8000/dashboard
+  ($1.7437 before the first real check), against HANDOFF §0.
 - Both files in docs\research\2026-10-16\ say "status: complete".
 
 Where we are:
