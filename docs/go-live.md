@@ -19,6 +19,16 @@ check that fails.
    `SARVAM_ZERO_RETENTION=true` in `.env`. Only then does the privacy
    notice say Sarvam keeps none of it; until then it says Sarvam may keep
    it.
+   - **Seen 2026-10-23 on the owner's account:** the workspace page is
+     called **Data policy** (`/settings/workspace/data-policy`) and lists
+     only **Voice Agents**. That covers call recordings, at 24 months.
+     There is no Model APIs row, although Sarvam's docs describe one.
+     So there is no switch for this app's speech-to-text.
+   - Leave `SARVAM_ZERO_RETENTION` **unset**, so the notice keeps saying
+     Sarvam may keep voice notes, which is true. Ask Sarvam support how
+     to set Model APIs to "No retention".
+   - This does not block the rest of go-live. The startup warning about
+     it stays until it is settled.
 2. **Anthropic:** a separate workspace for the public key, with a monthly
    spend limit; put that workspace's key in `.env` as `ANTHROPIC_API_KEY`.
 3. **Telegram:** send `/id` to the bot; put the number in `.env` as

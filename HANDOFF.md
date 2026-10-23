@@ -152,6 +152,12 @@ the first year).
    retention). THEN put `SARVAM_ZERO_RETENTION=true` in `.env`. Only then
    does the privacy notice say Sarvam keeps none of it (review S5-4).
    Until then it says Sarvam may keep it, and startup warns.
+   **2026-10-23: BLOCKED on Sarvam.**
+   - His workspace page is "Data policy" and lists only Voice Agents
+     (24 months). It has no Model APIs row, unlike Sarvam's docs and
+     their 2026-09-15 changelog.
+   - So `SARVAM_ZERO_RETENTION` stays unset, and the notice stays true.
+   - He asks Sarvam support. The rest of go-live goes on.
 2. **Anthropic:** a separate workspace with a monthly spend limit; its key
    goes in `.env` as `ANTHROPIC_API_KEY`.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
