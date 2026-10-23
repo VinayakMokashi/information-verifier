@@ -171,7 +171,10 @@ the first year).
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
 4. **`BACKUP_DIR=`** a OneDrive (or USB) folder, so the daily copies of
-   the spend record leave this laptop.
+   the spend record leave this laptop. **DONE 2026-10-23:**
+   `OneDrive\InformationVerifier-backups` exists, and the setting points
+   to it (checked without printing it). The first app start should put
+   a `ledger-<date>.db` there.
 5. **What the privacy notice publishes:** `CONTACT_EMAIL` (the notice and
    the terms give it as the place to write for deletion, corrections and
    complaints) and, if he wants a name shown, `OPERATOR_NAME`. A role
