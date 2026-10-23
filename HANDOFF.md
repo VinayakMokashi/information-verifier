@@ -158,8 +158,16 @@ the first year).
      their 2026-09-15 changelog.
    - So `SARVAM_ZERO_RETENTION` stays unset, and the notice stays true.
    - He asks Sarvam support. The rest of go-live goes on.
+   - Organisation → Policy holds only encryption-key settings.
+   - **He emailed Sarvam support on 2026-10-23.** Waiting on their
+     answer.
 2. **Anthropic:** a separate workspace with a monthly spend limit; its key
    goes in `.env` as `ANTHROPIC_API_KEY`.
+   **DONE 2026-10-23.** Verified free: a models list with the new key
+   returned HTTP 200 in workspace `wrkspc_01VYAydX915BB2PdCgkXE7Zh`, and
+   claude-sonnet-5 is visible.
+   - Keep the old key until the first real check passes on the new one,
+     then disable it.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
 4. **`BACKUP_DIR=`** a OneDrive (or USB) folder, so the daily copies of
