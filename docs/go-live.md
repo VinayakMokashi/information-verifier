@@ -183,7 +183,11 @@ Register-ScheduledTask -TaskName "Information Verifier" -Action $action `
 ```
 
 A password is needed to run with nobody signed in. With a Microsoft
-account, give that account's password, not the PIN. `Read-Host` shows
+account, give that account's password, not the PIN. With a **local**
+account (this PC's, as read on 2026-10-23), give its Windows password.
+If it has none, set one first (Settings → Accounts → Sign-in options →
+Password). Windows refuses a blank password for a task that runs with
+nobody signed in. `Read-Host` shows
 it as you type, so make sure nobody is watching the screen.
 
 If that is refused, the fallback is a separate **local** standard account
