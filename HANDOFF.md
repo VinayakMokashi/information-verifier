@@ -210,6 +210,9 @@ the first year).
        -enable C:`.
      - On Home, `manage-bde -protectors -add` may fail with 0x8031005a;
        `Add-BitLockerKeyProtector` is the reported workaround.
+     - **DECIDED (Vinayak, 2026-10-23): leave it OFF; revisit at the VM
+       move.** Telegram §4.4(a) is a known gap until then (PROJECT_PLAN
+       §11 29). Do not reopen it unasked.
    - **He signs in with a LOCAL account** (Get-LocalUser:
      PrincipalSource Local). So no recovery key was ever saved to a
      Microsoft account, and he found none there.

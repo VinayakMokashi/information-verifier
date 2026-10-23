@@ -466,6 +466,40 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-10-23 — Going live, §1: the owner's settings, and three things the dashboards did not say
+
+Vinayak worked through go-live.md §1, with each result read back, free.
+- **Sarvam has no switch for this app's retention.** The docs describe
+  "Data retention" with a Model APIs → "No retention (0 days)" override.
+  His account's workspace page is "Data policy", with only Voice Agents.
+  Organisation → Policy holds only encryption keys. So
+  `SARVAM_ZERO_RETENTION` stays unset (the notice keeps saying Sarvam
+  may keep voice notes, which is true). He emailed Sarvam support.
+- **Anthropic:** a new workspace with a monthly spend limit, and a key
+  bound to it.
+  - The app sends no `anthropic-workspace-id` header, so an unbound
+    key would fail every check with a 400.
+  - Verified free: a models list returned HTTP 200 in
+    `wrkspc_01VYAydX915BB2PdCgkXE7Zh`.
+- **BACKUP_DIR** points to OneDrive; **CONTACT_EMAIL** (a Gmail
+  address) and **OPERATOR_NAME** are set. All were checked without
+  printing their values.
+- **This PC:**
+  - sleep on AC is Never; the lid on AC does nothing;
+  - active hours are 7–1, set manually;
+  - updates are paused until 2026-10-30;
+  - it signs in with a **local account**, so the scheduled task in §5
+    needs that account's password.
+- **"Device encryption: On" was not protection.** `manage-bde -status
+  C:` said Protection Off, Key Protectors: None Found. The key sits
+  unsecured beside the data, which is why no recovery key ever existed.
+  **Vinayak decided to leave it off until the VM** (§11 29), with
+  Telegram's at-rest term a known gap.
+
+The lesson, a fourth time: a settings page's word is not a
+measurement. Sarvam's docs and its dashboard disagreed, and Windows'
+"On" meant unprotected. Each was settled by reading the real state.
+
 ### 2026-10-18 — A fresh reviewer for the third round: the first start is safe; 8 low findings, all fixed
 
 Vinayak took two of the three offers: a fresh reviewer, and one real
@@ -2399,6 +2433,14 @@ C. **The remaining to-dos** — items 4–32 below. Their value order is in
      the data (a local account never activates it).
    - Not met until a TPM and recovery-password protector are added and
      enabled (HANDOFF §0 owner item 6).
+   **DECIDED 2026-10-23 (Vinayak): leave protection OFF on this PC, and
+   revisit at the move to the VM.**
+   - A cloud VM's disk is normally encrypted by the provider.
+   - Until then, Telegram §4.4(a) is a known, accepted gap. A lost or
+     stolen laptop exposes what it holds, including 30 days of messages.
+   - Weighed and not taken: turning it on (lockout only if the recovery
+     key is lost too); and shortening retention to 7 days.
+   - Do not reopen this before the VM unasked.
 30. **Individualised advice** (Anthropic's Usage Policy from 12 Nov 2026:
    medical, legal and financial "High-risk AI Recommendations" need a
    qualified person's review; general information is excluded). "Is this
