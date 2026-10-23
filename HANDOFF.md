@@ -189,6 +189,23 @@ the first year).
      If Windows Home doesn't offer it, §11 29 has the other way.
    - Sleep: Never when plugged in. Lid close: Do nothing.
    - Windows Update active hours: 07:00–01:00.
+
+   **DONE 2026-10-23, read back here:**
+   - sleep on AC is Never; lid on AC is Do nothing (his screenshot);
+   - active hours are 7–1, set manually;
+   - Settings says Device encryption is "On". But the shell's code was
+     7 (unmapped), so whether protection is truly on (a TPM protector,
+     not "waiting for activation") needs `manage-bde -status C:`, run
+     as admin.
+   - **He signs in with a LOCAL account** (Get-LocalUser:
+     PrincipalSource Local). So no recovery key was ever saved to a
+     Microsoft account, and he found none there.
+     - Offered: `manage-bde -protectors -get C:` (admin), and keep the
+       48-digit key off this PC.
+     - For §5: the Task Scheduler task needs that local account's
+       password. A blank one is refused for a batch logon.
+   - Updates are paused until 2026-10-30 02:23 UTC. He has work open
+     until month end, so §5's reboot test waits until then.
 7. **The .com:**
    - Buy it at Cloudflare Registrar, with a Visa, Mastercard or Amex
      enabled for international payments with 3-D Secure. If the card is
