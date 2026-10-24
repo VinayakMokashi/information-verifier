@@ -79,7 +79,14 @@
     Snopes, Factly, India Today). Expect the ~$0.0084 shortcut.
   - NASA "6 days of darkness" was 2026-10-11's claim, so it is not
     reused.
-  - Not run yet. Ask first.
+  - **DONE 2026-10-24 09:09 IST, with his yes.**
+    - $0.0089, text, COMPLETE, tier trusted, 0 web searches: the
+      shortcut.
+    - The dashboard's all-time total went from $1.7437 to **$1.7526**.
+      The budget committed $0.0089 after reserving $0.20; the cap
+      shows 1 of 40.
+    - Next: disable the OLD Anthropic key, unless another project of
+      his uses it.
 - **Next:** docs/go-live.md with Vinayak, one step at a time. He has
   been given §1 item 1 (Sarvam's retention, then
   `SARVAM_ZERO_RETENTION=true`). The suggested order is 1 → 2 → 4 → 5
@@ -618,16 +625,23 @@ reliable has covered this" — that is a real answer here, not a failure.
 - Proven on the real model: the web page, links/reels, the caches, the
   Telegram bot, the summary, the language chooser, and (2026-10-11) the
   Google fact-check shortcut and the one-sentence pass 1.
-- **Not yet met real money or real keys.** Everything built since
-  2026-10-11 is proven only with fakes and test keys:
-  - the dollar budget's reserve-and-settle, and the per-person counts;
+- **Met real money on 2026-10-24, in the first real check since
+  2026-10-11.** The UNESCO anthem hoax, sent to the bot, cost $0.0089
+  through the shortcut (0 searches, tier trusted). It proved:
+  - the dollar budget's reserve-and-settle: $0.20 reserved, $0.0089
+    committed;
+  - the ledger and its new reference;
+  - the new workspace key;
+  - the bot's delivery (its pending file is empty).
+- **Not yet met reality:**
+  - the per-person counts (in memory, unseen);
   - Turnstile with real keys, and the device cookie;
-  - the ledger's new reference, and the owner alerts;
+  - the owner alerts;
   - the tunnel's streaming;
   - the unattended runner across a real reboot.
-  Step 4's checks cover them; one real local check first is on §0's
-  list of offers.
-- **Spent to date: $1.7437** — the spend ledger's own total, 17 rows (the
+
+  Step 4's later checks cover them.
+- **Spent to date: $1.7526** (was $1.7437 before 2026-10-24) — the spend ledger's own total, 18 rows (the
   ledger, not anyone's sum, is the truth: it once caught a $0.26 check the
   docs had missed). Watch it at `http://127.0.0.1:8000/dashboard`.
 - **Open problems found on real runs** (PROJECT_PLAN §11):

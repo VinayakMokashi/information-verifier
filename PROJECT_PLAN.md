@@ -496,6 +496,14 @@ Vinayak worked through go-live.md §1, with each result read back, free.
   **Vinayak decided to leave it off until the VM** (§11 29), with
   Telegram's at-rest term a known gap.
 
+**2026-10-24: the first real check since 2026-10-11** (his yes). The
+UNESCO anthem hoax, sent to the bot from his phone, cost **$0.0089**
+through the Google fact-check shortcut: 0 searches, tier trusted (it
+was $0.0084 for a like check on 2026-10-11). The budget reserved
+$0.20 and committed $0.0089, and the ledger went from $1.7437 to
+$1.7526, exactly. The dollar budget, the new key and the ledger have
+now met real money.
+
 The lesson, a fourth time: a settings page's word is not a
 measurement. Sarvam's docs and its dashboard disagreed, and Windows'
 "On" meant unprotected. Each was settled by reading the real state.
