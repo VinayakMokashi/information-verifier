@@ -16,7 +16,7 @@
   to 2026-10-17). The step-5 reviews alone found 31 defects, all fixed.
 - **Step 4, running it 24/7 on this PC at its own .com, waits on
   Vinayak's owner steps** in `docs/go-live.md`.
-- **1333 tests pass.** A fresh reviewer for the third round of fixes
+- **1334 tests pass.** A fresh reviewer for the third round of fixes
   found 8 low defects, all fixed the same day (§7, 2026-10-18); it
   judged the first real start safe. The app and the bot have not
   run since 2026-10-12, and the ledger stands at $1.7437.
@@ -62,7 +62,7 @@ Opus 5 on the same reel — right where Opus was wrong, at a quarter of the cost
   machine only (a 404 to anyone else, including through the share tunnel).
 
 **Everything below is built, tested, committed and pushed.** `main` is clean;
-**1333 tests pass** today (688 on 2026-09-22;
+**1334 tests pass** today (688 on 2026-09-22;
 `.venv\Scripts\python.exe -m pytest tests -q`, free — every paid seam is
 faked).
 
@@ -503,6 +503,14 @@ was $0.0084 for a like check on 2026-10-11). The budget reserved
 $0.20 and committed $0.0089, and the ledger went from $1.7437 to
 $1.7526, exactly. The dollar budget, the new key and the ledger have
 now met real money.
+
+**2026-10-24, two more of his calls.**
+- The disclaimer says "written by AI" and no longer names the model
+  (5455a6e). The Usage Policy asks only that people know they are
+  "interacting with AI rather than a human". The privacy notice still
+  names Anthropic as a recipient.
+- yt-dlp went 2026.8.19 → 2026.10.21. A real Facebook share reel
+  resolves; Instagram and Shorts are unprobed.
 
 The lesson, a fourth time: a settings page's word is not a
 measurement. Sarvam's docs and its dashboard disagreed, and Windows'

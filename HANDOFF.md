@@ -44,7 +44,7 @@
     start. **ALL 8 FIXED**, each failing-first, with mutants, and pushed
     alone. The commits: G-8 82b0708, G-2 6eb2e57, G-4 4838389, G-5
     aaf5398, G-1 f9fd678, G-3 486a795, G-7 7f35db8, G-6 ea2e82c (the
-    table at the end of the review file). **1333 tests.**
+    table at the end of the review file). **1333 tests** (1334 after 5455a6e, 2026-10-24).
   - **What it means for go-live:** go-live.md's fallback block now
     grants BACKUP_DIR, and its check proves a backup landed. A failing
     housekeeping step (the backup, the 30-day prune) now alerts your
@@ -265,6 +265,14 @@ the first year).
 11. **Two yes-or-no questions:** update yt-dlp (it is 2026.8.19; startup
     says when it is over 30 days old)? Install deno, the JS runtime yt-dlp
     wants for YouTube? Ask before either.
+    **yt-dlp: YES, done 2026-10-24.**
+    - 2026.8.19 → **2026.10.21**; pip check is clean; the suite passes
+      on it (1334).
+    - link_probe resolves a real Facebook share reel (14 s, within the
+      cap).
+    - Instagram and YouTube Shorts are unprobed: no real link to hand.
+    - The running app and bot pick it up at their next restart.
+    - **deno: still unasked.**
 12. **WhatsApp, the slow items** ([decision-brief §4](docs/research/2026-10-15/decision-brief.md),
     [whatsapp.md](docs/research/2026-10-15/whatsapp.md) "Start TODAY"):
     - a new SIM that has never been on WhatsApp, kept recharged;
@@ -456,7 +464,7 @@ FIRST, read these in order:
 Your memory also has entries for this project.
 
 Verify the state first (free, ~2 min) — and read pytest's OWN exit code:
-  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1333 passing
+  .\.venv\Scripts\python.exe -m pytest tests -q     # expect 1334 passing
 
 Money: I'm cost-conscious. MEASURED per check: ~$0.008 when Google's free
 fact-check database already covers the claim (about half of English hoaxes),
@@ -521,7 +529,7 @@ Your memory has entries for this project too.
 THEN verify, all free, and tell me what you find before doing anything else:
 - git is clean, and main equals origin/main at the 2026-10-18 handoff
   commit (git log -3).
-- .\.venv\Scripts\python.exe -m pytest tests -q gives 1333 passed. Read
+- .\.venv\Scripts\python.exe -m pytest tests -q gives 1334 passed. Read
   pytest's OWN exit code (0), never through a pipe.
 - No stray python, uvicorn or cloudflared processes.
 - The app runs now, so data\verifier.db changes all the time (217,088
@@ -617,7 +625,7 @@ reliable has covered this" — that is a real answer here, not a failure.
 
 ## 4. Where it stands right now
 
-- `main` is clean and pushed. **1333 tests pass**, all free (every paid seam is
+- `main` is clean and pushed. **1334 tests pass**, all free (every paid seam is
   faked, and a test proves demo mode cannot reach a paid provider).
 - **Ready for the public, waiting on the owner** (§0, `docs/go-live.md`).
   The app and the bot are not running now; nothing has run since
@@ -775,7 +783,7 @@ Always the venv Python: `.\.venv\Scripts\python.exe …`
 **Free (spends nothing):**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q            # 1333 tests, ~3-10 min
+.\.venv\Scripts\python.exe -m pytest tests -q            # 1334 tests, ~3-10 min
 .\.venv\Scripts\python.exe scripts\serve_demo.py         # the real page, simulated engine
 .\.venv\Scripts\python.exe scripts\demo_offline.py       # engine + cache, in the console
 .\.venv\Scripts\python.exe scripts\link_probe.py "<reel url>"   # does a link resolve?
