@@ -102,7 +102,7 @@ HELP = (
     "official sources (WHO, NASA, NIH, government sites…) se check karke "
     "jawab dunga — aapki hi bhasha mein. Sirf India ya politics nahi: "
     "health, science, history, kuch bhi.\n\n"
-    "🤖 Jawab ek AI (Claude) likhta hai — galat ho sakta hai, isliye diye gaye "
+    "🤖 Jawab ek AI likhta hai — galat ho sakta hai, isliye diye gaye "
     "sources khud padhiye.\n"
     "Sirf 18+ ke liye. Bhejne ka matlab: aap maante hain ki aapka message check "
     "ke liye Anthropic, Google aur Sarvam ke paas jaata hai — /privacy"
@@ -111,7 +111,7 @@ HELP = (
 # On EVERY answer, not only in /start: Anthropic's Usage Policy wants the AI
 # disclosed at the start of each chat session, and a Telegram chat never
 # starts a new one (the verification of policy-legal.md, 2026-10-15).
-AI_TAG = "🤖 Yeh jawab AI (Claude) ne likha hai — sources khud check kariye."
+AI_TAG = "🤖 Yeh jawab AI ne likha hai — sources khud check kariye."
 
 
 def privacy_text() -> str:

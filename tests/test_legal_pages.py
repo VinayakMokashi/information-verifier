@@ -113,7 +113,9 @@ def test_the_notice_says_who_can_open_an_answer(client):
 
 def test_the_terms_say_ai_wrote_it_and_to_check_the_sources(client):
     text = _read(client, "/terms")
-    assert "Claude" in text and "Anthropic" in text
+    # "written by an AI", unnamed (Vinayak, 2026-10-24); who receives the
+    # message, Anthropic among them, is the privacy notice's to say.
+    assert "Every answer is written by an AI" in text
     # D.3 is about relying on FACTUAL assertions without checking them —
     # for a fact-checker "can be wrong" alone is the weaker half.
     assert "checking the linked sources yourself" in text
@@ -226,8 +228,23 @@ def test_the_page_says_an_ai_answers_and_who_it_is_for():
     """Anthropic's Usage Policy: a consumer-facing chatbot discloses it is AI,
     at the latest at the start of each session — the line is always on
     screen. 18+: DPDP s.9 and Anthropic's minors rule (policy-legal.md)."""
-    assert "AI" in _hint() and "Claude" in _hint()
+    assert "AI" in _hint()
     assert "18" in _hint()
+
+
+def test_every_disclaimer_says_ai_and_none_names_the_model(client):
+    """Vinayak, 2026-10-24: "written by AI", not "written by AI (Claude)".
+    The policy asks only that people know they are "interacting with AI
+    rather than a human" (policy-legal.verification.md); the privacy
+    notice still names Anthropic, because that is where messages go."""
+    from scripts import telegram_bot as B
+
+    terms = _read(client, "/terms")
+    terms = terms[terms.index("Answers are written by AI"):][:400]
+    for where, text in (("the page", _hint()), ("the bot's /start", B.HELP),
+                        ("the bot's answer tag", B.AI_TAG), ("the terms", terms)):
+        assert "AI" in text, where
+        assert "Claude" not in text, where
 
 
 def test_every_answer_is_tagged_as_ai_written():

@@ -1212,7 +1212,7 @@ def test_anonymous_admins_and_channel_posts_are_their_chat_not_a_shared_account(
 # privacy policy and deletion on request.
 
 def test_help_says_an_ai_answers_who_it_is_for_and_where_data_goes():
-    assert "AI" in B.HELP and "Claude" in B.HELP
+    assert "AI" in B.HELP and "Anthropic" in B.HELP     # who, in "where it goes"
     assert "18" in B.HELP
     assert "/privacy" in B.HELP
 
