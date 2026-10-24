@@ -82,6 +82,24 @@ Then, in that dashboard:
 - **Turnstile → Add widget** for the domain (Managed). Put its two keys in
   `.env` as `TURNSTILE_SITE_KEY=` and `TURNSTILE_SECRET_KEY=`.
 
+Cloudflare's docs, re-read on 2026-10-24, give these names:
+- **Buying:** the **Register domains** page → search → **Purchase** →
+  the term in **Payment option** (1 year) → contact details → **Payment**
+  → **Complete purchase**.
+  - It needs a verified account email.
+  - The contacts must be accurate (ICANN), ASCII only, with the phone in
+    +91 form. WHOIS shows them redacted.
+  - Auto-renew is on by default.
+  - The price shown at checkout is the real one.
+- **Bot Fight Mode:** the **Security Settings** page → filter **Bot
+  traffic** → **Bot fight mode** → off. No rule can skip it, which is
+  why it goes off.
+- **Turnstile:** the **Turnstile** page → **Add widget**:
+  - **Widget name**: anything;
+  - **Hostname management**: the .com;
+  - **Widget mode**: **Managed**;
+  - then **Create**, and copy the **Sitekey** and **Secret key**.
+
 ## 3. The tunnel (cloudflared is already installed)
 
 In a PowerShell window (not as admin yet), with `<domain>` your .com:
