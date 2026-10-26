@@ -3,6 +3,7 @@
 Model IDs live here so the whole engine swaps models in one place: the chat
 check and vision OCR both run on Sonnet 5 since the 2026-09 pivot.
 """
+import os
 from functools import lru_cache
 
 from pydantic import Field
@@ -22,7 +23,11 @@ def _credential():
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # .env, unless VERIFIER_ENV_FILE names another file, or — empty — none at
+    # all: the test suite sets it so, and reads nothing of the owner's .env
+    # (2026-10-27: BACKUP_DIR and any raised limit reached it; conftest.py).
+    model_config = SettingsConfigDict(
+        env_file=os.environ.get("VERIFIER_ENV_FILE", ".env") or None, extra="ignore")
 
     # Credentials
     anthropic_api_key: str = _credential()

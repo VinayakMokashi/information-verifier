@@ -1,6 +1,12 @@
 """Shared fixtures: a fully-offline app client with every paid seam faked."""
 import os
 
+# Nothing from the owner's .env, before anything imports the app (and so in
+# every child a test starts): its BACKUP_DIR would send the backup tests'
+# copies to his OneDrive, and a raised limit would fail every test pinning a
+# default (2026-10-27). The overrides below stay as a second wall.
+os.environ["VERIFIER_ENV_FILE"] = ""
+
 # No real key in a test, ever — set BEFORE anything imports the app, because
 # some clients read their key once, at import (the Anthropic case, §7).
 # MEASURED 2026-10-16: the suite ran with the real keys from .env loaded,

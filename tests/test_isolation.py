@@ -13,8 +13,13 @@ patches are undone falls back to whatever `settings.db_path` held before
 them. So what it held must never be the real database.
 """
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 from app.config import Settings, settings
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 # Compared as plain strings, outside the assert: pytest's failure display
@@ -22,8 +27,25 @@ from app.config import Settings, settings
 # keys (it printed one on this test's first, deliberately failing, run).
 def _paths() -> tuple[str, str]:
     in_use = os.path.abspath(str(settings.db_path))
-    real = os.path.abspath(str(Settings().db_path))
+    # The real one is what the owner's .env names, read on purpose: the
+    # suite itself reads no .env (the test below).
+    real = os.path.abspath(str(Settings(_env_file=".env").db_path))
     return in_use, real
+
+
+def test_the_suite_reads_nothing_from_the_owners_env_file(tmp_path):
+    """FOUND 2026-10-27, before raising the caps through .env: conftest
+    overrode the keys and six settings, and every other line of the owner's
+    .env reached the suite. BACKUP_DIR would have put the backup tests'
+    copies in his OneDrive folder, and a raised DAILY_BUDGET_USD would fail
+    every test that pins the defaults. A planted .env, read the way the
+    suite's own environment reads one — in a child, from that folder."""
+    (tmp_path / ".env").write_text("DAILY_BUDGET_USD=9\nBACKUP_DIR=planted-backups\n",
+                                   encoding="utf-8")
+    code = "from app.config import settings as s; print(s.daily_budget_usd, repr(s.backup_dir))"
+    out = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True,
+                         text=True, timeout=60, env=dict(os.environ, PYTHONPATH=str(ROOT)))
+    assert out.stdout.split() == ["1.0", "''"], out.stdout + out.stderr[-500:]
 
 
 def test_a_test_that_patches_nothing_is_not_on_the_real_database():
