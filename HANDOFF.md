@@ -189,7 +189,21 @@ the first year).
      checks ran on 2026-10-24: a reel at 05:30 UTC ($0.1764, 178 s of
      ASR) and a screenshot at 06:40 UTC ($0.1781, tier none). The day
      came to $0.3634, inside the $1 budget. Who sent them is not
-     recorded, by design. He was asked whether they were his.
+     recorded, by design. **They were a friend's**, whom he had sent the
+     bot to.
+   - **go-live §3 DONE 2026-10-27:**
+     - the tunnel is **verifier**, `b9002f90-83a1-4751-b2fd-8d81816acfa8`;
+       its cert.pem and credentials .json are in `%USERPROFILE%\.cloudflared\`
+       (names checked, contents never read);
+     - DNS is routed: the site answered HTTP 530 / error 1033, a tunnel
+       with no connector, as expected before it runs;
+     - `config.yml` was written by Claude from go-live.md's template;
+       `ingress validate` says OK;
+     - by `ingress rule`, /dashboard and /api/v1/admin/spend → #0
+       (404), / and /privacy → #1 (the app), www → #2 (404, not set
+       up).
+   - cloudflared warns that 2026.7.3 is outdated (2026.10.4 is out).
+     Updating is his yes or no, before §5's service install.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
