@@ -18,6 +18,17 @@
 > A research file whose top says **"status: in progress"** means its agent
 > died: re-run that one task, seeded from the file.
 
+**⚠ RAISED CAPS, TEMPORARY (Vinayak, 2026-10-27), for 7 days, to about
+2026-11-03:**
+- `DAILY_BUDGET_USD=5`, `MAX_CHECKS_PER_DAY=200`, and
+  `PERSON_DAILY_LIMITS={"tg": 10, "tgchat": 10, "wa": 5, "dev": 10, "ip6": 5, "ip": 20}`,
+  in `.env`, added by him.
+- **He reverts by telling Claude** (his choice, not automatic): remove
+  those three lines and restart, back to $1, 40, and 5/3.
+- Any session after 2026-11-03 asks him first thing.
+- At $5 a day, October's worst case in the capped Anthropic workspace is
+  about $26. His monthly limit (about $35) must stay above that.
+
 **The 2026-10-18 session — IN FLIGHT (kept current as it moves):**
 - **Resume verified, free:**
   - git clean, `main` = `origin/main` at 97244ee;

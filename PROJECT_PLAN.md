@@ -512,6 +512,14 @@ now met real money.
 - yt-dlp went 2026.8.19 → 2026.10.21. A real Facebook share reel
   resolves; Instagram and Shorts are unprobed.
 
+**2026-10-27: caps raised for 7 days (Vinayak).** $5 a day, a 200-check
+backstop, and 10 a day per Telegram user and per web device, set in
+`.env`. He reverts by asking (HANDOFF §0). Raising them through `.env`
+exposed that the test suite read the owner's .env (BACKUP_DIR would
+have sent the backup tests' copies to OneDrive). Fixed test-first
+(7d78981): the suite now reads none of it. 1335 tests pass in the
+project folder with the real .env present, OneDrive untouched.
+
 The lesson, a fourth time: a settings page's word is not a
 measurement. Sarvam's docs and its dashboard disagreed, and Windows'
 "On" meant unprotected. Each was settled by reading the real state.
