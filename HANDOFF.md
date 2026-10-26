@@ -175,6 +175,8 @@ the first year).
    claude-sonnet-5 is visible.
    - Keep the old key until the first real check passes on the new one,
      then disable it.
+     **2026-10-27, Vinayak: the old key STAYS.** His other projects use
+     it. Only the new workspace key is in this app's `.env`.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
