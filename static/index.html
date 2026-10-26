@@ -24,6 +24,10 @@
     --danger: #b91c1c;
     --radius: 14px;
     --shadow: 0 1px 2px rgba(16,18,29,.04), 0 8px 24px rgba(16,18,29,.06);
+    /* The second accent of the gradient, the text that sits on an accent
+       fill, and the soft light behind the header. */
+    --accent-2: #0e7490;  --on-accent: #ffffff;
+    --glow: rgba(29,78,216,.10);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -34,6 +38,10 @@
       --web: #fbbf24;     --web-soft: #241d10;
       --danger: #f87171;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+      /* White on this light blue was 2.3:1, under any contrast rule: the
+         button's words go dark in the dark theme. */
+      --accent-2: #5eead4; --on-accent: #0b1220;
+      --glow: rgba(122,162,255,.13);
     }
   }
   * { box-sizing: border-box; }
@@ -219,12 +227,95 @@
           font-size: .74rem; text-align: center; }
   .hint a { color: inherit; }
   .hidden { display: none !important; }
+
+  /* -- the look (2026-10-27, Vinayak: "a little more appealing") ----------
+     Layered over the rules above, which stay the structure. No web font and
+     no image from anywhere else: a third party would see every visitor. */
+  body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 480px;
+                 z-index: -1; pointer-events: none;
+                 background: radial-gradient(60% 100% at 50% 0%, var(--glow), transparent 75%); }
+  .head-inner { align-items: center; }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .logo { width: 28px; height: 28px; flex: none; display: block; }
+  header h1 { font-size: 1.06rem; }
+
+  .empty { padding: 34px 4px 10px; }
+  .empty .eyebrow { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 14px;
+             font-size: .78rem; font-weight: 600; color: var(--accent);
+             background: var(--accent-soft); border-radius: 999px; padding: 4px 12px; }
+  .empty .eyebrow::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+                     background: var(--trusted); }
+  .empty h2 { font-size: clamp(1.6rem, 4.6vw, 2.15rem); line-height: 1.2;
+              letter-spacing: -.03em; margin-bottom: 12px; }
+  .empty h2 em { font-style: normal; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+                 -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .empty .lead { font-size: 1.02rem; max-width: 60ch; }
+  .steps { list-style: none; padding: 0; margin: 22px 0 24px;
+           display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .steps li { background: var(--surface); border: 1px solid var(--line);
+              border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+  .steps .ico { width: 34px; height: 34px; border-radius: 10px; display: grid;
+                place-items: center; margin-bottom: 10px; color: var(--accent);
+                background: var(--accent-soft); }
+  .steps .ico svg { width: 19px; height: 19px; }
+  .steps b { display: block; color: var(--ink); font-size: .93rem; margin-bottom: 2px; }
+  .steps div span { display: block; font-size: .85rem; line-height: 1.5; }
+  @media (max-width: 560px) {
+    .steps { grid-template-columns: 1fr; }
+    .steps li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+    .steps .ico { margin: 0; }
+  }
+  .empty .try { margin: 0 0 9px; font-size: .78rem; font-weight: 600;
+         text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+  .chip { transition: border-color .15s, color .15s, transform .15s; }
+  .chip:hover { transform: translateY(-1px); }
+  .chip::after { content: " →"; color: var(--ink-3); }
+
+  .answer { position: relative; border-radius: 16px; padding: 20px 20px 6px; }
+  /* The verdict's colour on the card's top edge: green when fact-checkers
+     covered it, amber for the open web, grey while it streams or when
+     nothing reliable did. The words stay what decides. */
+  .answer::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px;
+                    height: 4px; border-radius: 16px 16px 0 0; background: var(--line); }
+  .answer:has(.pill.trusted)::before { background: var(--trusted); }
+  .answer:has(.pill.web)::before { background: var(--web); }
+  .answer:has(.err)::before { display: none; }
+  .mine { border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .summary { border-radius: 0 12px 12px 0; }
+  .src { position: relative; padding-right: 36px;
+         transition: border-color .15s, transform .15s, box-shadow .15s; }
+  a.src:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  a.src::after { content: "↗"; position: absolute; right: 13px; top: 50%;
+                 transform: translateY(-50%); color: var(--ink-3); font-size: .95rem; }
+  a.src:hover::after { color: var(--accent); }
+
+  .composer-inner { border-radius: 16px; }
+  .composer-inner:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  .icon { display: inline-grid; place-items: center; padding: 7px; }
+  .icon svg { width: 20px; height: 20px; display: block; }
+  .send { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px;
+          color: var(--on-accent);
+          background: linear-gradient(135deg, var(--accent), var(--accent-2));
+          transition: filter .15s, transform .15s; }
+  .send:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+  /* CSS, not markup: setBusy() rewrites the button's text ("Checking…"),
+     which would drop an icon inside it after the first check. */
+  .send::after { content: "→"; }
+  .send:disabled::after { content: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .chip, .src, .send { transition: none; }
+    .chip:hover, a.src:hover, .send:hover:not(:disabled) { transform: none; }
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="head-inner">
-    <h1>🔎 Information Verifier</h1>
+    <div class="brand">
+      <!-- The app icon's own mark (static/icon.svg), drawn inline. -->
+      <svg class="logo" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#1d4ed8"/><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><circle cx="220" cy="220" r="120" stroke-width="44"/><path d="M305 305L404 404" stroke-width="44"/><path d="M168 222L206 260L276 186" stroke-width="34"/></g></svg>
+      <h1>Information Verifier</h1>
+    </div>
     <span class="tag">Is this true? — paste anything and find out</span>
     <button class="install hidden" id="install" type="button">Install app</button>
   </div>
@@ -234,11 +325,21 @@
 
 <main id="thread">
   <div class="empty" id="empty">
-    <h2>Send me something to check.</h2>
-    <p>A forwarded message, a screenshot, a voice note, or a link to a reel —
-       in any language. I'll check it against fact-checkers and official
-       sources, and tell you plainly what I find. When nobody reliable has
-       covered something, I'll say so instead of guessing.</p>
+    <p class="eyebrow">Free · any language · no sign-up</p>
+    <h2>Got a forward? <em>Check it before you share it.</em></h2>
+    <p class="lead">Send me a forwarded message, a screenshot, a voice note, or a
+       link to a reel — in any language. I'll check it against fact-checkers and
+       official sources, and tell you plainly what I find. When nobody reliable
+       has covered something, I'll say so instead of guessing.</p>
+    <ol class="steps">
+      <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+        <div><b>Send it</b><span>Text, a screenshot, a voice note or a reel link.</span></div></li>
+      <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+        <div><b>I check the sources</b><span>Fact-checkers like Alt News, BOOM and PIB Fact Check; official sites like the WHO.</span></div></li>
+      <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg></span>
+        <div><b>You get a plain answer</b><span>How sure I am, and the links to open yourself.</span></div></li>
+    </ol>
+    <p class="try">Try one</p>
     <div class="chips">
       <button class="chip" type="button" data-fill="Drinking hot water kills the coronavirus">Drinking hot water kills the coronavirus</button>
       <button class="chip" type="button" data-fill="NASA confirmed the Earth will have 6 days of total darkness">NASA confirmed 6 days of total darkness</button>
@@ -264,8 +365,8 @@
     <textarea id="text" rows="1" dir="auto"
               placeholder="Paste a message, a claim, or a reel link…"></textarea>
     <div class="tools">
-      <button class="icon" id="pickImage" type="button" title="Screenshot or photo">📷</button>
-      <button class="icon" id="pickMedia" type="button" title="Voice note or video">🎤</button>
+      <button class="icon" id="pickImage" type="button" title="Screenshot or photo" aria-label="Screenshot or photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg></button>
+      <button class="icon" id="pickMedia" type="button" title="Voice note or video" aria-label="Voice note or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
       <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif">
       <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
       <button class="send" id="check">Check</button>
