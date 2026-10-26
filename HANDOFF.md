@@ -177,6 +177,19 @@ the first year).
      then disable it.
      **2026-10-27, Vinayak: the old key STAYS.** His other projects use
      it. Only the new workspace key is in this app's `.env`.
+   - **go-live §2 DONE 2026-10-27:**
+     - the domain is **informationverifier.com**, at Cloudflare;
+     - Bot Fight Mode is OFF (his screenshot);
+     - both Turnstile keys are set. The secret was proven genuine for
+       free: siteverify with a dummy token said only
+       "invalid-input-response".
+   - Restarted 01:29 IST the same day: `/ready` is ready, and the page
+     says "I'm an AI, and I can be wrong".
+   - **The spend then read $2.1071.** After his $0.0089 check, two more
+     checks ran on 2026-10-24: a reel at 05:30 UTC ($0.1764, 178 s of
+     ASR) and a screenshot at 06:40 UTC ($0.1781, tier none). The day
+     came to $0.3634, inside the $1 budget. Who sent them is not
+     recorded, by design. He was asked whether they were his.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
