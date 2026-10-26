@@ -229,6 +229,13 @@ the first year).
      - He also asked for a more appealing page UI. It is built in a
        worktree with the demo engine and shown to him before it
        replaces the live static/index.html.
+       **Built: branch `ui-refresh`, 48e7c10, pushed; NOT on main, so
+       not live.** It has a hero, three "how it works" steps, the
+       verdict's colour on the answer card, SVG icons, and a gradient
+       Check button with dark words in the dark theme. Looked at in
+       both themes, desktop and 390 px phone; the 273 page tests pass.
+       The pictures were sent to him; deploying waits on his OK (merge
+       to main and push: the running app serves static/ from disk).
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
