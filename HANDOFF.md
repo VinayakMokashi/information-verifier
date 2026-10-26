@@ -215,6 +215,20 @@ the first year).
        up).
    - cloudflared warns that 2026.7.3 is outdated (2026.10.4 is out).
      Updating is his yes or no, before §5's service install.
+   - **go-live §4: THE SITE IS LIVE (2026-10-27, connector up 21:04
+     UTC, 02:34 IST).**
+     - `PUBLIC_HOSTS=informationverifier.com`. The going-live check
+       gives exactly one warning, Sarvam's, which is expected.
+     - The tunnel runs in his third PowerShell window; one connector,
+       4 edges in Mumbai.
+     - From outside: / , /privacy, /terms, /manifest and /ready are 200;
+       /dashboard and /api/v1/admin/spend are 404 at the edge.
+     - It is up only while that window is open, until §5.
+     - Still to do: his phone test on mobile data (streaming or
+       buffered? install?), the BotFather privacy URL, then §5.
+     - He also asked for a more appealing page UI. It is built in a
+       worktree with the demo engine and shown to him before it
+       replaces the live static/index.html.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
