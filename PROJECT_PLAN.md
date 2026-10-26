@@ -2201,9 +2201,13 @@ A. **A website / app anyone can use.** **DECIDED 2026-10-15** (§7): this PC
      step-5 reviews found 18 + 13, all fixed (§7).
    - Step 4, running it 24/7 here at the .com, is `docs/go-live.md`,
      waiting on Vinayak. HANDOFF §0 lists his steps.
-   - Never yet met reality: Cloudflare streaming the answer (or buffering
-     it), a real reboot under Task Scheduler, the budget against a real
-     bill.
+   - Never yet met reality: a real reboot under Task Scheduler.
+     **Met on 2026-10-24/27:**
+     - the budget against a real bill ($0.0089, settled exactly);
+     - Cloudflare **streams** the answer word by word (his phone, on
+       mobile data, through the tunnel).
+   - **2026-10-27: informationverifier.com is LIVE** (§7 2026-10-23),
+     with the refreshed page (7d84246).
    The original framing, kept for the record — decisions first, then code:
    - **Where it runs, 24/7.** Options: a small cloud host (Render, Railway,
      Fly.io, or a ₹400–800/month VPS) with a persistent disk for SQLite and

@@ -236,6 +236,20 @@ the first year).
        both themes, desktop and 390 px phone; the 273 page tests pass.
        The pictures were sent to him; deploying waits on his OK (merge
        to main and push: the running app serves static/ from disk).
+       **LIVE 2026-10-27, with his yes:** cherry-picked to main as
+       7d84246. 1335 tests pass on that commit, and the live site shows
+       the new headline.
+     - **His phone test, on mobile data: the answer STREAMS word by
+       word through Cloudflare.** That was the one thing no document
+       had settled.
+     - The BotFather privacy-policy URL is set (his word: "Done").
+     - cloudflared update: **yes**. It is a winget install (2026.7.3,
+       with 2026.10.4 available), done before §5.
+     - He typed his Windows password into the chat. It is not written
+       anywhere and never used by Claude; he types it into
+       Register-ScheduledTask's own prompt in §5. Advised: it must be
+       the account password, not a PIN, and he could change it
+       afterwards.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
