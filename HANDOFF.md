@@ -179,6 +179,23 @@ the first year).
    - Organisation → Policy holds only encryption-key settings.
    - **He emailed Sarvam support on 2026-10-23.** Waiting on their
      answer.
+   - **Sarvam's answer, 2026-10-28:**
+     - Zero data retention for Model APIs is **turned on by their team**,
+       not on the dashboard. They need the org ID, the workspace ID
+       (Settings → Workspace → General), the Owner's email and the APIs.
+       This app uses **speech-to-text only** (`saaras:v3`,
+       /speech-to-text; app/providers/asr.py).
+     - **Do NOT put the "45 days" in the notice.** They will put in
+       writing exactly what is and is not stored, usage and billing
+       records included, and they offered to check our wording.
+     - Training: the Owner switches it off at Settings → Organisation →
+       General → Model training.
+     - Neither applies to data sent earlier. That needs a deletion
+       request to privacy@sarvam.ai, subject "Data Deletion Request".
+     - **When their written confirmation arrives:** set
+       `SARVAM_ZERO_RETENTION=true`, and possibly add "not used for
+       training" to `legal.sarvam_line()`. That is a code change with a
+       test, in both languages.
 2. **Anthropic:** a separate workspace with a monthly spend limit; its key
    goes in `.env` as `ANTHROPIC_API_KEY`.
    **DONE 2026-10-23.** Verified free: a models list with the new key
