@@ -164,6 +164,22 @@ copy $env:USERPROFILE\.cloudflared\<UUID>.json C:\Windows\System32\config\system
 ```
 
 In the copied `config.yml`, change `credentials-file:` to the new folder.
+The whole line must read exactly
+`credentials-file: C:\Windows\System32\config\systemprofile\.cloudflared\<UUID>.json`,
+with the label once. On 2026-10-28 a pasted line left it twice, and the
+service died at every start, logging no reason. So check the copy before
+installing anything:
+
+```powershell
+cloudflared --config="C:\Windows\System32\config\systemprofile\.cloudflared\config.yml" tunnel ingress validate
+```
+
+It must say **OK**. A YAML error names its line.
+
+If the service ever stops at once anyway, run its own command by hand in
+the admin window. The error that the service cannot show prints there:
+`& "<cloudflared.exe>" --config="…\systemprofile\.cloudflared\config.yml" tunnel run`.
+
 Then install the service, and tell it what to run. Installed without a
 token, the service starts cloudflared with no arguments, and that runs
 **no tunnel**. Cloudflare's own Windows page makes this registry change
