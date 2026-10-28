@@ -29,6 +29,18 @@
 - At $5 a day, October's worst case in the capped Anthropic workspace is
   about $26. His monthly limit (about $35) must stay above that.
 
+**2026-10-28, end of the day (Vinayak is out of tokens):** nothing is in flight.
+- The free review of this session's code was **stopped at his request**
+  (docs/research/2026-10-28/review-session.md, an outline only). Re-run it
+  only when he asks.
+- Item 30 (decline individualised advice, **before 12 Nov**) is not
+  started; the prompts were only read.
+- **The live site runs by itself:** the task and the cloudflared service;
+  www forwards to the main address.
+- **Next, in order:** Sarvam's written confirmation (he sent both
+  emails); the reboot test after 30 Oct; "revert" the caps around 3 Nov;
+  item 30; the review; YouTube Shorts and deno; then WhatsApp.
+
 **The 2026-10-18 session — IN FLIGHT (kept current as it moves):**
 - **Resume verified, free:**
   - git clean, `main` = `origin/main` at 97244ee;
