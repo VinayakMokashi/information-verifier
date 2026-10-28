@@ -37,9 +37,39 @@
   started; the prompts were only read.
 - **The live site runs by itself:** the task and the cloudflared service;
   www forwards to the main address.
-- **Next, in order:** Sarvam's written confirmation (he sent both
-  emails); the reboot test after 30 Oct; "revert" the caps around 3 Nov;
-  item 30; the review; YouTube Shorts and deno; then WhatsApp.
+- **THE TO-DO LIST, in order.** He says when his tokens are back; then
+  pick up here.
+  1. **Sarvam** (he sent both emails on 2026-10-28):
+     - confirm he switched Model training → Off;
+     - on their written confirmation: `SARVAM_ZERO_RETENTION=true`, plus
+       "not used for training" in `legal.sarvam_line()`, in English and
+       Hinglish, with a test;
+     - track the deletion request for earlier audio
+       (privacy@sarvam.ai).
+  2. **The reboot test (go-live §5d) after 2026-10-30**, when his update
+     pause ends: restart, don't sign in, and check from the phone that
+     the site loads and the bot replies.
+  3. **"Revert" the raised caps around 2026-11-03**: remove the 3 lines
+     from `.env`, then restart via the stop file + Start-ScheduledTask.
+  4. **Item 30 before 2026-11-12:** decline individualised medical,
+     legal and financial advice, while still checking the general
+     claim. A prompt change, so one paid check (~$0.05). ASK first.
+  5. **The free review** of this session's code (82b0708..7d84246).
+     Stopped once at his request; re-run when he asks.
+  6. **Free probe:** do YouTube Shorts links resolve without deno? It
+     decides the deno yes/no.
+  7. **Small items:**
+     - silence the harmless asyncio WinError 10054 startup traceback;
+     - he changes his Windows password (it appeared in the chat), and
+       then re-registers the scheduled task with the new one;
+     - the HANDOFF §1b resume prompt is refreshed at the session's
+       end.
+  8. **WhatsApp (B):** his SIM, Udyam and Meta accounts first. Claude
+     re-checks Meta's pricing and terms (§4.7, the AI-provider risk)
+     before building.
+  9. **Then §11 C,** in HANDOFF §6's order: the eval set 22, the
+     search A/B 21, Hindi lookups 20, 23, 25 and 27, then the rest.
+  10. **At the VM move:** disk encryption (§11 29, his decision).
 
 **The 2026-10-18 session — IN FLIGHT (kept current as it moves):**
 - **Resume verified, free:**
