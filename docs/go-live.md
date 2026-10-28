@@ -99,6 +99,17 @@ Cloudflare's docs, re-read on 2026-10-24, give these names:
   - **Hostname management**: the .com;
   - **Widget mode**: **Managed**;
   - then **Create**, and copy the **Sitekey** and **Secret key**.
+- **www → the main address** (done 2026-10-28): a **Redirect Rule**, so
+  nothing on this PC changes.
+  - DNS → Add record: `CNAME`, Name `www`, Target the .com, **Proxied**.
+  - Rules → Overview → Create rule → Redirect Rule:
+    - Wildcard pattern, Request URL `http*://www.<domain>/*`;
+    - Target URL `https://<domain>/${2}`. **`${2}`, not `${1}`:** the
+      first wildcard is the "s" of `http*`. With `${1}`, every page
+      went to `/s`, as measured.
+    - status 301, Preserve query string ticked.
+  - Check: `www.<domain>/privacy` → 301 → `<domain>/privacy`, 200; www
+    `/dashboard` lands on the 404.
 
 ## 3. The tunnel (cloudflared is already installed)
 
