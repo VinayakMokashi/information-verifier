@@ -265,6 +265,26 @@ the first year).
        closes the start.cmd windows first, and types his account
        password into the prompt himself. Then §5d, the reboot test,
        after the update pause ends (2026-10-30).
+   - **go-live §5c DONE 2026-10-28:** the task **"Information
+     Verifier"**.
+     - It runs as VINAYAK45\Vinayak Mokashi, logon Password, run level
+       Limited, with a boot trigger, no time limit, and restarts every
+       minute.
+     - Started 09:23 IST: the supervisor log shows the app and the bot
+       started; /ready is ready (database, keys, ffmpeg); the site is
+       200 from outside.
+     - The bot is polling; today's ledger backup is in OneDrive; there
+       is no housekeeping failure.
+     - One asyncio `ConnectionResetError [WinError 10054]` in
+       `_call_connection_lost` came at startup. It is known Proactor
+       noise when a client drops its socket (likely the supervisor's
+       /health probe), harmless. Silencing it is a possible small fix.
+     - **If he ever changes his Windows password, the task must be
+       re-registered with the new one**, or it cannot start at boot.
+     - **start.cmd is no longer used**: the task runs everything. To
+       stop it in order: `New-Item data\serve_forever.stop`.
+     - **Only §5d is left:** restart without signing in, after
+       2026-10-30.
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
