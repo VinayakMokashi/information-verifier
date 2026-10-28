@@ -250,6 +250,21 @@ the first year).
        Register-ScheduledTask's own prompt in §5. Advised: it must be
        the account password, not a PIN, and he could change it
        afterwards.
+   - **go-live §5a and §5b DONE 2026-10-28:**
+     - cloudflared is updated to 2026.10.4 (winget).
+     - The **Cloudflared service runs the tunnel**, with the ImagePath
+       fix.
+     - The first start died nine times, because the copied config's
+       credentials-file line carried its label twice. That was seen by
+       running the service's command by hand; go-live.md now has a
+       validate step.
+     - After the fix: the service is Running, the site 200,
+       /dashboard 404, and exactly one connector, the service's. His
+       manual tunnel window is closed.
+     - **Next: §5c**, the Task Scheduler task for serve_forever. He
+       closes the start.cmd windows first, and types his account
+       password into the prompt himself. Then §5d, the reboot test,
+       after the update pause ends (2026-10-30).
 3. **`OWNER_CHAT_ID=`** his Telegram chat id (send `/id` to the bot), so
    restarts, the budget and failures reach his phone.
    **DONE 2026-10-24: the first app start since 2026-10-12** (start.cmd,
