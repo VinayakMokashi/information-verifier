@@ -29,6 +29,28 @@
 - At $5 a day, October's worst case in the capped Anthropic workspace is
   about $26. His monthly limit (about $35) must stay above that.
 
+**2026-11-10, he is back:**
+- **Go-live §5d PASSED in practice.** Windows Update restarted the PC on
+  2026-10-31 at 01:36, and the task brought the app and the bot back by
+  itself.
+- **Live logs read** (docs/research/2026-11-10/live-logs.md):
+  - L-1: scanners made the static-file server return 500 on Windows.
+    **FIXED in b9e44b6 (1345 tests), but not live until the app
+    restarts.**
+  - L-2: the PC lost its internet for about 27 h since 10-30; this
+    PC's Wi-Fi, "NIC compliance". It is his to fix (Ethernet, the
+    adapter's power setting); an outside uptime monitor is suggested.
+  - L-3: the known Proactor noise.
+- **IN FLIGHT: the review agent** on 82b0708..7d84246. It writes as it
+  goes to docs/research/2026-10-28/review-session.md; if it says "in
+  progress" after this session, it died.
+- **Waiting on him:**
+  - the caps revert (OVERDUE; it still reads $5 a day, 200);
+  - item 30 before 2026-11-12, one paid check, ASK;
+  - the Wi-Fi.
+- One restart deploys both the L-1 fix and the revert: the stop
+  file, then Start-ScheduledTask.
+
 **2026-10-28, end of the day (Vinayak is out of tokens):** nothing is in flight.
 - The free review of this session's code was **stopped at his request**
   (docs/research/2026-10-28/review-session.md, an outline only). Re-run it
