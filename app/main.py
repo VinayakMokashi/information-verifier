@@ -526,6 +526,20 @@ async def ready() -> JSONResponse:
                         status_code=200 if ok else 503)
 
 
+class _StaticFiles(StaticFiles):
+    """A name that cannot be a file is not found. SEEN LIVE on 2026-11-03:
+    scanners asked for /*, /*/[id] and the like; on Windows `* < > | "`
+    cannot be in a file name, os.stat raised WinError 123, and Starlette's
+    lookup, which catches only "not found", turned each probe into a 500
+    and a traceback (docs/research/2026-11-10/live-logs.md, L-1)."""
+
+    def lookup_path(self, path):
+        try:
+            return super().lookup_path(path)
+        except (OSError, ValueError):       # ValueError: an embedded NUL
+            return "", None
+
+
 # Mounted LAST so the API routes above always win; "/" then serves the
 # mobile-first demo page (static/index.html) with no Node/build step.
-app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+app.mount("/", _StaticFiles(directory=_STATIC_DIR, html=True), name="static")
