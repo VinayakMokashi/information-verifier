@@ -41,9 +41,18 @@
     PC's Wi-Fi, "NIC compliance". It is his to fix (Ethernet, the
     adapter's power setting); an outside uptime monitor is suggested.
   - L-3: the known Proactor noise.
-- **IN FLIGHT: the review agent** on 82b0708..7d84246. It writes as it
-  goes to docs/research/2026-10-28/review-session.md; if it says "in
-  progress" after this session, it died.
+- **The review of 82b0708..7d84246 is COMPLETE**
+  (docs/research/2026-10-28/review-session.md): 5 low findings, none
+  high or medium; 10 mutants, all caught.
+  - Live on the page: H-2 (screen readers read the CSS arrows) and H-5
+    (the light theme's disclaimer is 2.99:1 contrast).
+  - Rare: H-1 (a dead run's pid now taken by a live process keeps its
+    voice note).
+  - Operator tools: H-3 (forget.py's "clean" after a mistyped id) and
+    H-4 (a full copy filed in backups/ is labelled a backup).
+  - Plus a note: the answer card's green edge sits on a debunked
+    claim too.
+  - To fix, each failing-first.
 - **Waiting on him:**
   - the caps revert (OVERDUE; it still reads $5 a day, 200);
   - item 30 before 2026-11-12, one paid check, ASK;
