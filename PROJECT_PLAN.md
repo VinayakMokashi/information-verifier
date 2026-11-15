@@ -2477,6 +2477,11 @@ C. **The remaining to-dos** — items 4–32 below. Their value order is in
    triage should also decline the individual part and answer the general
    claim. A prompt change changes the cache fingerprint and needs one paid
    check to verify, so ASK first.
+   **DONE 2026-11-15 (c061d61): the rule is in the shared prompt rules,
+   not the triage, because the triage must never turn a real claim away.
+   One paid check ($0.0627) checked the hoax and declined the dose
+   question; docs/research/2026-11-15/item30-check.md. Legal and
+   financial wording is not measured.**
 31. **A "report this answer" control** — required only if the app ever
    goes on the Play Store (Play's AI-content policy; pwa-app.md F9).
    Deferred with the Play route itself.

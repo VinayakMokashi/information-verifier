@@ -29,6 +29,26 @@
 - At $5 a day, October's worst case in the capped Anthropic workspace is
   about $26. His monthly limit (about $35) must stay above that.
 
+**2026-11-15:**
+- **Item 30 DONE, NOT LIVE until the restart:** c061d61 (1346 tests,
+  exit 0 in a clean worktree). He approved one paid check: **$0.0627**,
+  one pass, 95% fact-checkers. It checked the P-500 hoax as before and
+  declined the dose question, sending him to a doctor
+  (docs/research/2026-11-15/item30-check.md). The policy took effect on
+  12 Nov, so the restart is due now.
+- **Wi-Fi** (docs/research/2026-11-15/wifi-outages.md): about 20 h more
+  down since 10 Nov, the longest 9 h (11-11 16:05 → 11-12 01:03).
+  Windows said "connected" all along, and every long outage ended when
+  the driver remade the link. Realtek RTL8852AE, driver from 2022-08-26,
+  power-saving box ticked, **no Ethernet port**. Sent him the steps;
+  offered a free self-heal watchdog (remake the link after N minutes).
+- **Waiting on him:** the caps revert in `.env`, and permission to
+  restart (deploys L-1 and item 30); the Wi-Fi steps; whether to build
+  the watchdog.
+- Ledger 2026-11-15: $3.4995 total, 33 checks and 7 experiments, before
+  this check. Busiest day 10-27, 11 checks, $0.57. The raised caps were
+  never approached.
+
 **2026-11-10, he is back:**
 - **Go-live §5d PASSED in practice.** Windows Update restarted the PC on
   2026-10-31 at 01:36, and the task brought the app and the bot back by
@@ -82,9 +102,8 @@
      the site loads and the bot replies.
   3. **"Revert" the raised caps around 2026-11-03**: remove the 3 lines
      from `.env`, then restart via the stop file + Start-ScheduledTask.
-  4. **Item 30 before 2026-11-12:** decline individualised medical,
-     legal and financial advice, while still checking the general
-     claim. A prompt change, so one paid check (~$0.05). ASK first.
+  4. ~~**Item 30 before 2026-11-12**~~ DONE 2026-11-15 (c061d61, one
+     paid check $0.0627); live at the next restart.
   5. **The free review** of this session's code (82b0708..7d84246).
      Stopped once at his request; re-run when he asks.
   6. **Free probe:** do YouTube Shorts links resolve without deno? It
