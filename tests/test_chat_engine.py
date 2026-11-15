@@ -969,6 +969,23 @@ def test_the_language_rule_names_english_and_forbids_guessing_the_reader():
         assert "Never pick the language from who you think the reader is" in prompt
 
 
+def test_every_prompt_declines_advice_on_the_senders_own_case():
+    """Anthropic's Usage Policy from 12 Nov 2026 (PROJECT_PLAN §11 item 30):
+    medical, legal and financial recommendations for an individual need a
+    qualified person's review; general information does not. "Is this
+    forwarded health claim true?" is checked as before; "should I stop my
+    medicine?" is sent to a doctor. In the shared rules, so the no-tool
+    shortcut says it too."""
+    from app.engine.chat_prompts import (
+        CHAT_SYSTEM_PRIOR, CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB)
+
+    for prompt in (CHAT_SYSTEM_TRUSTED, CHAT_SYSTEM_WEB, CHAT_SYSTEM_PRIOR):
+        assert "their OWN case" in prompt
+        assert "Never advise on that" in prompt
+        assert "Check any general claim in the message as usual" in prompt
+        assert "a doctor, a lawyer or a registered financial adviser" in prompt
+
+
 def test_without_a_clear_hint_the_general_instruction_is_last():
     """When code cannot tell, the model's own judgment is asked for — last."""
     content = C._render_input("El agua caliente mata el virus del covid", None, [])
