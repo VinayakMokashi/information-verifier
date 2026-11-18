@@ -41,10 +41,17 @@ _TOO_LARGE_UPLOAD = b'{"detail":"File too large. Please send a shorter clip."}'
 _TOO_LARGE_MESSAGE = (b'{"detail":"That message is too long. '
                       b'Send the part you want checked."}')
 
-# The only routes that take a file. Decided by PATH, which the server owns:
-# Content-Type is the client's word, and a JSON route must never get the
-# upload allowance by claiming to be multipart.
-_UPLOAD_PATHS = frozenset({"/api/v1/verify/image", "/api/v1/verify/media"})
+# The only routes that take a file, and what each says past the cap. Decided
+# by PATH, which the server owns: Content-Type is the client's word, and a
+# JSON route must never get the upload allowance by claiming to be
+# multipart. Since several pictures go in one check (2026-11-18), they can
+# cross the cap together, where "a shorter clip" means nothing.
+_UPLOAD_REFUSALS = {
+    "/api/v1/verify/image": (b'{"detail":"Those pictures are too large together. '
+                             b'Send fewer at a time, or screenshots of them."}'),
+    "/api/v1/verify/media": _TOO_LARGE_UPLOAD,
+}
+_UPLOAD_PATHS = frozenset(_UPLOAD_REFUSALS)
 
 
 async def _send_413(send, body: bytes = _TOO_LARGE_UPLOAD) -> None:
@@ -81,9 +88,10 @@ class LimitUploadSize:
         # The ROUTE path: with a root_path, uvicorn puts the prefix in
         # scope["path"], and every real screenshot was refused as "too long"
         # (review R4, reproduced on real uvicorn).
-        upload = get_route_path(scope) in _UPLOAD_PATHS
+        path = get_route_path(scope)
+        upload = path in _UPLOAD_PATHS
         limit = settings.max_media_bytes if upload else settings.max_json_bytes
-        refusal = _TOO_LARGE_UPLOAD if upload else _TOO_LARGE_MESSAGE
+        refusal = _UPLOAD_REFUSALS.get(path, _TOO_LARGE_MESSAGE)
         for name, value in scope.get("headers") or []:
             if name == b"content-length" and value.isdigit() and int(value) > limit:
                 return await _send_413(send, refusal)

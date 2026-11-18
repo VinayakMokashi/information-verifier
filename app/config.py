@@ -170,7 +170,9 @@ class Settings(BaseSettings):
     # (limits.reserve). The reservations sit above the MEASURED maxima: text
     # $0.17 (two passes, 295 s), a reel $0.26, OCR a few cents.
     daily_budget_usd: float = 1.0
-    budget_reserve_usd: dict[str, float] = {"text": 0.20, "image": 0.25,
+    # "image" 0.25 -> 0.30 on 2026-11-18: one check now reads up to
+    # max_images_per_check images (~$0.09 at most; tests/test_several_images).
+    budget_reserve_usd: dict[str, float] = {"text": 0.20, "image": 0.30,
                                             "media": 0.30, "link": 0.30}
     # "Gets cheaper as it runs low" (the same decision): with less than this
     # share of the day's budget left, no open-web pass (reserving half)...

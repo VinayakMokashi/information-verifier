@@ -51,6 +51,9 @@ _ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 # technical detail goes to the server log; the person gets what to do next.
 _MSG_NOT_AN_IMAGE = ("That doesn't look like a picture. Send a screenshot or "
                      "a photo (PNG, JPG, WEBP or GIF).")
+_MSG_IMAGE_TOO_LARGE = (f"That picture is larger than "
+                        f"{settings.max_image_bytes // (1024 * 1024)} MB. Send a "
+                        "screenshot of it instead.")
 _MSG_NOT_MEDIA = ("That doesn't look like audio or video. Send a voice note "
                   "or a video file.")
 _MSG_BAD_AUDIO = ("The audio in that file couldn't be read. Try sending it "
@@ -508,19 +511,33 @@ async def verify_text(
 @router.post("/verify/image", response_model=JobAccepted, status_code=202)
 async def verify_image(
     background: BackgroundTasks, request: Request, response: Response,
-    file: UploadFile = File(...), language: str | None = Form(None, max_length=40),
+    file: list[UploadFile] = File(...), language: str | None = Form(None, max_length=40),
+    note: str | None = Form(None, max_length=settings.max_input_chars),
 ) -> JobAccepted:
+    """One image or several (2026-11-18: "I cant post multiple images?"),
+    read in ONE vision call. `note` is what the person wrote with them — a
+    Telegram photo's caption — and is checked with what they say."""
     async with _quota(request, "image", response=response) as spend:
-        if file.content_type not in _ALLOWED_IMAGE_TYPES:
-            raise HTTPException(415, _MSG_NOT_AN_IMAGE)
-        image_bytes = await file.read()
+        # Everything that can refuse comes before the first paid call, so a
+        # refusal hands the slot back: the count, every type, every size.
+        if len(file) > settings.max_images_per_check:
+            raise HTTPException(413, f"Send up to {settings.max_images_per_check} "
+                                     "images at a time.")
+        images = []
+        for upload in file:
+            if upload.content_type not in _ALLOWED_IMAGE_TYPES:
+                raise HTTPException(415, _MSG_NOT_AN_IMAGE)
+            data = await upload.read()
+            if len(data) > settings.max_image_bytes:
+                raise HTTPException(413, _MSG_IMAGE_TOO_LARGE)
+            images.append((data, upload.content_type))
         # OCR is quick; do it inline so extracted text is captured even if the
         # check itself runs in the background.
         spend.begin()          # everything past here has been paid for
         meter = UsageMeter()   # starts at the first paid call, so the report's
         with meter.activate():  # the bill includes route-level OCR, not just the check
             try:
-                extracted = await ocr_images([(image_bytes, file.content_type)])
+                extracted = await ocr_images(images)
             except Exception as exc:
                 reason = paused_reason(exc)
                 if not reason:
@@ -534,9 +551,11 @@ async def verify_image(
         if not extracted:
             raise HTTPException(422, "No text or visual claim could be read from the image.")
 
-        answer, stream = await _new_job(extracted)
-        background.add_task(_run_check_job, answer.job_id, extracted, _repo, stream,
-                            quota=spend, derived_text=extracted, meter=meter,
+        words = (note or "").strip()
+        checked = f"{words}\n\n{extracted}" if words else extracted
+        answer, stream = await _new_job(checked)
+        background.add_task(_run_check_job, answer.job_id, checked, _repo, stream,
+                            quota=spend, derived_text=checked, meter=meter,
                             kind="image", language=language)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 

@@ -327,13 +327,13 @@
   <div class="empty" id="empty">
     <p class="eyebrow">Free · any language · no sign-up</p>
     <h2>Got a forward? <em>Check it before you share it.</em></h2>
-    <p class="lead">Send me a forwarded message, a screenshot, a voice note, or a
-       link to a reel — in any language. I'll check it against fact-checkers and
+    <p class="lead">Send me a forwarded message, screenshots, a voice note, or a
+       link to an Instagram, YouTube or Facebook post — in any language. I'll check it against fact-checkers and
        official sources, and tell you plainly what I find. When nobody reliable
        has covered something, I'll say so instead of guessing.</p>
     <ol class="steps">
       <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
-        <div><b>Send it</b><span>Text, a screenshot, a voice note or a reel link.</span></div></li>
+        <div><b>Send it</b><span>Text, screenshots, a voice note or a post link.</span></div></li>
       <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
         <div><b>I check the sources</b><span>Fact-checkers like Alt News, BOOM and PIB Fact Check; official sites like the WHO.</span></div></li>
       <li><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg></span>
@@ -363,11 +363,11 @@
              aria-label="Answer in another language">
     </div>
     <textarea id="text" rows="1" dir="auto"
-              placeholder="Paste a message, a claim, or a reel link…"></textarea>
+              placeholder="Paste a message, a claim, or a post link…"></textarea>
     <div class="tools">
-      <button class="icon" id="pickImage" type="button" title="Screenshot or photo" aria-label="Screenshot or photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg></button>
+      <button class="icon" id="pickImage" type="button" title="Screenshots or photos" aria-label="Screenshots or photos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg></button>
       <button class="icon" id="pickMedia" type="button" title="Voice note or video" aria-label="Voice note or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
-      <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif">
+      <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
       <input type="file" id="media" accept="audio/*,video/*,.ogg,.opus">
       <button class="send" id="check">Check</button>
     </div>
@@ -973,21 +973,26 @@ $("check").addEventListener("click", () => {
   }), text);
 });
 
-function wireFilePicker(buttonId, inputId, endpoint, label) {
+// Several screenshots go in ONE check (2026-11-18: "I cant post multiple
+// images?"). The server says how many it reads at once, so the page does not
+// keep its own number to drift.
+function wireFilePicker(buttonId, inputId, endpoint, label, plural) {
   $(buttonId).addEventListener("click", () => $(inputId).click());
   $(inputId).addEventListener("change", () => {
-    const f = $(inputId).files[0];
-    if (!f) return;
+    const files = [...$(inputId).files];
+    if (!files.length) return;
     const fd = new FormData();
-    fd.append("file", f);
+    for (const f of files) fd.append("file", f);
     fd.append("language", replyLanguage);
     $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
+    const shown = files.length === 1 ? `${label}: ${files[0].name}`
+                                     : `${plural}: ${files.length}`;
     submit((human) => fetch(endpoint, { method: "POST", headers: human, body: fd }),
-           `${label}: ${f.name}`);
+           shown);
   });
 }
-wireFilePicker("pickImage", "image", "api/v1/verify/image", "📷 Image");
-wireFilePicker("pickMedia", "media", "api/v1/verify/media", "🎤 Voice / video");
+wireFilePicker("pickImage", "image", "api/v1/verify/image", "📷 Image", "📷 Images");
+wireFilePicker("pickMedia", "media", "api/v1/verify/media", "🎤 Voice / video", "🎤 Files");
 </script>
 </body>
 </html>

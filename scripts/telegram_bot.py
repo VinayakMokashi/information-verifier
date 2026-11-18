@@ -95,9 +95,9 @@ HELP = (
     "🔎 <b>Information Verifier</b>\n"
     "Bhejo:\n"
     "• koi bhi forwarded message (text) — kisi bhi bhasha mein\n"
-    "• Instagram Reel / YouTube Shorts / Facebook video ka link\n"
+    "• Instagram post ya Reel / YouTube Shorts / Facebook video ka link\n"
     "• voice note ya video\n"
-    "• screenshot / photo\n\n"
+    "• screenshots / photos — ek saath kai bhi (album), caption ke saath\n\n"
     "Main fact-checkers (AltNews, BOOM, PIB, Factly, Snopes, Full Fact…) aur "
     "official sources (WHO, NASA, NIH, government sites…) se check karke "
     "jawab dunga — aapki hi bhasha mein. Sirf India ya politics nahi: "
@@ -244,6 +244,10 @@ def classify_message(msg: dict) -> tuple[str, str]:
             if (msg[key].get("file_size") or 0) > _TG_DOWNLOAD_LIMIT:
                 return "too_big", ""
             return "media", msg[key].get("file_id", "")
+    if msg.get("_album"):
+        # An album AlbumCollector gathered into one message (2026-11-18): its
+        # photos' file ids, space-separated — Telegram's ids never hold one.
+        return "image", " ".join(msg["_album"])
     if msg.get("photo"):
         # Telegram sends multiple sizes; the last is the largest.
         return "image", msg["photo"][-1].get("file_id", "")
@@ -568,9 +572,22 @@ class AppClient:
     async def submit_file(self, endpoint: str, filename: str, content: bytes,
                           content_type: str,
                           subject: str | None = None) -> tuple[str | None, str]:
+        return await self._post_files(endpoint, [(filename, content, content_type)],
+                                      None, subject)
+
+    async def submit_images(self, files: list[tuple[str, bytes, str]], note: str = "",
+                            subject: str | None = None) -> tuple[str | None, str]:
+        """One photo or an album's, in ONE check; `note` is their caption."""
+        return await self._post_files("image", files, {"note": note} if note else None,
+                                      subject)
+
+    async def _post_files(self, endpoint: str, files: list[tuple[str, bytes, str]],
+                          data: dict | None,
+                          subject: str | None) -> tuple[str | None, str]:
         resp = await self._http.post(
             f"{self._base}/verify/{endpoint}",
-            files={"file": (filename, content, content_type)},
+            files=[("file", f) for f in files],
+            data=data,
             headers=self._for(subject),
             timeout=_SUBMIT_TIMEOUT,
         )
@@ -720,19 +737,25 @@ class TelegramClient:
 
 
 async def _submit(kind: str, payload: str, app: AppClient,
-                  tg: TelegramClient, subject: str | None = None) -> tuple[str | None, str]:
+                  tg: TelegramClient, subject: str | None = None,
+                  note: str = "") -> tuple[str | None, str]:
     """Send one message's content to the API, for `subject` (the sender).
+    `note` is a photo's caption, checked with what the photos say.
     -> (job_id, "") or (None, why)."""
     if kind == "text":
         return await app.submit_json("text", {"text": payload}, subject=subject)
     if kind == "link":
         return await app.submit_json("link", {"url": payload}, subject=subject)
+    if kind == "image":
+        photos = []
+        for file_id in payload.split():          # one photo, or an album's
+            content, path = await tg.file_bytes(file_id)
+            name = os.path.basename(path) or "photo.jpg"
+            ext = os.path.splitext(name)[1].lower()
+            photos.append((name, content, "image/png" if ext == ".png" else "image/jpeg"))
+        return await app.submit_images(photos, note=note, subject=subject)
     content, path = await tg.file_bytes(payload)
     name = os.path.basename(path) or "media.bin"
-    if kind == "image":
-        ext = os.path.splitext(name)[1].lower()
-        ctype = "image/png" if ext == ".png" else "image/jpeg"
-        return await app.submit_file("image", name, content, ctype, subject=subject)
     return await app.submit_file("media", name, content, "audio/ogg", subject=subject)
 
 
@@ -743,6 +766,8 @@ _SMALLTALK_REPLY = ("🙂 Kuch check karwana ho to woh message, link, voice note
 _TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi file "
                   "download nahi kar sakte. Chhota clip (5 minute tak) bhejiye, "
                   "ya video ka link.")
+_ALBUM_CUT = ("ℹ️ Ek baar mein {cap} photos tak check hoti hain — aapki {total} "
+              "mein se pehli {cap} check kar raha hoon.")
 _UNOPENABLE_LINK_REPLY = (
     "🔗 Is website ka link main khol nahi sakta. Article ya post ka text yahan "
     "paste kariye, ya uska screenshot bhejiye. ("
@@ -1019,9 +1044,15 @@ async def handle_message(
             await tg.send(chat_id, _UNOPENABLE_LINK_REPLY)
             return
 
+        if kind == "image" and len(payload.split()) > settings.max_images_per_check:
+            # Telegram allows ten in an album; the API reads this many at once.
+            total, cap = len(payload.split()), settings.max_images_per_check
+            payload = " ".join(payload.split()[:cap])
+            await tg.send(chat_id, _ALBUM_CUT.format(cap=cap, total=total))
         await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")
         try:
-            job_id, err = await _submit(kind, payload, app, tg, subject_of_message(msg))
+            job_id, err = await _submit(kind, payload, app, tg, subject_of_message(msg),
+                                        note=(msg.get("caption") or "").strip())
         except Exception as exc:  # noqa: BLE001 — a chat must always get an answer
             print(f"[bot] submit failed: {type(exc).__name__}: {exc}")
             await tg.send(chat_id, "😕 Kuch gadbad ho gayi. Thodi der baad try karo.")
@@ -1224,6 +1255,74 @@ class Dispatcher:
             await asyncio.sleep(0)
 
 
+class AlbumCollector:
+    """An album's photos -> ONE message for the Dispatcher (2026-11-18).
+
+    Telegram sends an album as one message per photo, sharing a
+    media_group_id, within about a second and sometimes across two polls.
+    Dispatched one by one, the first photo started a check and every other
+    was told "Yeh naya message check nahi hua" ("I cant post multiple
+    images?"). Gathered here, BEFORE the Dispatcher, the album is one
+    message to everything that decides about money — the per-chat lock,
+    busy_on_arrival, the API's limits — exactly like one photo.
+
+    The photos wait `wait_s` after the latest one, then go. A restart in
+    that window loses the album, as the bot already prefers: the offset is
+    confirmed before any work, so a lost message is resent by the person,
+    never silently re-billed.
+    """
+
+    _MAX_ALBUMS = 256        # gathering at once; past it the oldest goes now
+
+    def __init__(self, dispatch, wait_s: float = 2.0):
+        self._dispatch = dispatch
+        self._wait_s = wait_s
+        self._albums: dict[tuple[int, str], dict] = {}
+
+    def add(self, message: dict) -> bool:
+        """Take an album's photo (True), or leave the message alone (False)."""
+        group = message.get("media_group_id")
+        chat_id = (message.get("chat") or {}).get("id")
+        if not group or chat_id is None or not message.get("photo"):
+            return False
+        key = (chat_id, str(group))
+        album = self._albums.get(key)
+        if album is None:
+            if len(self._albums) >= self._MAX_ALBUMS:
+                self._flush(next(iter(self._albums)))
+            album = self._albums[key] = {"first": message, "ids": [],
+                                         "caption": "", "timer": None}
+        album["ids"].append(message["photo"][-1].get("file_id", ""))
+        caption = (message.get("caption") or "").strip()
+        if caption and not album["caption"]:
+            album["caption"] = caption          # Telegram puts it on one photo
+        if album["timer"] is not None:
+            album["timer"].cancel()
+        album["timer"] = asyncio.get_running_loop().call_later(
+            self._wait_s, self._flush, key)
+        return True
+
+    def _flush(self, key: tuple[int, str]) -> None:
+        album = self._albums.pop(key, None)
+        if album is None:
+            return
+        if album["timer"] is not None:
+            album["timer"].cancel()
+        first = {k: v for k, v in album["first"].items() if k != "photo"}
+        self._dispatch({**first, "_album": album["ids"], "caption": album["caption"]})
+
+
+def deliver(updates: list[dict], dispatch, albums: AlbumCollector) -> None:
+    """One poll's updates: an album's photos to the collector, the rest on."""
+    for update in updates:
+        message = update.get("message") or update.get("channel_post")
+        if message and not albums.add(message):
+            # Concurrent: one chat's long check no longer blocks the others.
+            # Spend stays bounded by the API's daily cap and the per-chat
+            # lock (see Dispatcher / handle_message).
+            dispatch(message)
+
+
 def _utf8_console() -> None:
     """A long-running bot must not die of a console encoding error.
 
@@ -1325,6 +1424,7 @@ async def main() -> None:
         print(">> Bot polling. Ctrl+C to stop. Checks cost real money.")
         offset = 0
         dispatcher = Dispatcher(app, tg, pending_path=pending_path())
+        albums = AlbumCollector(dispatcher.dispatch)
         if dispatcher.pending:
             print(f">> Resuming {len(dispatcher.pending)} check(s) a previous run "
                   "was waiting for.")
@@ -1352,13 +1452,7 @@ async def main() -> None:
             except (httpx.HTTPError, asyncio.TimeoutError) as exc:
                 print(f"[bot] offset confirm failed: {type(exc).__name__}")
 
-            for update in updates:
-                message = update.get("message") or update.get("channel_post")
-                if message:
-                    # Concurrent: one chat's long check no longer blocks the
-                    # others. Spend stays bounded by the API's daily cap and
-                    # the per-chat lock (see Dispatcher / handle_message).
-                    dispatcher.dispatch(message)
+            deliver(updates, dispatcher.dispatch, albums)
 
 
 if __name__ == "__main__":

@@ -334,6 +334,11 @@ class StubApp:
         self.subjects.append(subject)
         return "job123", ""
 
+    async def submit_images(self, files, note="", subject=None):
+        self.submissions.append(("image", [name for name, _, _ in files], note))
+        self.subjects.append(subject)
+        return "job123", ""
+
     async def wait_for_report(self, job_id, attempts=None):
         return self.report
 
@@ -706,6 +711,111 @@ def test_a_link_nobody_can_open_mid_check_gets_its_own_reply_not_not_checked():
     kinds in _NEVER_CHECKED)."""
     assert "unopenable_link" in B._NEVER_CHECKED
     assert "unopenable_link" not in B._SUBMITS
+
+
+# -- albums and captions (2026-11-18) ---------------------------------------------
+# A friend: "I cant post multiple images?" Telegram sends an album as one
+# message per photo; the first started a check and every other photo was
+# told "Yeh naya message check nahi hua". A photo's caption was dropped.
+
+class _NamedTG(StubTG):
+    async def file_bytes(self, file_id):
+        return b"\xff\xd8", f"photos/{file_id}.jpg"
+
+
+def _album(chat, ids, caption=""):
+    return {"chat": {"id": chat}, "_album": list(ids), "caption": caption}
+
+
+def test_an_album_is_classified_as_one_image_check_of_every_photo():
+    assert B.classify_message(_album(7, ["a", "b", "c"])) == ("image", "a b c")
+
+
+def test_an_album_is_one_check_of_all_its_photos_with_its_caption():
+    app, tg = StubApp(), _NamedTG()
+    _handle(_album(7, ["a", "b", "c"], caption="Yeh kal ki baadh hai"), app, tg)
+    assert app.submissions == [("image", ["a.jpg", "b.jpg", "c.jpg"],
+                                "Yeh kal ki baadh hai")]
+    assert "This is false." in tg.sent[-1][1]
+
+
+def test_a_single_photos_caption_goes_with_it():
+    app, tg = StubApp(), _NamedTG()
+    _handle({"chat": {"id": 7}, "photo": [{"file_id": "s"}, {"file_id": "big"}],
+             "caption": "Kya ye sach hai?"}, app, tg)
+    assert app.submissions == [("image", ["big.jpg"], "Kya ye sach hai?")]
+
+
+def test_an_album_past_the_cap_sends_the_first_photos_and_says_so(monkeypatch):
+    monkeypatch.setattr(settings, "max_images_per_check", 2)
+    app, tg = StubApp(), _NamedTG()
+    _handle(_album(7, ["a", "b", "c", "d"]), app, tg)
+    assert app.submissions == [("image", ["a.jpg", "b.jpg"], "")]
+    assert any("2" in t and "4" in t for _, t in tg.sent[:2]), tg.sent
+
+
+async def _until_true(condition, turns=200):
+    for _ in range(turns):
+        if condition():
+            return
+        await asyncio.sleep(0.02)
+
+
+def _photo(chat, file_id, group=None, caption=None):
+    msg = {"chat": {"id": chat}, "photo": [{"file_id": f"{file_id}-small"},
+                                           {"file_id": file_id}]}
+    if group:
+        msg["media_group_id"] = group
+    if caption:
+        msg["caption"] = caption
+    return msg
+
+
+def test_an_albums_photos_reach_the_dispatcher_as_one_message():
+    async def scenario():
+        seen = []
+        albums = B.AlbumCollector(seen.append, wait_s=0.05)
+        B.deliver([{"message": _photo(7, "a", "G1")},
+                   {"message": _photo(7, "b", "G1", caption="Sach hai?")}], seen.append, albums)
+        B.deliver([{"message": _photo(7, "c", "G1")}], seen.append, albums)  # next poll
+        await _until_true(lambda: seen)
+        await asyncio.sleep(0.1)                     # nothing more may follow
+        return seen
+
+    seen = asyncio.run(scenario())
+    assert len(seen) == 1
+    assert seen[0]["_album"] == ["a", "b", "c"]
+    assert seen[0]["caption"] == "Sach hai?"
+    assert seen[0]["chat"] == {"id": 7}
+
+
+def test_anything_but_an_albums_photo_goes_straight_through():
+    async def scenario():
+        seen = []
+        albums = B.AlbumCollector(seen.append, wait_s=0.05)
+        B.deliver([{"message": _photo(7, "lone")},                       # no group
+                   {"message": {"chat": {"id": 7}, "text": "hi"}},
+                   {"message": {"chat": {"id": 7}, "media_group_id": "G2",
+                                "video": {"file_id": "v"}}}], seen.append, albums)
+        return list(seen)
+
+    seen = asyncio.run(scenario())
+    assert [m.get("text") or (m.get("photo") or [{}])[-1].get("file_id")
+            or m["video"]["file_id"] for m in seen] == ["lone", "hi", "v"]
+
+
+def test_two_chats_albums_stay_apart():
+    async def scenario():
+        seen = []
+        albums = B.AlbumCollector(seen.append, wait_s=0.05)
+        B.deliver([{"message": _photo(7, "a", "G")}, {"message": _photo(8, "x", "G")},
+                   {"message": _photo(7, "b", "G")}], seen.append, albums)
+        await _until_true(lambda: len(seen) == 2)
+        return seen
+
+    seen = asyncio.run(scenario())
+    assert sorted((m["chat"]["id"], tuple(m["_album"])) for m in seen) == [
+        (7, ("a", "b")), (8, ("x",))]
 
 
 def test_ok_still_collects_the_report_the_bot_asked_a_poke_for():

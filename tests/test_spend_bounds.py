@@ -141,6 +141,21 @@ def test_a_long_message_is_refused_before_triage_and_without_a_slot(client, monk
     assert seen == [] and claimed == []
 
 
+def test_pictures_too_large_together_are_not_told_to_send_a_shorter_clip(client, monkeypatch):
+    """Several images in one check (2026-11-18) can cross the upload cap
+    together; "send a shorter clip" is the voice-note wording."""
+    monkeypatch.setattr(settings, "max_media_bytes", 1000)
+    resp = client.post("/api/v1/verify/image",
+                       files=[("file", ("a.png", b"\x89PNG" + b"0" * 800, "image/png")),
+                              ("file", ("b.png", b"\x89PNG" + b"0" * 800, "image/png"))])
+    assert resp.status_code == 413
+    detail = resp.json()["detail"]
+    assert "clip" not in detail and "pictures" in detail
+    media = client.post("/api/v1/verify/media",
+                        files={"file": ("a.ogg", b"0" * 2000, "audio/ogg")})
+    assert media.status_code == 413 and "clip" in media.json()["detail"]
+
+
 def test_an_image_upload_still_gets_the_upload_allowance(client):
     """The guard on the other side: the small cap must not reach uploads."""
     resp = client.post("/api/v1/verify/image",
