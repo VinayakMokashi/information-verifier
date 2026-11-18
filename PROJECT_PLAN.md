@@ -466,6 +466,48 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-11-18 — Friends' complaints: Instagram photo posts, links with words, several images
+
+Full notes: docs/research/2026-11-18/link-and-image-complaints.md.
+- **Seen live.** Four Instagram links on 17-18 Nov failed with "No video
+  formats found!": carousels of pictures. Each person was told "That
+  link could not be read." One then paid $0.04 for a text check that
+  could not open the link either.
+- **Decided: an Instagram post of pictures is read by the vision
+  model**, one call for up to 5 pictures, with the caption.
+  - yt-dlp is told `ignore_no_formats_error` for Instagram only.
+    YouTube and Facebook keep their old behaviour.
+  - Pictures are fetched only from `*.cdninstagram.com` and
+    `*.fbcdn.net`: https, port 443, no redirects, 7 MB, 20 s.
+  - The largest version is chosen by the URL's `_s<W>x<H>` token.
+    MEASURED: the versions carry no width or height, and yt-dlp's own
+    "best" is right only because the URLs sort that way.
+  - A carousel's videos are not listened to, and the reader is told.
+  - A carousel of only videos is refused for free, saying to send a
+    screen recording.
+  - A read that missed a picture is not kept by the transcript cache.
+- **Decided: the server's text route routes a link it can read, with
+  up to 300 characters of words, to the link check**, the words
+  included. The page and the bot need no rule of their own.
+- **Decided: a message that is only links nobody can open**, plus at
+  most a greeting or "is this true?", **is answered for free**: send the
+  text or a screenshot. Any other words are checked as before.
+- **Decided: up to 5 images in one check**, one vision call. The bot
+  gathers an album (same `media_group_id`, a 2 s window) before the
+  Dispatcher, so the money logic sees one message. A photo's caption
+  goes with it, capped at 1,024.
+- **Image reservation $0.25 → $0.30.**
+  - MEASURED from the vision docs (2026-11-18): Sonnet 5 reads images
+    at high resolution, up to 4,784 tokens each, not ~1,600.
+  - Five images plus the 4,000-token output cap come to about $0.09, and
+    the dearest check to about $0.19.
+  - In "vetted" mode a reservation is halved ($0.15) while a 5-picture
+    worst case is about $0.17. As with reels, the settle records the
+    real cost.
+- **Found reviewing the fix:** the engine's 8,000-character spend bound
+  cut silently. It now says where it cut, so the model does not call a
+  picture it never saw "silent".
+
 ### 2026-10-23 — Going live, §1: the owner's settings, and three things the dashboards did not say
 
 Vinayak worked through go-live.md §1, with each result read back, free.

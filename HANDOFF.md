@@ -29,6 +29,22 @@
 - At $5 a day, October's worst case in the capped Anthropic workspace is
   about $26. His monthly limit (about $35) must stay above that.
 
+**2026-11-18: friends' complaints fixed, NOT LIVE until a restart**
+(docs/research/2026-11-18/link-and-image-complaints.md; PROJECT_PLAN §7):
+- a1a7548: Instagram photo posts and carousels are read, with one
+  vision call for up to 5 pictures.
+- a8369c7: a link with a few words is checked as the link, and a link
+  nobody can open is answered for free.
+- 374fa17: several images in one check (the page, the API and the bot's
+  albums), plus a photo's caption. Image reservation $0.30.
+- 570666a: the 8,000-character bound says where it cut.
+- Both bot explorers: 2,000 interleavings each, no violations.
+- **Waiting on him:**
+  - **the restart** (deploys all of the above, plus L-1 and item 30);
+  - the caps revert;
+  - optionally, one paid check of a real photo post (about $0.10);
+  - the Wi-Fi steps.
+
 **2026-11-15:**
 - **Item 30 DONE, NOT LIVE until the restart:** c061d61 (1346 tests,
   exit 0 in a clean worktree). He approved one paid check: **$0.0627**,

@@ -1,6 +1,35 @@
 # "Can't read the link", "can't send several images" (2026-11-18)
 
-status: in progress
+status: complete. Built, NOT live until the app restarts (Vinayak's OK).
+
+## Done
+
+| Commit | What |
+|---|---|
+| a1a7548 | Instagram photo posts and carousels read (pictures, one vision call, ≤ 5) |
+| a8369c7 | a link with a few words is checked as the link; a link nobody can open is answered free |
+| 374fa17 | several images in one check: API ≤ 5, the page picks several, the bot gathers albums and keeps captions; image reservation $0.25 → $0.30 |
+| 570666a | the 8,000-character spend bound says where it cut; a caption is capped at 1,024 |
+
+Measured free:
+- With the new code, a real public photo post resolved to its
+  full-size picture. The fenced fetch got 33,734 bytes of JPEG with no
+  special headers.
+- A carousel of videos was refused with the new message.
+- A reel was unchanged.
+- Both bot explorers ran 2,000 interleavings each, with no violations.
+- The page was screenshotted at desktop and 390 px.
+
+Not measured: a PAID end-to-end check of a photo post (the vision
+reading plus the check, about $0.10). It is the one real run that would
+confirm the vision call on real Instagram pictures. Ask first.
+
+Not built:
+- the sound of a video inside a carousel, which is said instead;
+- a link to any other site is still not opened (the engine has no
+  fetch);
+- the web page sends no words with its images (the bot sends the
+  caption).
 
 Reported by Vinayak on 2026-11-18, from a friend's WhatsApp at 17:34:
 "I cant post multiple images? Or say a link to Instagram post. Its not
