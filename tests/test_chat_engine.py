@@ -986,6 +986,19 @@ def test_every_prompt_declines_advice_on_the_senders_own_case():
         assert "a doctor, a lawyer or a registered financial adviser" in prompt
 
 
+def test_a_message_cut_at_the_spend_bound_says_so_to_the_model():
+    """Since 2026-11-18 one check reads up to five pictures, whose text can
+    pass the 8,000-character bound. Cut silently, the model would say the
+    last picture "does not mention" what it never saw, while the reader is
+    shown all of it (invariant 4)."""
+    long = "Image 1: " + "words " * 2000
+    turn = C._render_input(long, None, [])
+    assert C._CUT_OFF in turn
+    assert C._CUT_OFF not in C._render_input("Drinking hot water kills the coronavirus",
+                                              None, [])
+    assert len(turn) < len(long)                      # still a spend bound
+
+
 def test_without_a_clear_hint_the_general_instruction_is_last():
     """When code cannot tell, the model's own judgment is asked for — last."""
     content = C._render_input("El agua caliente mata el virus del covid", None, [])

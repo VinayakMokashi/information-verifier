@@ -288,16 +288,27 @@ def _chosen_language(language: str | None) -> str | None:
     return None if picked.lower() in _AUTO else picked[:_MAX_LANGUAGE_CHARS]
 
 
+# Said where the spend bound cut a message (2026-11-18): five pictures' text
+# can pass it, and a silent cut let the model say the last picture "does not
+# mention" what it never saw, while the reader is shown all of it.
+_CUT_OFF = "[…the rest was cut off here, unread]"
+
+
+def _bounded(text: str, limit: int) -> str:
+    safe = as_prompt_data(text, limit)
+    return f"{safe}\n{_CUT_OFF}" if len(text) > limit else safe
+
+
 def _render_input(text: str, heard: str | None, factchecks: list,
                   language: str | None = None,
                   step_note: str | None = None) -> str:
     """The user turn. `step_note` is a pass-specific reminder, placed just
     before the closing instructions so that the LANGUAGE line stays last."""
-    parts = [f"<message>\n{as_prompt_data(text, _MAX_INPUT_CHARS)}\n</message>"]
+    parts = [f"<message>\n{_bounded(text, _MAX_INPUT_CHARS)}\n</message>"]
     if heard and heard.strip() and heard.strip() != text.strip():
         parts.append(
             "<heard>\n"
-            + as_prompt_data(heard, _MAX_HEARD_CHARS)
+            + _bounded(heard, _MAX_HEARD_CHARS)
             + "\n</heard>\n(The above was read by speech-to-text or OCR from "
               "what the person sent — it may contain mis-hearings.)"
         )

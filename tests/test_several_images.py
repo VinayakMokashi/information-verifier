@@ -96,6 +96,15 @@ def test_the_persons_own_words_go_with_the_images(client, monkeypatch):
     assert "Image 1: words 1" in report["source_text"]
 
 
+def test_a_note_longer_than_a_telegram_caption_is_refused_before_reading(client, monkeypatch):
+    """The note is a photo's caption; Telegram's own limit is 1,024. Longer,
+    it would only push the pictures' text past the engine's bound."""
+    read = _reading(monkeypatch)
+    assert _post(client, _shots(1), note="x" * 1025).status_code == 422
+    assert read == []
+    assert _report(client, _post(client, _shots(1), note="x" * 1024))["status"] == "COMPLETE"
+
+
 def test_the_page_lets_a_person_pick_several_images_and_sends_them_all():
     import re
     from pathlib import Path

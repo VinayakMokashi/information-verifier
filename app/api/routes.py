@@ -512,7 +512,9 @@ async def verify_text(
 async def verify_image(
     background: BackgroundTasks, request: Request, response: Response,
     file: list[UploadFile] = File(...), language: str | None = Form(None, max_length=40),
-    note: str | None = Form(None, max_length=settings.max_input_chars),
+    # A photo's caption: Telegram's own limit. Longer, it would only push the
+    # pictures' text past the engine's bound.
+    note: str | None = Form(None, max_length=1024),
 ) -> JobAccepted:
     """One image or several (2026-11-18: "I cant post multiple images?"),
     read in ONE vision call. `note` is what the person wrote with them — a
