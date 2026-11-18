@@ -82,7 +82,7 @@ def client(tmp_path, monkeypatch):
     # THE paid seam. One engine call replaced six pipeline stages, so there is
     # exactly one thing to forget here now instead of six.
     monkeypatch.setattr(C, "answer", F.fake_answer)
-    monkeypatch.setattr(R, "ocr_image", F.fake_ocr)
+    monkeypatch.setattr(R, "ocr_images", F.fake_ocr_images)
     # Every paid seam the routes can reach, faked HERE rather than per-test —
     # "a seam nobody remembered" is how demo mode billed real money once
     # already (PROJECT_PLAN §7, 2026-07-26).

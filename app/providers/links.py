@@ -96,6 +96,27 @@ _DOWNLOAD_WALL_S = 180.0     # a trickling stream must not pin a worker
 _SUBTITLE_TIMEOUT_S = 20
 _SUBTITLE_MAX_BYTES = 5_000_000   # caption tracks are ~100 KB; 5 MB is absurd
 
+# A photo post, or a carousel of pictures, has no video at all. yt-dlp then
+# fails ("There is no video in this post", "No video formats found!") unless
+# told not to — and four people's Instagram links failed that way on 17-18 Nov
+# 2026, each told only "That link could not be read." Asked only of Instagram:
+# YouTube and Facebook keep their old behaviour exactly.
+_INSTAGRAM_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
+# Where Instagram serves a post's pictures. MEASURED 2026-11-18: every version
+# of a photo and every carousel cover was on instagram.f<pop>.fna.fbcdn.net;
+# scontent-*.cdninstagram.com is its other name. The URL comes from
+# Instagram's reply, but the server connects to it, so it is fenced like
+# allowed_link_host: https, port 443, on a dot boundary of these suffixes.
+_IMAGE_HOST_SUFFIXES = (".cdninstagram.com", ".fbcdn.net")
+# What the vision model reads (the docs' list, 2026-11-18). HEIC is not.
+_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_IMAGE_DEADLINE_S = 20.0
+# MEASURED 2026-11-18: a photo's versions carry no width or height. The size
+# is in the URL's stp parameter (dst-jpg_e35_s480x480_tt6); the full-size one
+# has no size token at all.
+_SIZE_TOKEN = re.compile(r"_s(\d{2,5})x(\d{2,5})")
+_UNSIZED = 10 ** 8           # no size token: the original, the largest there is
+
 
 class LinkError(Exception):
     """A link could not be resolved or fetched. `str(exc)` is user-facing.
@@ -142,6 +163,11 @@ class LinkInfo:
     caption: str              # the post's own text; often carries the claim
     has_media: bool
     subtitle: SubtitleRef | None
+    # A photo post's pictures, largest version each, in the post's order:
+    # read by the vision model instead of a transcription. Every one has
+    # passed image_host_ok.
+    images: tuple[str, ...] = ()
+    videos_skipped: int = 0   # a carousel's videos: not listened to
 
 
 _WARNED: set[str] = set()
@@ -205,6 +231,15 @@ _MSG_NOT_OPENABLE = (
     "That post couldn't be opened — it may have been removed, or be visible "
     "only to people who are logged in. Only public posts work."
 )
+# Every dead end says what to do instead: "That link could not be read." on
+# its own was the whole answer four people got for a photo post.
+_MSG_UNREADABLE = ("That link could not be read. Send a screenshot or a screen "
+                   "recording of the post instead.")
+_MSG_NO_VIDEO = ("That post has no video this service can read. For a post of "
+                 "pictures, send a screenshot instead.")
+_MSG_VIDEO_CAROUSEL = (
+    "That post is a set of videos, and only a single video can be checked from "
+    "a link so far. Send a screen recording of the one you mean instead.")
 
 
 def _is_share_link(url: str) -> bool:
@@ -254,7 +289,7 @@ def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
             try:
                 target = str(httpx.URL(url).join(location))
             except Exception as exc:  # noqa: BLE001 — a Location nobody can parse
-                raise LinkError("other", "That link could not be read.") from exc
+                raise LinkError("other", _MSG_UNREADABLE) from exc
             if allowed_link_host(target) is None:
                 raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
             if urlsplit(target).path.startswith("/login"):
@@ -262,7 +297,7 @@ def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
             if not _is_share_link(target):
                 return target
             url = target
-        raise LinkError("other", "That link could not be read.")
+        raise LinkError("other", _MSG_UNREADABLE)
     finally:
         if own:
             client.close()
@@ -306,6 +341,10 @@ def _classified(exc: Exception) -> LinkError:
         # users — even on the latest yt-dlp, and whether reached by its
         # share link or its /reel/<id> address. Other public reels resolved.
         return LinkError("gated", _MSG_NOT_OPENABLE)
+    if "no video in this post" in m or "no video formats found" in m:
+        # yt-dlp's words for a post of pictures. Instagram's are read now
+        # (resolve_link); this is what is left: another platform's photo post.
+        return LinkError("unsupported", _MSG_NO_VIDEO)
     if "unsupported url" in m:
         return LinkError(
             "unsupported",
@@ -327,7 +366,7 @@ def _classified(exc: Exception) -> LinkError:
             "network",
             "The platform could not be reached right now. Try again in a minute.",
         )
-    return LinkError("other", "That link could not be read.")
+    return LinkError("other", _MSG_UNREADABLE)
 
 
 def _base_opts() -> dict:
@@ -389,14 +428,21 @@ def resolve_link(url: str) -> LinkInfo:
     # Before yt-dlp, and kept: the download later starts from LinkInfo.url,
     # and a share URL there would meet the same dead end.
     url = expand_share_link(url)
+    instagram = allowed_link_host(url) in _INSTAGRAM_HOSTS
+    opts = _base_opts()
+    if instagram:
+        opts["ignore_no_formats_error"] = True   # a post of pictures is a post
     try:
-        with yt_dlp.YoutubeDL(_base_opts()) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # noqa: BLE001 — classified for the user
         raise _classified(exc) from exc
 
-    if not isinstance(info, dict) or info.get("entries") is not None \
-            or info.get("_type") == "playlist":
+    playlist = isinstance(info, dict) and (info.get("entries") is not None
+                                           or info.get("_type") == "playlist")
+    if playlist and instagram:
+        return _carousel(url, info)
+    if not isinstance(info, dict) or playlist:
         raise LinkError(
             "unsupported",
             "That looks like a channel or playlist — send one video's link.",
@@ -407,6 +453,8 @@ def resolve_link(url: str) -> LinkInfo:
             "Live streams can't be checked — send a finished video.",
         )
 
+    has_media = bool(info.get("formats"))
+    picture = _best_image(info) if instagram and not has_media else None
     return LinkInfo(
         url=url,
         platform=info.get("extractor") or "unknown",
@@ -415,9 +463,125 @@ def resolve_link(url: str) -> LinkInfo:
         uploader=str(info.get("uploader") or info.get("channel") or ""),
         duration=info.get("duration"),
         caption=str(info.get("description") or ""),
-        has_media=bool(info.get("formats")),
+        has_media=has_media,
         subtitle=_pick_subtitle(info),
+        images=(picture,) if picture else (),
     )
+
+
+def _carousel(url: str, info: dict) -> LinkInfo:
+    """An Instagram post of several pictures (or videos): yt-dlp's playlist.
+
+    Its pictures are read; its videos are not listened to, and the reader is
+    told so (gather_link_text). Downloading one video out of a carousel is a
+    different job from a reel's, so a carousel of ONLY videos is refused here,
+    for free, with what works instead.
+    """
+    items = [e for e in list(info.get("entries") or []) if isinstance(e, dict)]
+    pictures = [e for e in items if not e.get("formats")]
+    if not pictures:
+        raise LinkError("unsupported", _MSG_VIDEO_CAROUSEL)
+    return LinkInfo(
+        url=url,
+        platform=info.get("extractor") or "Instagram",
+        video_id=str(info.get("id") or ""),
+        title=str(info.get("title") or ""),
+        uploader=str(info.get("uploader") or info.get("channel") or ""),
+        duration=None,
+        caption=str(info.get("description") or ""),
+        has_media=False,
+        subtitle=None,
+        images=tuple(p for p in map(_best_image, pictures) if p),
+        videos_skipped=len(items) - len(pictures),
+    )
+
+
+def image_host_ok(url: str) -> bool:
+    """May the server fetch this picture? Only from Instagram's image
+    servers, over https, on port 443. Fails closed, like allowed_link_host."""
+    if not isinstance(url, str):
+        return False
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        return False
+    host = strict_host(url, schemes=("https",))
+    if host is None or not host.endswith(_IMAGE_HOST_SUFFIXES):
+        return False
+    try:
+        return urlsplit(url).port in (None, 443)
+    except ValueError:
+        return False
+
+
+def _best_image(entry: dict) -> str | None:
+    """The largest version of a post's picture that the server may fetch.
+
+    By declared size when there is one, else by the size token in the URL
+    (none means the original). Not yt-dlp's own pick: with no sizes it is
+    last only because the URLs happen to sort that way (measured).
+    """
+    thumbs = list(entry.get("thumbnails") or [])
+    if not thumbs and entry.get("thumbnail"):
+        thumbs = [{"url": entry["thumbnail"]}]
+    best, best_area, refused = None, -1, None
+    for thumb in thumbs:
+        url = thumb.get("url") if isinstance(thumb, dict) else None
+        if not isinstance(url, str) or not image_host_ok(url):
+            refused = refused or (strict_host(url) if isinstance(url, str) else None)
+            continue
+        width, height = thumb.get("width"), thumb.get("height")
+        if isinstance(width, int) and isinstance(height, int):
+            area = width * height
+        else:
+            token = _SIZE_TOKEN.search(urlsplit(url).query)
+            area = int(token[1]) * int(token[2]) if token else _UNSIZED
+        if area > best_area:
+            best, best_area = url, area
+    if best is None and refused:
+        # The day Instagram serves pictures from a new domain, its posts are
+        # checked by their captions alone; this line says why. A host only.
+        print(f"[links] a post's picture is on a server outside the fence: {refused}")
+    return best
+
+
+def fetch_post_image(url: str, max_bytes: int,
+                     client: httpx.Client | None = None) -> tuple[bytes, str]:
+    """One picture of a post -> (bytes, media type). Raises LinkError.
+
+    Fenced before any request (image_host_ok), never redirected, and capped in
+    bytes and in time as it streams — the same discipline as the audio
+    download, for a file the vision model is then paid to read.
+    """
+    if not image_host_ok(url):
+        raise LinkError("unsupported", _MSG_UNREADABLE)
+    own = client is None
+    client = client or httpx.Client(timeout=_IMAGE_DEADLINE_S, follow_redirects=False)
+    deadline = time.monotonic() + _IMAGE_DEADLINE_S
+    try:
+        with client.stream("GET", url) as resp:
+            if resp.status_code in (404, 410):
+                raise LinkError("not_found", "A picture in that post is gone.")
+            if resp.status_code != 200:
+                raise LinkError("other", "A picture in that post could not be fetched.")
+            ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+            if ctype not in _IMAGE_TYPES:
+                raise LinkError("other", "A picture in that post is in a format "
+                                         "this service cannot read.")
+            data = bytearray()
+            for chunk in resp.iter_bytes():
+                data.extend(chunk)
+                if len(data) > max_bytes:
+                    raise LinkError("too_large", "A picture in that post is too large.")
+                if time.monotonic() > deadline:
+                    raise LinkError("network", "Fetching that post's pictures took "
+                                               "too long. Try again in a minute.")
+        return bytes(data), ctype
+    except LinkError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — httpx.InvalidURL is not an HTTPError
+        raise _classified(exc) from exc
+    finally:
+        if own:
+            client.close()
 
 
 def _parse_json3(data: bytes) -> str:

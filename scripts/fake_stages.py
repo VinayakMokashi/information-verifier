@@ -99,7 +99,7 @@ async def fake_answer(text, *, heard=None, emit=None, language=None, mode="full"
     )
 
 
-async def fake_ocr(image_bytes: bytes, media_type: str) -> str:
+async def fake_ocr_images(images) -> str:
     return "WHO ne kaha hai ki 5G se coronavirus phailta hai. (simulated OCR)"
 
 
@@ -145,7 +145,7 @@ def apply_fake_stages() -> None:
 
     # One engine seam now, where there used to be six pipeline stages.
     C.answer = fake_answer
-    R.ocr_image = fake_ocr
+    R.ocr_images = fake_ocr_images
     R.get_asr_provider = lambda: FakeASR()
     # The link path: resolve touches the network (free but online — a demo
     # must be fully offline) and gather can reach paid Sarvam. Both faked.

@@ -117,6 +117,14 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
+    # Pictures read in ONE vision call (a post's pictures; 2026-11-18). On
+    # Sonnet 5 an image costs up to 4,784 tokens (the vision docs, 2026-11-18),
+    # so 5 read with 4,000 tokens out stay under $0.09 — inside a link's
+    # reservation. Past the cap the first ones are read, and the reader told.
+    max_images_per_check: int = 5
+    # Per picture, raw. The API's own limit is 10 MB base64-encoded, which is
+    # 7.5 MB of image; past it a check would fail AFTER being accepted.
+    max_image_bytes: int = 7 * 1024 * 1024
 
     # Spending guard — every check costs money and the share link is public.
     # One submission is one answer since the pivot (it used to fan out to a

@@ -65,10 +65,10 @@ def test_a_rejection_that_came_after_paying_still_burns_quota(client, monkeypatc
     monkeypatch.setattr(settings, "max_checks_per_day", 100)
     limits.reset()
 
-    async def ocr_that_costs_money_and_finds_nothing(image_bytes, media_type):
+    async def ocr_that_costs_money_and_finds_nothing(images):
         return ""      # paid for, no text found -> the 422 below
 
-    monkeypatch.setattr(R, "ocr_image", ocr_that_costs_money_and_finds_nothing)
+    monkeypatch.setattr(R, "ocr_images", ocr_that_costs_money_and_finds_nothing)
 
     resp = client.post("/api/v1/verify/image",
                        files={"file": ("blank.png", b"\x89PNG", "image/png")})
@@ -538,14 +538,14 @@ def test_a_paid_step_keeps_its_slot_even_on_a_cache_hit(limited, monkeypatch):
 
     monkeypatch.setattr(settings, "max_checks_per_hour", 100)
 
-    async def metered_ocr(image_bytes, media_type):
+    async def metered_ocr(images):
         note_llm("claude-sonnet-5", type("U", (), {
             "input_tokens": 1500, "output_tokens": 40,
             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
             "server_tool_use": None})())
         return "WHO ne kaha 5G se corona"
 
-    monkeypatch.setattr(R, "ocr_image", metered_ocr)
+    monkeypatch.setattr(R, "ocr_images", metered_ocr)
     _check(limited, "WHO ne kaha 5G se corona")          # primes the cache
     before = limits.used_today()
     resp = limited.post("/api/v1/verify/image",

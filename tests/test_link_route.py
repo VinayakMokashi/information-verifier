@@ -474,3 +474,120 @@ def test_a_link_with_a_line_break_is_a_readable_refusal_not_a_500(client):
     resp = client.post("/api/v1/verify/link",
                        json={"url": "https://www.facebook.com/share/r/17RQxbYP2j/\nKya?"})
     assert resp.status_code == 422
+
+
+# -- photo posts and carousels (2026-11-18) -----------------------------------
+# SEEN LIVE: four Instagram photo posts on 17-18 Nov were refused as "That
+# link could not be read." Their pictures are now read by the vision model,
+# all of them in ONE paid call, and what it read is shown back (invariant 4).
+
+def _pics(n, start=1):
+    return tuple(f"https://instagram.fbom3-2.fna.fbcdn.net/{i}.jpg"
+                 for i in range(start, start + n))
+
+
+def _wire_pictures(monkeypatch, *, fetch=None):
+    _wire_real_gather(monkeypatch)        # no subtitles; a download would fail
+    fetched, read = [], []
+
+    def fake_fetch(url, max_bytes):
+        fetched.append((url, max_bytes))
+        return b"\xff\xd8" + url.encode(), "image/jpeg"
+
+    async def fake_ocr(images):
+        read.append(list(images))
+        return "\n".join(f"Image {i}: words {i}" for i in range(1, len(images) + 1))
+
+    monkeypatch.setattr(R, "fetch_post_image", fetch or fake_fetch)
+    monkeypatch.setattr(R, "ocr_images", fake_ocr)
+    return fetched, read
+
+
+def test_a_photo_post_is_read_in_one_vision_call(client, monkeypatch):
+    fetched, read = _wire_pictures(monkeypatch)
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        has_media=False, caption="Sarkar sabko free laptop degi!", images=_pics(2)))
+
+    report = _report(client, _submit(client))
+
+    assert report["status"] == "COMPLETE"
+    assert len(read) == 1 and len(read[0]) == 2          # one call, both pictures
+    assert [cap for _, cap in fetched] == [settings.max_image_bytes] * 2
+    assert "Sarkar sabko free laptop degi!" in report["source_text"]
+    assert "Image 2: words 2" in report["source_text"]   # shown back
+
+
+def test_past_the_cap_only_the_first_pictures_are_read_and_it_says_so(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_images_per_check", 2)
+    _, read = _wire_pictures(monkeypatch)
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        has_media=False, images=_pics(7), videos_skipped=2))
+
+    report = _report(client, _submit(client))
+
+    assert len(read[0]) == 2                             # the bound on the paid call
+    assert "7 pictures" in report["source_text"]
+    assert "first 2" in report["source_text"]
+    assert "2 videos" in report["source_text"]
+
+
+def test_a_photo_post_without_a_caption_is_checked_not_refused(client, monkeypatch):
+    _wire_pictures(monkeypatch)
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(has_media=False, caption="", images=_pics(1)))
+    assert _report(client, _submit(client))["status"] == "COMPLETE"
+
+
+def test_a_picture_that_cannot_be_fetched_is_left_out_and_said(client, monkeypatch):
+    def flaky(url, max_bytes):
+        if url.endswith("2.jpg"):
+            raise LinkError("network", "slow")
+        return b"\xff\xd8", "image/jpeg"
+
+    _, read = _wire_pictures(monkeypatch, fetch=flaky)
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(has_media=False, images=_pics(2)))
+
+    report = _report(client, _submit(client))
+
+    assert report["status"] == "COMPLETE" and len(read[0]) == 1
+    assert "could not be fetched" in report["source_text"]
+
+
+def test_no_picture_fetched_is_a_readable_failure_and_nothing_is_read(client, monkeypatch):
+    def down(url, max_bytes):
+        raise LinkError("network", "down")
+
+    _, read = _wire_pictures(monkeypatch, fetch=down)
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        has_media=False, caption="Some caption", images=_pics(1)))
+
+    report = _report(client, _submit(client))
+
+    assert report["status"] == "FAILED" and read == []   # no paid reading
+    assert "screenshot" in report["error"]
+
+
+def test_a_read_post_is_remembered_by_its_id(client, monkeypatch):
+    _, read = _wire_pictures(monkeypatch)
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(has_media=False, images=_pics(1), video_id="P1"))
+    for _ in range(2):
+        assert _report(client, _submit(client))["status"] == "COMPLETE"
+    assert len(read) == 1, "the same post's pictures were paid for twice"
+
+
+def test_a_partly_read_post_is_not_remembered(client, monkeypatch):
+    """Invariant 6: the transcript cache never keeps a failed read. A picture
+    missed today must be fetched again next time, not left out for 30 days."""
+    def flaky(url, max_bytes):
+        if url.endswith("2.jpg"):
+            raise LinkError("network", "slow")
+        return b"\xff\xd8", "image/jpeg"
+
+    _, read = _wire_pictures(monkeypatch, fetch=flaky)
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(has_media=False, images=_pics(2), video_id="P2"))
+    for _ in range(2):
+        assert _report(client, _submit(client))["status"] == "COMPLETE"
+    assert len(read) == 2

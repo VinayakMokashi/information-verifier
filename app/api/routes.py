@@ -30,12 +30,12 @@ from app.providers.asr import get_asr_provider
 from app.providers.llm import PAUSED_MESSAGE, paused_reason, tell_owner_paused
 from app.providers.links import (
     SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
-    download_link_audio, log_safe, resolve_link, subtitle_text,
+    download_link_audio, fetch_post_image, log_safe, resolve_link, subtitle_text,
 )
 from app.providers import alerts, turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
-from app.providers.vision import ocr_image
+from app.providers.vision import ocr_images
 from app.trusted_sources import is_trusted_url
 from app.store.repository import AnswerRepository, safe_cache_call
 
@@ -503,7 +503,7 @@ async def verify_image(
         meter = UsageMeter()   # starts at the first paid call, so the report's
         with meter.activate():  # the bill includes route-level OCR, not just the check
             try:
-                extracted = await ocr_image(image_bytes, file.content_type)
+                extracted = await ocr_images([(image_bytes, file.content_type)])
             except Exception as exc:
                 reason = paused_reason(exc)
                 if not reason:
@@ -598,7 +598,9 @@ def _caption_text(info: LinkInfo) -> str:
 
 
 async def gather_link_text(info: LinkInfo) -> str:
-    """Everything readable from the post: caption + (subtitles | audio->ASR).
+    """Everything readable from the post: caption + (subtitles | audio->ASR),
+    or, for a post of pictures, caption + what its pictures say (one vision
+    call).
 
     Cost order is the point (measured, §0a): the caption is already in hand
     ($0); a subtitle track replaces ASR outright ($0 — YouTube's '-orig'
@@ -620,10 +622,56 @@ async def gather_link_text(info: LinkInfo) -> str:
         )
         spoken = await transcribe_wav(wav, duration)
 
-    combined = "\n\n".join(t for t in (caption, spoken) if t and t.strip())
+    seen = await _read_pictures(info) if info.images else None
+
+    combined = "\n\n".join(t for t in (caption, spoken, seen) if t and t.strip())
     if not combined.strip():
         raise LinkError("other", "No speech or text could be read from that post.")
     return combined
+
+
+# Said with the text when a picture could not be fetched. Also how _link_job
+# knows not to remember the text: a read that missed a picture is retried
+# next time, never kept for 30 days (invariant 6).
+_PICTURES_MISSED = "[Some of the post's pictures could not be fetched.]"
+
+
+async def _read_pictures(info: LinkInfo) -> str:
+    """A photo post's pictures -> what they say: ONE paid vision call.
+
+    Bounded before it is made (invariant 5): at most max_images_per_check
+    pictures, each byte-capped as it is fetched. What was not read is said
+    in the text the reader is shown, and the model sees it too.
+    """
+    wanted = info.images[: settings.max_images_per_check]
+    # Side by side, kept in the post's order: one after another, a carousel's
+    # fetches added up in front of the person waiting.
+    outcomes = await asyncio.gather(
+        *(asyncio.to_thread(fetch_post_image, url, settings.max_image_bytes)
+          for url in wanted),
+        return_exceptions=True)
+    fetched = []
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            print(f"[link] a picture could not be fetched: "
+                  f"{getattr(outcome, 'kind', type(outcome).__name__)}")
+        else:
+            fetched.append(outcome)
+    if not fetched:
+        raise LinkError("network", "That post's pictures could not be fetched. Try "
+                                   "again in a minute, or send a screenshot instead.")
+    notes = []
+    if len(info.images) > len(wanted):
+        notes.append(f"[This post has {len(info.images)} pictures; only the first "
+                     f"{len(wanted)} were read.]")
+    if len(fetched) < len(wanted):
+        notes.append(_PICTURES_MISSED)
+    if info.videos_skipped:
+        noun = "video" if info.videos_skipped == 1 else "videos"
+        notes.append(f"[This post also has {info.videos_skipped} {noun}; "
+                     "they were not listened to.]")
+    read = await ocr_images(fetched)
+    return "\n".join([read, *notes])
 
 
 def _friendly_link_failure(exc: Exception) -> str:
@@ -703,8 +751,10 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
         # reel, maybe a hiccup — and the cache's rule is to retry that, not
         # to remember it as the post for 30 days (found by review: the empty
         # check ran on caption + speech combined). A caption is free to read
-        # again; re-hearing a music-only reel costs its ASR, a few paise.
-        if key and text.strip() != _caption_text(info).strip():
+        # again; re-hearing a music-only reel costs its ASR, a few paise. A
+        # post read with a picture missing is retried the same way.
+        if (key and text.strip() != _caption_text(info).strip()
+                and _PICTURES_MISSED not in text):
             await safe_cache_call(repo.transcripts.put, key, text)
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
                     kind="link", language=language, mode=mode,
@@ -755,8 +805,8 @@ async def verify_link(
         if needs_asr and not settings.sarvam_api_key:
             print("[config] SARVAM_API_KEY is missing; this link needs transcription")
             raise HTTPException(503, _MSG_NO_ASR)
-        if not info.has_media and not info.caption.strip():
-            raise HTTPException(422, "That post has no video and no caption to check.")
+        if not info.has_media and not info.images and not info.caption.strip():
+            raise HTTPException(422, "That post has no video, picture or caption to check.")
 
         # Funded only now, once the free resolve has succeeded: REPRODUCED
         # (review R1), five people's slow, refused resolves held every slot.

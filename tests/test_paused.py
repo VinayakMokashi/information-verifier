@@ -109,11 +109,11 @@ def test_a_repeat_is_still_answered_free_while_paused(budgeted, monkeypatch):
 
 def test_an_image_whose_reading_is_refused_for_money_gives_it_back(budgeted, monkeypatch,
                                                                    capsys):
-    async def refused(image_bytes, media_type):
+    async def refused(images):
         raise _refused_for_money(402, "There's an issue with your billing.",
                                  "billing_error")
 
-    monkeypatch.setattr(R, "ocr_image", refused)
+    monkeypatch.setattr(R, "ocr_images", refused)
     resp = budgeted.post("/api/v1/verify/image",
                          files={"file": ("shot.png", b"\x89PNG" + b"0" * 64, "image/png")})
     assert resp.status_code == 503 and resp.json()["detail"] == PAUSED_MESSAGE

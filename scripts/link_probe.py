@@ -147,7 +147,14 @@ def app_verdict(url: str) -> str:
         info = resolve_link(url)
     except LinkError as exc:
         return f"NO - [{exc.kind}] {exc}"
-    return f"YES - {info.platform} video {info.video_id or '(no id)'}"
+    post = info.video_id or "(no id)"
+    if info.has_media:
+        return f"YES - {info.platform} video {post}"
+    # A post of pictures (2026-11-18): read by the vision model, not heard.
+    what = f"{len(info.images)} pictures to read" if info.images else "its caption only"
+    if info.videos_skipped:
+        what += f", {info.videos_skipped} video(s) not listened to"
+    return f"YES - {info.platform} post {post}: {what}"
 
 
 def probe(url: str, cookies_from: str | None = None) -> None:

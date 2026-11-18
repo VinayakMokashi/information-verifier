@@ -23,7 +23,7 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
 
     # apply_fake_stages assigns module attributes directly, so snapshot them
     # rather than reloading the modules (which would orphan routes' _repo).
-    seams = [(C, "answer"), (R, "ocr_image"), (R, "get_asr_provider"),
+    seams = [(C, "answer"), (R, "ocr_images"), (R, "get_asr_provider"),
              (R, "resolve_link"), (R, "gather_link_text")]
     originals = [(mod, name, getattr(mod, name)) for mod, name in seams]
 
@@ -32,7 +32,7 @@ def test_apply_fake_stages_patches_every_paid_seam(monkeypatch):
         # Every seam that can reach a paid API — or, for resolve_link, any
         # network at all — is a fake.
         assert C.answer is F.fake_answer
-        assert R.ocr_image is F.fake_ocr
+        assert R.ocr_images is F.fake_ocr_images
         assert R.resolve_link is F.fake_resolve_link
         assert R.gather_link_text is F.fake_gather_link_text
         assert not isinstance(R.get_asr_provider(), SarvamASR)

@@ -377,6 +377,20 @@ def test_the_probe_reports_what_the_app_itself_would_do(monkeypatch):
     assert "NO" in P.app_verdict(_FB_SHARE) and "unsupported" in P.app_verdict(_FB_SHARE)
 
 
+def test_the_probe_calls_a_photo_post_what_it_is(monkeypatch):
+    """Since 2026-11-18 the app reads a post's pictures; "YES - Instagram
+    video" for a carousel of photos would send the operator looking for one."""
+    import scripts.link_probe as P
+
+    post = L.LinkInfo(url=_IG_POST, platform="Instagram", video_id="C1", title="",
+                      uploader="", duration=None, caption="", has_media=False,
+                      subtitle=None, images=("a", "b", "c"), videos_skipped=1)
+    monkeypatch.setattr(P, "resolve_link", lambda url: post)
+    verdict = P.app_verdict(_IG_POST)
+    assert verdict.startswith("YES") and "3 pictures" in verdict
+    assert "video" not in verdict.split(":")[0] and "1 video" in verdict
+
+
 # -- review R2/R3 (2026-10-15): ports, line breaks, unparseable hops ------------
 
 @pytest.mark.parametrize("url", [
@@ -442,4 +456,184 @@ def test_the_whole_expansion_has_one_deadline(monkeypatch):
         L.expand_share_link(_FB_SHARE, client=client)
     assert info.value.kind == "network"
     assert hops["n"] <= 2
+
+
+# -- Instagram photo posts and carousels (2026-11-18) -------------------------
+# SEEN LIVE: four Instagram links on 17-18 Nov failed "No video formats
+# found!" — carousels of pictures — and each person was told only "That link
+# could not be read." A single-photo post fails "There is no video in this
+# post"; a carousel of videos was refused as "a channel or playlist".
+# MEASURED (docs/research/2026-11-18/link-and-image-complaints.md): a photo's
+# versions carry no width or height; the size is the URL's `_s<W>x<H>` token,
+# and the full-size one has none.
+
+_IG_POST = "https://www.instagram.com/p/BsOGulcndj-/"
+_CDN = "instagram.fbom3-2.fna.fbcdn.net"
+
+
+def _pic(size=None, host=_CDN, **extra):
+    stp = f"dst-jpg_e35_s{size}x{size}_tt6" if size else "dst-jpg_e35_tt6"
+    return {"url": f"https://{host}/v/t51.2885-15/1_n.jpg?stp={stp}&oh=x", **extra}
+
+
+def _fake_ydl(monkeypatch, info, seen_opts=None):
+    import yt_dlp
+
+    class FakeYDL:
+        def __init__(self, opts):
+            if seen_opts is not None:
+                seen_opts.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download):
+            return info
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+
+def test_a_photo_post_is_its_caption_and_its_largest_picture(monkeypatch):
+    _fake_ydl(monkeypatch, {
+        "extractor": "Instagram", "id": "BsOGulcndj-", "title": "Post by x",
+        "formats": [], "description": "A world record egg",
+        "thumbnails": [_pic(150), _pic(480), _pic(), _pic(320)]})
+    info = L.resolve_link(_IG_POST)
+    assert info.images == (_pic()["url"],)
+    assert not info.has_media             # nothing to download or transcribe
+    assert info.caption == "A world record egg"
+    assert info.video_id == "BsOGulcndj-"
+
+
+def test_a_carousel_is_its_pictures_in_order_and_says_how_many_videos(monkeypatch):
+    other = "scontent-bom1-1.cdninstagram.com"
+    _fake_ydl(monkeypatch, {
+        "_type": "playlist", "extractor": "Instagram", "id": "C1",
+        "description": "Breaking news",
+        "entries": [
+            {"id": "a", "formats": [], "thumbnails": [_pic(150), _pic()]},
+            {"id": "b", "formats": [{"url": "v"}], "thumbnails": [_pic()]},
+            {"id": "c", "formats": [], "thumbnails": [_pic(host=other)]},
+        ]})
+    info = L.resolve_link(_IG_POST)
+    assert info.images == (_pic()["url"], _pic(host=other)["url"])
+    assert info.videos_skipped == 1
+    assert info.video_id == "C1" and info.caption == "Breaking news"
+    assert not info.has_media
+
+
+def test_a_carousel_of_only_videos_is_refused_with_what_works_instead(monkeypatch):
+    _fake_ydl(monkeypatch, {
+        "_type": "playlist", "extractor": "Instagram", "id": "V",
+        "entries": [{"id": "a", "formats": [{"url": "v"}], "thumbnails": [_pic()]}]})
+    with pytest.raises(L.LinkError) as err:
+        L.resolve_link(_IG_POST)
+    assert err.value.kind == "unsupported"
+    assert "screen recording" in str(err.value)
+
+
+def test_a_playlist_anywhere_else_is_still_refused(monkeypatch):
+    _fake_ydl(monkeypatch, {"_type": "playlist", "extractor": "youtube:tab",
+                            "id": "PL", "entries": [{"id": "a", "formats": []}]})
+    with pytest.raises(L.LinkError) as err:
+        L.resolve_link("https://www.youtube.com/watch?v=x&list=PL")
+    assert "playlist" in str(err.value)
+
+
+def test_only_instagram_is_asked_for_a_post_without_video(monkeypatch):
+    """YouTube and Facebook keep exactly their old behaviour: a video they
+    cannot serve still fails there, rather than turning into a check of its
+    description."""
+    seen = []
+    _fake_ydl(monkeypatch, {"extractor": "youtube", "id": "x", "formats": [{"url": "v"}]},
+              seen)
+    L.resolve_link("https://www.youtube.com/shorts/x")
+    L.resolve_link("https://www.instagram.com/reel/x/")
+    assert not seen[0].get("ignore_no_formats_error")
+    assert seen[1]["ignore_no_formats_error"] is True
+
+
+def test_a_post_with_no_picture_it_may_fetch_has_none(monkeypatch):
+    _fake_ydl(monkeypatch, {"extractor": "Instagram", "id": "p", "formats": [],
+                            "description": "only words",
+                            "thumbnails": [_pic(host="evil.example")]})
+    info = L.resolve_link(_IG_POST)
+    assert info.images == () and info.caption == "only words"
+
+
+def test_declared_sizes_beat_the_order_they_came_in():
+    big = _pic(150, width=1080, height=1350)    # its URL token says small
+    small = _pic(width=320, height=400)
+    assert L._best_image({"thumbnails": [big, small]}) == big["url"]
+
+
+@pytest.mark.parametrize("url", [
+    "http://instagram.fbom3-2.fna.fbcdn.net/v/1.jpg",          # not https
+    "https://evil.example/v/1.jpg",
+    "https://fbcdn.net.evil.example/v/1.jpg",                  # lookalike
+    "https://cdninstagram.com.evil.example/v/1.jpg",
+    "https://fbcdn.net/v/1.jpg",                               # no subdomain
+    "https://instagram.fbom3-2.fna.fbcdn.net:8443/v/1.jpg",    # another port
+    "https://u@instagram.fbom3-2.fna.fbcdn.net/v/1.jpg",       # userinfo
+    "https://instagram.fbom3-2.fna.fbcdn.net/v/1.jpg\n",       # a line break
+])
+def test_a_picture_is_fetched_only_from_instagrams_image_servers(url):
+    """This decides what the SERVER connects to, so it gets the same
+    paranoia as allowed_link_host: the URL came from Instagram's reply, but
+    nothing about it is trusted."""
+    assert not L.image_host_ok(url)
+    with pytest.raises(L.LinkError):
+        L.fetch_post_image(url, max_bytes=1000)   # refused before any request
+    picked = L._best_image({"thumbnails": [{"url": url, "width": 9999, "height": 9999},
+                                           _pic(150)]})
+    assert picked == _pic(150)["url"]
+
+
+def _image_server(status=200, ctype="image/jpeg", body=b"\xff\xd8jpeg", seen=None,
+                  headers=None):
+    import httpx
+
+    def handler(request):
+        if seen is not None:
+            seen.append(request)
+        return httpx.Response(status, content=body,
+                              headers={"content-type": ctype, **(headers or {})})
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_a_picture_is_fetched_whole():
+    data, ctype = L.fetch_post_image(_pic()["url"], max_bytes=1000,
+                                     client=_image_server())
+    assert data == b"\xff\xd8jpeg" and ctype == "image/jpeg"
+
+
+@pytest.mark.parametrize("server,kind", [
+    (dict(status=302, headers={"location": "https://evil.example/"}), "other"),
+    (dict(ctype="text/html"), "other"),
+    (dict(ctype="image/heic"), "other"),      # the model cannot read it
+    (dict(body=b"x" * 2000), "too_large"),
+    (dict(status=404), "not_found"),
+])
+def test_a_picture_that_is_not_a_small_image_is_refused(server, kind):
+    with pytest.raises(L.LinkError) as err:
+        L.fetch_post_image(_pic()["url"], max_bytes=1000, client=_image_server(**server))
+    assert err.value.kind == kind
+
+
+@pytest.mark.parametrize("message", [
+    "ERROR: [Instagram] BsOGulcndj-: There is no video in this post",
+    "ERROR: [facebook] 1: No video formats found!; please report this issue",
+])
+def test_a_post_with_no_video_says_so_and_what_works_instead(message):
+    err = L._classified(RuntimeError(message))
+    assert err.kind == "unsupported"
+    assert "screenshot" in str(err)
+
+
+def test_the_catch_all_failure_still_says_what_to_do_instead():
+    assert "screenshot" in str(L._classified(RuntimeError("something entirely novel")))
 
