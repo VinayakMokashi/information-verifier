@@ -577,6 +577,70 @@ def test_a_read_post_is_remembered_by_its_id(client, monkeypatch):
     assert len(read) == 1, "the same post's pictures were paid for twice"
 
 
+# -- a link with a few words around it (2026-11-18) ----------------------------
+# SEEN LIVE: after his Instagram link failed, the person sent it again with
+# some words — a paid TEXT check, $0.04, whose model cannot open links and
+# said so. The page and the bot send only a BARE link to /verify/link; the
+# text route now decides for both of them.
+
+def _resolving(monkeypatch):
+    asked = []
+
+    def resolve(url):
+        asked.append(url)
+        return F.fake_resolve_link(url)
+
+    monkeypatch.setattr(R, "resolve_link", resolve)
+    return asked
+
+
+def _text(client, text):
+    return client.post("/api/v1/verify/text", json={"text": text})
+
+
+def test_a_link_with_a_few_words_is_checked_as_the_link(client, monkeypatch):
+    asked = _resolving(monkeypatch)
+    sent = "Kya ye sach hai? https://www.instagram.com/p/DXyZ12abc/"
+
+    report = _report(client, _text(client, sent))
+
+    assert asked == ["https://www.instagram.com/p/DXyZ12abc/"]
+    assert report["status"] == "COMPLETE"
+    assert "simulated reel" in report["source_text"]        # the post was read
+    assert "Kya ye sach hai?" in report["source_text"]      # and the words went with it
+    assert report["input_text"] == sent                     # what the person sent
+
+
+@pytest.mark.parametrize("sent,link", [
+    ("https://youtu.be/abc.", "https://youtu.be/abc"),
+    ("dekho (https://youtu.be/abc) sach?", "https://youtu.be/abc"),
+    ("यह सच है? https://www.instagram.com/reel/Xy1/।", "https://www.instagram.com/reel/Xy1/"),
+    ("https://www.instagram.com/p/C1/?igsh=MWQ1ZGUxMzBkMA== check",
+     "https://www.instagram.com/p/C1/?igsh=MWQ1ZGUxMzBkMA=="),
+])
+def test_punctuation_around_a_link_is_not_part_of_it(client, monkeypatch, sent, link):
+    asked = _resolving(monkeypatch)
+    assert _text(client, sent).status_code == 202
+    assert asked == [link]
+
+
+def test_a_long_forward_with_a_link_in_it_is_still_a_text_check(client, monkeypatch):
+    """A forward carries its own claim; the link at its end may be anything,
+    and downloading it would buy a different check from the one sent."""
+    asked = _resolving(monkeypatch)
+    forward = ("Sarkar ne naya niyam banaya hai ki har ghar ko 5000 rupaye "
+               "milenge, abhi register karo, sirf aaj tak. " * 6
+               + "https://youtu.be/abc")
+    assert _report(client, _text(client, forward))["status"] == "COMPLETE"
+    assert asked == []
+
+
+def test_a_lookalike_link_in_words_is_not_fetched(client, monkeypatch):
+    asked = _resolving(monkeypatch)
+    _text(client, "is this true https://youtube.com.evil.com/watch?v=1")
+    assert asked == []
+
+
 def test_a_partly_read_post_is_not_remembered(client, monkeypatch):
     """Invariant 6: the transcript cache never keeps a failed read. A picture
     missed today must be fetched again next time, not left out for 30 days."""

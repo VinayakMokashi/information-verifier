@@ -33,8 +33,8 @@ from app.api.legal import public_url, sarvam_line  # noqa: E402
 from app.api.limits import SUBJECT_HEADER  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.engine.marker import strip_any_sentinel  # noqa: E402
-from app.engine.triage import nothing_to_check  # noqa: E402
-from app.providers.links import allowed_link_host  # noqa: E402
+from app.engine.triage import nothing_to_check, only_unopenable_links  # noqa: E402
+from app.providers.links import SUPPORTED_PLATFORMS, allowed_link_host  # noqa: E402
 
 APP_BASE = os.environ.get("APP_BASE", "http://127.0.0.1:8000/api/v1")
 
@@ -205,8 +205,8 @@ _TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024
 def classify_message(msg: dict) -> tuple[str, str]:
     """(kind, payload) for one Telegram message. Pure — fully offline-testable.
 
-    kinds: help | id | privacy | delete | smalltalk | text | link | media |
-    image | too_big | unsupported. The
+    kinds: help | id | privacy | delete | smalltalk | unopenable_link | text |
+    link | media | image | too_big | unsupported. The
     link test reuses the SERVER's own allowlist check, and the small-talk test
     the server's own triage, so the bot and the API can never disagree about
     what counts as a checkable link or as nothing to check.
@@ -232,6 +232,10 @@ def classify_message(msg: dict) -> tuple[str, str]:
             return "link", text
         if nothing_to_check(text):
             return "smalltalk", text
+        if only_unopenable_links(text):
+            # A news site, X, a WhatsApp channel: nothing the engine can open,
+            # and nothing else to check (the server's own rule, 2026-11-18).
+            return "unopenable_link", text
         return "text", text
     for key in ("voice", "audio", "video", "video_note"):
         if msg.get(key):
@@ -739,9 +743,14 @@ _SMALLTALK_REPLY = ("🙂 Kuch check karwana ho to woh message, link, voice note
 _TOO_BIG_REPLY = ("📦 Yeh file 20 MB se badi hai — Telegram bots itni badi file "
                   "download nahi kar sakte. Chhota clip (5 minute tak) bhejiye, "
                   "ya video ka link.")
+_UNOPENABLE_LINK_REPLY = (
+    "🔗 Is website ka link main khol nahi sakta. Article ya post ka text yahan "
+    "paste kariye, ya uska screenshot bhejiye. ("
+    + ", ".join(SUPPORTED_PLATFORMS[:-1]) + f" aur {SUPPORTED_PLATFORMS[-1]} ke "
+    "public posts ke link chalte hain.)")
 # Kinds that are never submitted, so never told "this was not checked". A
 # "poke" is an instant command handing over a waiting answer (review S5-6).
-_NEVER_CHECKED = ("unsupported", "smalltalk", "too_big", "poke")
+_NEVER_CHECKED = ("unsupported", "smalltalk", "unopenable_link", "too_big", "poke")
 # Kinds answered at once, before any lock or bound.
 _INSTANT = ("help", "id", "privacy", "delete")
 # Kinds that can be submitted — the only work in flight that makes the
@@ -1005,6 +1014,9 @@ async def handle_message(
             # still go through the pending-report logic above, because "ok"
             # is exactly what people send when told "send any message".
             await tg.send(chat_id, _SMALLTALK_REPLY)
+            return
+        if kind == "unopenable_link":
+            await tg.send(chat_id, _UNOPENABLE_LINK_REPLY)
             return
 
         await tg.send(chat_id, "🔎 Checking… thoda time lagega (1–3 min).")

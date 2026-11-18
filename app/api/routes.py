@@ -24,13 +24,14 @@ from app.api.schemas import JobAccepted, VerifyLinkRequest, VerifyTextRequest
 from app.config import settings
 from app.api import stream as job_stream
 from app.engine.job import cache_key, run_check
-from app.engine.triage import nothing_to_check
+from app.engine.triage import nothing_to_check, only_unopenable_links
 from app.models.answer import Answer, JobStatus
 from app.providers.asr import get_asr_provider
 from app.providers.llm import PAUSED_MESSAGE, paused_reason, tell_owner_paused
 from app.providers.links import (
-    SUPPORTED_LINKS_MSG, LinkError, LinkInfo, allowed_link_host,
-    download_link_audio, fetch_post_image, log_safe, resolve_link, subtitle_text,
+    SUPPORTED_LINKS_MSG, SUPPORTED_PLATFORMS, LinkError, LinkInfo, allowed_link_host,
+    download_link_audio, fetch_post_image, link_in_message, log_safe, resolve_link,
+    subtitle_text,
 )
 from app.providers import alerts, turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
@@ -59,6 +60,11 @@ _MSG_NO_ASR = ("Voice notes and videos can't be checked here right now. "
 _MSG_NOTHING_TO_CHECK = ("That looks like a greeting, not something to check. "
                          "Paste or forward the message, link or claim you "
                          "want checked.")
+_MSG_UNOPENABLE_LINK = (
+    "This service can't open links to other websites. Paste the text of the "
+    "article or post here, or send a screenshot of it. Links to public "
+    + ", ".join(SUPPORTED_PLATFORMS[:-1]) + f" and {SUPPORTED_PLATFORMS[-1]} "
+    "posts do work.")
 # ffmpeg sniffs the real container, so the type gate is deliberately loose —
 # browsers label voice notes inconsistently (audio/ogg, application/ogg, …).
 _ALLOWED_MEDIA_PREFIXES = ("audio/", "video/")
@@ -464,10 +470,21 @@ async def verify_text(
             f"That message is {len(req.text)} characters; the limit is "
             f"{settings.max_input_chars}. Send the part you want checked.",
         )
+    # A link this service reads, with a few words: checked as the LINK
+    # (2026-11-18). The page and the bot send only a bare link to
+    # /verify/link; with words around it, it came here and bought a check
+    # that could not open it. Decided here, so every surface agrees.
+    found = link_in_message(req.text)
+    if found:
+        url, words = found
+        return await _start_link_check(url, req.language, background, request,
+                                       response, note=words, sent=req.text)
     # Before the slot is even claimed: "hi" used to buy a full check and use
     # up one of the day's capped slots (measured 2026-10-10).
     if nothing_to_check(req.text):
         raise HTTPException(422, _MSG_NOTHING_TO_CHECK)
+    if only_unopenable_links(req.text):
+        raise HTTPException(422, _MSG_UNOPENABLE_LINK)
     # Repeats stay free (Vinayak's $1-a-day decision, 2026-10-15; audit-ops
     # OPS-15): an answer already in the cache costs nothing, so it is served
     # with no slot and no reservation — even when the day's budget or this
@@ -708,26 +725,29 @@ def transcript_key(info: LinkInfo) -> str | None:
 
 async def _run_link_job(job_id: str, info: LinkInfo, repo, stream=None,
                         quota: _Spend | None = None,
-                        language: str | None = None) -> None:
+                        language: str | None = None, note: str = "") -> None:
     """The background job of /verify/link; settles its day (`_finish`)
     however it ends."""
     meter = UsageMeter()   # here, so the transcription it pays for is checkpointed
     try:
         async with _checkpointing(job_id, repo, meter):
             await _link_job(job_id, info, repo, stream, language=language,
-                            meter=meter, **_engine_kwargs(quota))
+                            meter=meter, note=note, **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
 
 
 async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
                     language: str | None = None, mode: str = "full",
-                    on_finished=None, meter: UsageMeter | None = None) -> None:
+                    on_finished=None, meter: UsageMeter | None = None,
+                    note: str = "") -> None:
     """Background half: fetch the text (or its cached transcript), then check it.
 
     A failure here becomes a FAILED report with a readable error (the page
     renders those), never a silent PROCESSING-forever. run_check guards
-    itself; this guard covers the fetch/ASR work before it.
+    itself; this guard covers the fetch/ASR work before it. `note`, the
+    person's own words around the link, is checked with what the post says
+    and is never part of what the transcript cache keeps for the post.
     """
     meter = meter or UsageMeter()
     key = transcript_key(info)
@@ -756,6 +776,8 @@ async def _link_job(job_id: str, info: LinkInfo, repo, stream=None,
         if (key and text.strip() != _caption_text(info).strip()
                 and _PICTURES_MISSED not in text):
             await safe_cache_call(repo.transcripts.put, key, text)
+    if note:
+        text = f"{note}\n\n{text}"
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
                     kind="link", language=language, mode=mode,
                     on_finished=on_finished)
@@ -778,8 +800,21 @@ async def verify_link(
     a background task, and of the two errors, over-counting is the one the
     wallet survives.
     """
+    return await _start_link_check(req.url.strip(), req.language, background,
+                                   request, response)
+
+
+async def _start_link_check(url: str, language: str | None,
+                            background: BackgroundTasks, request: Request,
+                            response: Response, *, note: str = "",
+                            sent: str | None = None) -> JobAccepted:
+    """A link check, from /verify/link or from a message that carried one.
+
+    `note` is the person's own words around the link, checked with what the
+    post says. `sent` is the whole message, stored as what the person sent
+    (what a deletion request names).
+    """
     async with _quota(request, "link", deferred=True, response=response) as spend:
-        url = req.url.strip()
         if allowed_link_host(url) is None:
             raise HTTPException(422, SUPPORTED_LINKS_MSG)
         try:
@@ -811,9 +846,9 @@ async def verify_link(
         # Funded only now, once the free resolve has succeeded: REPRODUCED
         # (review R1), five people's slow, refused resolves held every slot.
         await spend.fund()
-        answer, stream = await _new_job(url)
+        answer, stream = await _new_job(sent or url)
         background.add_task(_run_link_job, answer.job_id, info, _repo, stream,
-                            quota=spend, language=req.language)
+                            quota=spend, language=language, note=note)
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 

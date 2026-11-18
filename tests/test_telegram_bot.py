@@ -33,9 +33,10 @@ def test_links_use_the_servers_own_gate():
     assert kind == "link"
     kind, _ = B.classify_message({"text": "https://youtu.be/x"})
     assert kind == "link"
-    # A lookalike the server would refuse must not be classified as a link.
+    # A lookalike the server would refuse must not be classified as a link:
+    # it is a link nobody may open (2026-11-18), answered for free.
     kind, _ = B.classify_message({"text": "https://youtube.com.evil.com/watch"})
-    assert kind == "text"
+    assert kind == "unopenable_link"
 
 
 def test_a_forward_containing_a_link_is_still_text():
@@ -686,6 +687,25 @@ def test_a_greeting_is_answered_without_a_check():
     _handle(_msg(7, "hi"), app, tg)
     assert app.submissions == []
     assert tg.sent == [(7, B._SMALLTALK_REPLY)]
+
+
+def test_a_link_nobody_can_open_is_answered_without_a_check():
+    """2026-11-18: a news or X link bought a check whose whole answer was "I
+    can't open links". The server's own rule (triage), answered at once."""
+    app, tg = StubApp(), StubTG()
+    msg = _msg(7, "Is this true? https://x.com/someone/status/1890")
+    assert B.classify_message(msg)[0] == "unopenable_link"
+    _handle(msg, app, tg)
+    assert app.submissions == []
+    assert tg.sent == [(7, B._UNOPENABLE_LINK_REPLY)]
+    assert "screenshot" in B._UNOPENABLE_LINK_REPLY
+
+
+def test_a_link_nobody_can_open_mid_check_gets_its_own_reply_not_not_checked():
+    """It is never submitted, so it is never "not checked" either (the
+    kinds in _NEVER_CHECKED)."""
+    assert "unopenable_link" in B._NEVER_CHECKED
+    assert "unopenable_link" not in B._SUBMITS
 
 
 def test_ok_still_collects_the_report_the_bot_asked_a_poke_for():

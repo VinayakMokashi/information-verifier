@@ -227,6 +227,49 @@ def allowed_link_host(url: str) -> str | None:
     return host
 
 
+# A link inside a message (2026-11-18): an address, to the first space.
+_LINK_IN_TEXT = re.compile(r"(?<![\w.])(?:https?://|www\.)\S+", re.IGNORECASE)
+# What closes a sentence or wraps a link, never ends one: "(link)", "link.",
+# the Devanagari danda. "=" is not here: Instagram's ?igsh= ends with it.
+_LINK_TRAILERS = ".,;:!?)]}>\"'»”’…।"
+# The words around a link that still make it "this link, and a question":
+# past this, the message is a forward of its own, and is checked as text.
+_MAX_NOTE_CHARS = 300
+
+
+def find_links(text: str) -> list[tuple[int, int, str]]:
+    """Every link in a message -> (start, end, link), the link as the server
+    would fetch it: "www." gets https, and http:// becomes https:// when that
+    is a link this service reads (they are https-only platforms)."""
+    found = []
+    for match in _LINK_IN_TEXT.finditer(text or ""):
+        token = match.group(0).rstrip(_LINK_TRAILERS)
+        link = token
+        if token.lower().startswith("www."):
+            link = "https://" + token
+        elif token.lower().startswith("http://"):
+            upgraded = "https://" + token[len("http://"):]
+            if allowed_link_host(upgraded) is not None:
+                link = upgraded
+        found.append((match.start(), match.start() + len(token), link))
+    return found
+
+
+def link_in_message(text: str) -> tuple[str, str] | None:
+    """A link this service reads, with a few words around it -> (the link,
+    the words). None if there is none, or if the words are a whole forward.
+
+    SEEN LIVE 2026-11-18: "Kya ye sach hai? <instagram link>" went to the
+    text check, which cannot open a link, was paid for, and said so.
+    """
+    for start, end, link in find_links(text):
+        if allowed_link_host(link) is None:
+            continue
+        words = " ".join((text[:start] + " " + text[end:]).split())
+        return (link, words) if len(words) <= _MAX_NOTE_CHARS else None
+    return None
+
+
 _MSG_NOT_OPENABLE = (
     "That post couldn't be opened — it may have been removed, or be visible "
     "only to people who are logged in. Only public posts work."
