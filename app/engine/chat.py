@@ -272,8 +272,12 @@ def language_hint(text: str) -> str | None:
         return ("The message above is in Hinglish (Hindi written in Latin "
                 "letters), so reply in Hinglish.")
     # English needs POSITIVE evidence. "No Hinglish words" alone would call
-    # "El agua caliente mata el virus" English.
-    if hinglish == 0 and english >= 1 and english / len(words) >= 0.1:
+    # "El agua caliente mata el virus" English. And a Hindi name in English
+    # prose must not veto it: MEASURED 2026-11-19, one "Ki" (Mann Ki Baat)
+    # against 121 English markers left an English post with no language line,
+    # and its answer came back in Hindi. "Modi ji" does the same.
+    if (english >= 1 and english / len(words) >= 0.1
+            and hinglish * 4 <= english):
         return "The message above is written in English, so write your whole reply in English."
     return None
 

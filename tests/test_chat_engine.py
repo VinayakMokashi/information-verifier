@@ -1274,6 +1274,16 @@ def _kind(hint):
     ("https://www.example.com/some/article-about-covid", UNCLEAR),
     # Genuinely mixed: leave it to the model.
     ("The PM said ki petrol will be free", UNCLEAR),
+    # MEASURED 2026-11-19 (paid): an English carousel, 546 words with 121
+    # English markers and ONE Hinglish one ("Mann Ki Baat"), got no language
+    # line at all, and its open-web answer came back in Hindi.
+    ("We are back to normal because we have been taught to outrage over "
+     "other issues, imposing penalties on students who do not celebrate the "
+     "Prime Minister's birthday or listen to Mann Ki Baat. If you think "
+     "women's safety is a priority, check the social media handles of the "
+     "Prime Minister and the Home Minister in the last 24 hours.", ENGLISH),
+    ("Modi ji announced that the government will give free laptops to all "
+     "students from this year", ENGLISH),
 ])
 def test_the_language_hint(text, expected):
     assert _kind(C.language_hint(text)) == expected
