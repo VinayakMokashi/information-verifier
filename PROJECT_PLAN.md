@@ -466,6 +466,48 @@ tests/               pytest suite — always free, every paid seam faked
 changing anything — several entries record measurements that overturned an
 obvious-looking design.*
 
+### 2026-11-19 — One paid carousel check, and a sweep for what else broke
+
+Full notes: docs/research/2026-11-19/sweep.md. Vinayak: "think of such
+exceptions or places where our app is not working currently and fix it."
+- **MEASURED (paid, $0.2051): the model's narration between searches was
+  stored as the answer.** Several English sentences ("Now let's check the
+  second claim.…") came glued to a Hindi answer.
+  - **Decided: the stored answer is what a pass writes after its last
+    tool call**, across paused turns. It still streams live, and every
+    surface re-renders from the stored answer.
+  - A pass that only narrated has written nothing, so it escalates.
+- **MEASURED: one Hindi name vetoed the English hint.** "Mann Ki Baat"
+  against 121 English markers gave no language line, and the answer drifted
+  into Hindi. **Decided: English if Hinglish markers are at most a quarter
+  of the English ones** (positive evidence still required).
+- **MEASURED (free): uploader caption tracks can be translations.** An
+  English video's 'de-DE' was taken alphabetically. **Decided: the track in
+  the spoken language, then the recognised speech, then any other.**
+- **MEASURED (free): Instagram's Share links** (`/share/reel/<code>`)
+  answer a plain client with one 302 to the post, as Facebook's do. yt-dlp
+  refuses `/share/` on purpose. **Decided: the same one-hop, host-checked
+  expansion.** `/accounts/login` counts as a login wall.
+- **Decided: an image's type is read from its bytes, never from its name**,
+  so the vision API is never sent a type it would refuse after the slot is
+  taken. HEIC is named. A side over the API's 8,000 px is refused before
+  any spend, asking for parts. Pillow is not needed: the headers are
+  enough.
+- **Decided: a linked video WITH captions may run to 20 minutes**
+  (`max_captioned_seconds`). The 5-minute cap protects transcription,
+  which a caption track does not need, and the text is bounded by the
+  8,000-character cut anyway.
+- **Decided: captions everywhere.** A Telegram photo, video or audio sent
+  as a file is checked (it was "this message type"). A video's or voice
+  note's caption goes with it, and with no speech the caption is checked.
+  The page sends typed words with picked files.
+- **The privacy notice now names a linked post's pictures** (fetched, read
+  and kept), behind the code since 2026-11-18.
+- **Not fixed (S-6): a restart's orderly stop takes the full 5 minutes**
+  even with nothing running. uvicorn hangs in `server.wait_closed()`
+  (Python 3.12.3, Proactor), most likely on a transport a reset
+  connection left attached.
+
 ### 2026-11-18 — Friends' complaints: Instagram photo posts, links with words, several images
 
 Full notes: docs/research/2026-11-18/link-and-image-complaints.md.
@@ -2448,7 +2490,10 @@ C. **The remaining to-dos** — items 4–32 below. Their value order is in
    check this project lacks, and it gates every remaining cost trade-off:
    effort `low` vs `medium` (Anthropic measured a third to half off for 1–3
    points on research tasks), 2 vs 3 vetted searches, item 21. ~$0.60 a run.
-24. **A QUESTION FOR VINAYAK: "is this true? <link>".** A message with a
+24. ~~**A QUESTION FOR VINAYAK: "is this true? <link>".**~~ **DONE
+   2026-11-18** (a8369c7): a readable link with up to 300 characters of
+   words is checked as the link, the words included; a friend's complaint
+   settled it. Was: a message with a
    link plus other words is checked as TEXT (a pinned rule: a long
    forward's claim is in its words). But for "dekho <reel> sach hai kya" the
    words are only a question, and checking the reel itself would answer far
@@ -2542,6 +2587,24 @@ C. **The remaining to-dos** — items 4–32 below. Their value order is in
      per-person table, because `forget_idle` clears without re-dating.
      Only a sleeping machine stalls that long, and go-live.md sets sleep
      to Never.
+33. **A restart's orderly stop takes the full 5 minutes** (2026-11-19, S-6).
+   - What was seen: uvicorn logged "Shutting down" and nothing more, with
+     no check running. The supervisor killed it at its 300 s limit.
+   - The hang is in `server.wait_closed()` (Python 3.12.3, Proactor),
+     most likely on a transport that a reset connection left attached.
+   - Next: reproduce it for free (a scratch app on another port, a
+     connection reset with SO_LINGER 0, then CTRL_BREAK). Then choose
+     between a supervisor that waits only while a check is PROCESSING and
+     a bounded wait inside the app.
+34. **Long screenshots are refused, not read** (2026-11-19). A side over
+   8,000 px is refused for free, with "send it in parts". Cutting it into
+   tiles with ffmpeg (already installed) would read it whole. The tiles
+   count toward the 5-picture cap and its reservation.
+35. **A "nothing to check" message past the triage still buys pass 2**
+   (about $0.02 more each). In 30 days, 5 of 27 checks were "tier none, 0
+   searches", at about $0.044. Skipping pass 2 when pass 1 searched
+   nothing and answered "no" would save that, at a quality risk to
+   measure first.
 
 **Closed on 2026-09-22 (kept so nobody re-opens them):**
 - ~~The first paid run of the new engine~~ — done; measured in §8.

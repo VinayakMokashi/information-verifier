@@ -29,7 +29,29 @@
 - At $5 a day, October's worst case in the capped Anthropic workspace is
   about $26. His monthly limit (about $35) must stay above that.
 
-**2026-11-18: friends' complaints fixed, NOT LIVE until a restart**
+**2026-11-19: restarted; one paid check; a sweep of what else broke**
+(docs/research/2026-11-19/sweep.md; PROJECT_PLAN §7 2026-11-19):
+- **Restarted at his OK**, 06:39 → 06:45. Live since then: L-1, item 30
+  and every 2026-11-18 fix. The stop took 5 minutes with no check
+  running (S-6, not fixed).
+- **The caps were NOT reverted**: the dashboard still reads $5 and 200.
+  He was told how; it is his call.
+- **One paid check, at his OK: $0.2051** (told "about $0.10"; the open-web
+  pass doubled it).
+  - A 9-picture Instagram text carousel, sent through the live app
+    (link_smoke could not start beside it, S-4).
+  - All 5 pictures were read correctly, the cap note was shown, and both
+    incidents were confirmed from news reports, 75%, general web.
+- **Built from it and the sweep, NOT LIVE until the next restart**:
+  - pushed: 1d8d474, 65a0374, a2c201a, 1f8b5c5, b00f3f3, 174d967,
+    622bf3a, fa775ad, b7ee6c9, 9fa2b3b;
+  - after them: d685876, 9f416d4, 64baecd, and the docs.
+  - The table is in the research file. Both bot explorers: 2,000 seeds
+    each, no violations.
+- **Waiting on him:** a second restart (about 6 minutes down, S-6); the
+  caps revert; the Wi-Fi steps.
+
+**2026-11-18: friends' complaints fixed, LIVE since the 2026-11-19 restart**
 (docs/research/2026-11-18/link-and-image-complaints.md; PROJECT_PLAN §7):
 - a1a7548: Instagram photo posts and carousels are read, with one
   vision call for up to 5 pictures.
@@ -122,8 +144,10 @@
      paid check $0.0627); live at the next restart.
   5. **The free review** of this session's code (82b0708..7d84246).
      Stopped once at his request; re-run when he asks.
-  6. **Free probe:** do YouTube Shorts links resolve without deno? It
-     decides the deno yes/no.
+  6. ~~**Free probe:** do YouTube Shorts links resolve without deno?~~
+     **ANSWERED 2026-11-19: yes.** Watch, Shorts and youtu.be links
+     resolve, with duration, captions and audio formats; yt-dlp only
+     warns. No deno for now; re-probe if YouTube links start failing.
   7. **Small items:**
      - silence the harmless asyncio WinError 10054 startup traceback;
      - he changes his Windows password (it appeared in the chat), and
