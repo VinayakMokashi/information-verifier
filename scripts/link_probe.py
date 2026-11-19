@@ -151,7 +151,9 @@ def app_verdict(url: str) -> str:
     if info.has_media:
         return f"YES - {info.platform} video {post}"
     # A post of pictures (2026-11-18): read by the vision model, not heard.
-    what = f"{len(info.images)} pictures to read" if info.images else "its caption only"
+    count = len(info.images)
+    what = (f"{count} picture{'' if count == 1 else 's'} to read" if info.images
+            else "its caption only")
     if info.videos_skipped:
         what += f", {info.videos_skipped} video(s) not listened to"
     return f"YES - {info.platform} post {post}: {what}"
@@ -180,6 +182,10 @@ def probe(url: str, cookies_from: str | None = None) -> None:
         "noplaylist": True,
         "extract_flat": False,
         "logger": _Silent(),        # yt-dlp writes to stderr regardless of quiet
+        # A post of pictures is a post (the app since 2026-11-18): without
+        # this, "There is no video in this post" read as "no extractor
+        # matched this address" right under the app's YES (2026-11-19).
+        "ignore_no_formats_error": True,
     }
     if cookies_from:
         opts["cookiesfrombrowser"] = (cookies_from,)

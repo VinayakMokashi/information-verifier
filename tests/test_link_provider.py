@@ -487,6 +487,45 @@ def test_the_probe_calls_a_photo_post_what_it_is(monkeypatch):
     assert verdict.startswith("YES") and "3 pictures" in verdict
     assert "video" not in verdict.split(":")[0] and "1 video" in verdict
 
+    one = L.LinkInfo(url=_IG_POST, platform="Instagram", video_id="C1", title="",
+                     uploader="", duration=None, caption="", has_media=False,
+                     subtitle=None, images=("a",))
+    monkeypatch.setattr(P, "resolve_link", lambda url: one)
+    assert "1 picture to read" in P.app_verdict(_IG_POST)
+
+
+def test_the_probes_own_resolve_reads_a_post_of_pictures_too(monkeypatch, capsys):
+    """MEASURED 2026-11-19: on a photo post the probe printed "THE APP: YES …
+    1 pictures to read" and then, from its own yt-dlp run, "RESOLVES: NO —
+    NOT A MEDIA URL — no extractor matched this address": yt-dlp's "There
+    is no video in this post", which the app ignores since 2026-11-18."""
+    import yt_dlp
+
+    import scripts.link_probe as P
+
+    opts_seen = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            opts_seen.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download):
+            if not opts_seen[-1].get("ignore_no_formats_error"):
+                raise yt_dlp.utils.DownloadError("ERROR: [Instagram] C1: There is no video in this post")
+            return {"id": "C1", "title": "", "description": "a caption", "formats": []}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(P, "app_verdict", lambda url: "YES")
+    P.probe(_IG_POST)
+    out = capsys.readouterr().out
+    assert "RESOLVES  : YES" in out and "NOT A MEDIA URL" not in out
+
 
 # -- review R2/R3 (2026-10-15): ports, line breaks, unparseable hops ------------
 
