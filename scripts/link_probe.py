@@ -36,7 +36,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings  # noqa: E402
 from app.providers.links import (  # noqa: E402
-    ALLOWED_HOSTS, LinkError, _classified, _pick_subtitle, resolve_link,
+    _INSTAGRAM_HOSTS, ALLOWED_HOSTS, LinkError, _classified, _pick_subtitle,
+    resolve_link,
 )
 
 # Sarvam bills ~Rs 30/hour by the second (PROJECT_PLAN section 8).
@@ -182,10 +183,11 @@ def probe(url: str, cookies_from: str | None = None) -> None:
         "noplaylist": True,
         "extract_flat": False,
         "logger": _Silent(),        # yt-dlp writes to stderr regardless of quiet
-        # A post of pictures is a post (the app since 2026-11-18): without
-        # this, "There is no video in this post" read as "no extractor
-        # matched this address" right under the app's YES (2026-11-19).
-        "ignore_no_formats_error": True,
+        # An Instagram post of pictures is a post, as in the app since
+        # 2026-11-18 (and only there): without this, "There is no video in
+        # this post" read as "no extractor matched this address" right under
+        # the app's YES (2026-11-19).
+        "ignore_no_formats_error": host in _INSTAGRAM_HOSTS,
     }
     if cookies_from:
         opts["cookiesfrombrowser"] = (cookies_from,)

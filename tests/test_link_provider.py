@@ -526,6 +526,11 @@ def test_the_probes_own_resolve_reads_a_post_of_pictures_too(monkeypatch, capsys
     out = capsys.readouterr().out
     assert "RESOLVES  : YES" in out and "NOT A MEDIA URL" not in out
 
+    # As the app: only Instagram. A YouTube video with no formats is a
+    # failure there, and the probe must not call it resolved.
+    P.probe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert "RESOLVES  : NO" in capsys.readouterr().out
+
 
 # -- review R2/R3 (2026-10-15): ports, line breaks, unparseable hops ------------
 
