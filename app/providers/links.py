@@ -429,13 +429,22 @@ def _base_opts() -> dict:
 _SUB_EXTS = ("json3", "vtt")
 
 
+def _base_language(code: str | None) -> str:
+    """'en-GB', 'hi_FB', 'hi-orig' -> 'en', 'hi', 'hi'."""
+    return re.split(r"[-_]", (code or "").strip().lower(), maxsplit=1)[0]
+
+
 def _pick_subtitle(info: dict) -> SubtitleRef | None:
-    """Choose one caption track: any manual track, else an auto '-orig' one.
+    """Choose one caption track, in the language that was SPOKEN: the
+    uploader's track in it, else the recognised speech, else any uploader
+    track.
 
     Auto tracks WITHOUT '-orig' are machine TRANSLATIONS of the original —
     feeding one to the pipeline would hand normalize() a translation of a
     translation. '-orig' is the recognized source speech, which is exactly
-    the ASR output we would otherwise pay Sarvam for.
+    the ASR output we would otherwise pay Sarvam for. Uploader tracks can be
+    translations too: MEASURED 2026-11-19, an English video carried de-DE,
+    en, es-419, ja and pt-BR, and alphabetical order chose the German one.
     """
     def usable(tracks: list[dict]) -> tuple[str, str] | None:
         by_ext = {t.get("ext"): t.get("url") for t in tracks or [] if t.get("url")}
@@ -445,18 +454,23 @@ def _pick_subtitle(info: dict) -> SubtitleRef | None:
         return None
 
     manual = info.get("subtitles") or {}
-    for lang in sorted(manual):
-        found = usable(manual[lang])
-        if found:
-            return SubtitleRef(lang=lang, url=found[1], ext=found[0])
     autos = info.get("automatic_captions") or {}
-    for lang in sorted(autos):
-        # YouTube marks the recognized source speech '-orig' (everything else
-        # is a machine TRANSLATION). Facebook names its single auto track
-        # '<lang>_FB' and does not serve translated auto tracks — measured on
-        # a Hindi I&B ministry video carrying exactly one track, 'hi_FB'.
-        if lang.endswith("-orig") or lang.endswith("_FB"):
-            found = usable(autos[lang])
+    # YouTube marks the recognized source speech '-orig' (everything else is
+    # a machine TRANSLATION). Facebook names its single auto track
+    # '<lang>_FB' and does not serve translated auto tracks — measured on a
+    # Hindi I&B ministry video carrying exactly one track, 'hi_FB'.
+    heard = sorted(lang for lang in autos
+                   if lang.endswith("-orig") or lang.endswith("_FB"))
+    # yt-dlp states the spoken language for YouTube; the recognised track
+    # names it wherever it does not.
+    spoken = (_base_language(info.get("language"))
+              or next((_base_language(lang) for lang in heard), ""))
+    same = sorted(lang for lang in manual
+                  if spoken and _base_language(lang) == spoken)
+    others = sorted(lang for lang in manual if lang not in same)
+    for tracks, langs in ((manual, same), (autos, heard), (manual, others)):
+        for lang in langs:
+            found = usable(tracks[lang])
             if found:
                 return SubtitleRef(lang=lang, url=found[1], ext=found[0])
     return None

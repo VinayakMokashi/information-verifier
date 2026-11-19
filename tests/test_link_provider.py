@@ -152,6 +152,44 @@ def test_a_track_without_a_usable_format_is_skipped():
     assert (ref.lang, ref.ext) == ("mr", "vtt")
 
 
+def test_the_spoken_languages_own_track_beats_a_translation():
+    """MEASURED 2026-11-19 (free probe): an English video whose uploader
+    tracks were de-DE, en, es-419, ja and pt-BR was read from 'de-DE', the
+    first in alphabetical order. A German translation would have been shown
+    back as what was said, and checked in German."""
+    ref = L._pick_subtitle({
+        "language": "en",
+        "subtitles": {lang: [_track()] for lang in ("de-DE", "en", "es-419", "ja", "pt-BR")},
+        "automatic_captions": {"en-orig": [_track()], "de": [_track()]},
+    })
+    assert ref.lang == "en"
+
+
+def test_a_regional_variant_of_the_spoken_language_counts():
+    ref = L._pick_subtitle({"language": "en",
+                            "subtitles": {"de-DE": [_track()], "en-GB": [_track()]}})
+    assert ref.lang == "en-GB"
+
+
+def test_the_recognised_speech_beats_another_languages_track():
+    """Uploader tracks only in OTHER languages are translations; the
+    recognition of what was actually said is closer to the source."""
+    ref = L._pick_subtitle({
+        "language": "hi",
+        "subtitles": {"en": [_track()]},
+        "automatic_captions": {"hi-orig": [_track()], "en": [_track()]},
+    })
+    assert ref.lang == "hi-orig"
+
+
+def test_without_a_stated_language_the_recognised_speech_names_it():
+    ref = L._pick_subtitle({
+        "subtitles": {"en": [_track()], "hi": [_track()]},
+        "automatic_captions": {"hi-orig": [_track()]},
+    })
+    assert ref.lang == "hi"
+
+
 # -- caption parsers ----------------------------------------------------------
 
 def test_json3_parsing_flattens_events():
