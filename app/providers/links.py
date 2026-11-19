@@ -278,6 +278,12 @@ _MSG_NOT_OPENABLE = (
 # its own was the whole answer four people got for a photo post.
 _MSG_UNREADABLE = ("That link could not be read. Send a screenshot or a screen "
                    "recording of the post instead.")
+_MSG_THROTTLED = ("The platform is limiting how often this server can open posts "
+                  "just now. Try again in a few minutes, or send a screenshot of "
+                  "the post instead.")
+_MSG_NOT_SHOWN = ("The platform didn't show that post to this server. If it is "
+                  "public, try again in a few minutes; if it needs a login, send a "
+                  "screenshot or a screen recording of it instead.")
 _MSG_NO_VIDEO = ("That post has no video this service can read. For a post of "
                  "pictures, send a screenshot instead.")
 _MSG_VIDEO_CAROUSEL = (
@@ -374,7 +380,16 @@ def _classified(exc: Exception) -> LinkError:
     print(f"[links] resolve/fetch failed: {log_safe(exc)}")
     if isinstance(exc, LinkError):
         return exc
-    if "empty media response" in m or "cookies" in m or "login" in m or "logged-in" in m:
+    # Before the login words, which every yt-dlp refusal carries in its hint
+    # ("Use --cookies…"). MEASURED 2026-11-19: a public post read, was then
+    # refused, then read again a minute later — and the refusal told the
+    # person it "needs a login … Only public posts work".
+    if "rate-limit" in m or "rate limit" in m:
+        return LinkError("network", _MSG_THROTTLED)
+    if "empty media response" in m:
+        # yt-dlp cannot tell a login-only post from a passing refusal here.
+        return LinkError("gated", _MSG_NOT_SHOWN)
+    if "cookies" in m or "login" in m or "logged-in" in m:
         return LinkError(
             "gated",
             "That post needs a login to view, so it can't be checked. "

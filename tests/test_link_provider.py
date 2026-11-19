@@ -98,6 +98,42 @@ def test_failures_are_classified_for_the_user(message, kind):
     assert "yt-dlp" not in str(err) and "--cookies" not in str(err)
 
 
+# yt-dlp's own words (instagram.py, 2026.10.21), each with its login hint.
+_IG_THROTTLED = ("ERROR: [Instagram] C1: The webpage request was redirected to the "
+                 "login page. You have exceeded the rate-limit for accessing posts "
+                 "anonymously. Use --cookies-from-browser or --cookies for the "
+                 "authentication")
+_IG_EMPTY = ("ERROR: [Instagram] C1: Instagram sent an empty media response. Check if "
+             "this post is accessible in your browser without being logged-in. If it "
+             "is not, then use --cookies-from-browser or --cookies for the "
+             "authentication. Otherwise, if the post is accessible in browser without "
+             "being logged-in, please report this issue")
+_IG_FOLLOWERS = ("ERROR: [Instagram] C1: This content is only available for registered "
+                 "users who follow this account. Use --cookies-from-browser or --cookies")
+
+
+def test_instagram_throttling_this_server_is_not_called_a_login_wall():
+    """MEASURED 2026-11-19: a public picture post that read fine minutes
+    earlier came back "That post needs a login to view … Only public posts
+    work", and read fine again a minute later. Told that about a public
+    post, a person concludes the service is broken."""
+    err = L._classified(RuntimeError(_IG_THROTTLED))
+    assert err.kind == "network"
+    assert "login" not in str(err) and "try again" in str(err).lower()
+
+
+def test_an_empty_answer_from_instagram_names_both_causes():
+    """yt-dlp cannot tell a login-only post from a passing refusal here, so
+    neither can the person's answer: it says what to try for each."""
+    err = str(L._classified(RuntimeError(_IG_EMPTY))).lower()
+    assert "try again" in err and "screenshot" in err
+
+
+def test_a_real_login_wall_is_still_called_one():
+    err = L._classified(RuntimeError(_IG_FOLLOWERS))
+    assert err.kind == "gated" and "login" in str(err)
+
+
 # -- subtitle choice ----------------------------------------------------------
 
 def _track(ext="json3", url="https://yt.example/sub"):
