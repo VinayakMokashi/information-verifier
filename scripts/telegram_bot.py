@@ -244,14 +244,49 @@ def classify_message(msg: dict) -> tuple[str, str]:
             if (msg[key].get("file_size") or 0) > _TG_DOWNLOAD_LIMIT:
                 return "too_big", ""
             return "media", msg[key].get("file_id", "")
+    doc, mime = _document(msg)
+    if mime in _IMAGE_FILE_TYPES or mime.startswith(("audio/", "video/")):
+        if (doc.get("file_size") or 0) > _TG_DOWNLOAD_LIMIT:
+            return "too_big", ""
+        if not mime.startswith("image/"):
+            return "media", doc.get("file_id", "")
     if msg.get("_album"):
         # An album AlbumCollector gathered into one message (2026-11-18): its
         # photos' file ids, space-separated — Telegram's ids never hold one.
         return "image", " ".join(msg["_album"])
-    if msg.get("photo"):
-        # Telegram sends multiple sizes; the last is the largest.
-        return "image", msg["photo"][-1].get("file_id", "")
+    image = _image_file_id(msg)
+    if image is not None:
+        return "image", image
     return "unsupported", ""
+
+
+# A "document" is a file: a photo sent without compression or from desktop
+# Telegram, a forwarded file. Refused as "this message type" until
+# 2026-11-19. The vision API reads these four; HEIC it does not.
+_IMAGE_FILE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png",
+                     "image/webp": ".webp", "image/gif": ".gif"}
+_TYPE_OF_EXTENSION = {ext: mime for mime, ext in _IMAGE_FILE_TYPES.items()}
+
+
+def _document(msg: dict) -> tuple[dict, str]:
+    """(the file, its lower-cased type), or ({}, "") for none — and for a GIF,
+    which Telegram sends as an animation AND a video/mp4 file: nothing said."""
+    doc = msg.get("document") or {}
+    if not doc or msg.get("animation"):
+        return {}, ""
+    return doc, (doc.get("mime_type") or "").lower()
+
+
+def _image_file_id(msg: dict) -> str | None:
+    """A message's picture, if it has one the bot can fetch: a photo's
+    largest size (Telegram sends several, the last is the largest), or an
+    image sent as a file."""
+    if msg.get("photo"):
+        return msg["photo"][-1].get("file_id", "")
+    doc, mime = _document(msg)
+    if mime in _IMAGE_FILE_TYPES and (doc.get("file_size") or 0) <= _TG_DOWNLOAD_LIMIT:
+        return doc.get("file_id", "")
+    return None
 
 
 def _e(text) -> str:
@@ -570,10 +605,11 @@ class AppClient:
         return resp.json()["job_id"], ""
 
     async def submit_file(self, endpoint: str, filename: str, content: bytes,
-                          content_type: str,
-                          subject: str | None = None) -> tuple[str | None, str]:
+                          content_type: str, subject: str | None = None,
+                          note: str = "") -> tuple[str | None, str]:
+        """One voice note or video; `note` is its caption."""
         return await self._post_files(endpoint, [(filename, content, content_type)],
-                                      None, subject)
+                                      {"note": note} if note else None, subject)
 
     async def submit_images(self, files: list[tuple[str, bytes, str]], note: str = "",
                             subject: str | None = None) -> tuple[str | None, str]:
@@ -752,11 +788,12 @@ async def _submit(kind: str, payload: str, app: AppClient,
             content, path = await tg.file_bytes(file_id)
             name = os.path.basename(path) or "photo.jpg"
             ext = os.path.splitext(name)[1].lower()
-            photos.append((name, content, "image/png" if ext == ".png" else "image/jpeg"))
+            photos.append((name, content, _TYPE_OF_EXTENSION.get(ext, "image/jpeg")))
         return await app.submit_images(photos, note=note, subject=subject)
     content, path = await tg.file_bytes(payload)
     name = os.path.basename(path) or "media.bin"
-    return await app.submit_file("media", name, content, "audio/ogg", subject=subject)
+    return await app.submit_file("media", name, content, "audio/ogg", subject=subject,
+                                 note=note)
 
 
 _NOT_CHECKED = ("ℹ️ Yeh naya message check nahi hua, kyunki pichla check chal "
@@ -1283,7 +1320,8 @@ class AlbumCollector:
         """Take an album's photo (True), or leave the message alone (False)."""
         group = message.get("media_group_id")
         chat_id = (message.get("chat") or {}).get("id")
-        if not group or chat_id is None or not message.get("photo"):
+        file_id = _image_file_id(message)       # a photo, or an image sent as a file
+        if not group or chat_id is None or file_id is None:
             return False
         key = (chat_id, str(group))
         album = self._albums.get(key)
@@ -1292,7 +1330,7 @@ class AlbumCollector:
                 self._flush(next(iter(self._albums)))
             album = self._albums[key] = {"first": message, "ids": [],
                                          "caption": "", "timer": None}
-        album["ids"].append(message["photo"][-1].get("file_id", ""))
+        album["ids"].append(file_id)
         caption = (message.get("caption") or "").strip()
         if caption and not album["caption"]:
             album["caption"] = caption          # Telegram puts it on one photo
@@ -1308,7 +1346,7 @@ class AlbumCollector:
             return
         if album["timer"] is not None:
             album["timer"].cancel()
-        first = {k: v for k, v in album["first"].items() if k != "photo"}
+        first = {k: v for k, v in album["first"].items() if k not in ("photo", "document")}
         self._dispatch({**first, "_album": album["ids"], "caption": album["caption"]})
 
 

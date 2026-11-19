@@ -329,8 +329,11 @@ class StubApp:
             return None, self.reject
         return "job123", ""
 
-    async def submit_file(self, endpoint, filename, content, content_type, subject=None):
-        self.submissions.append((endpoint, filename, content_type))
+    async def submit_file(self, endpoint, filename, content, content_type, subject=None,
+                          note=""):
+        # A caption is recorded only when there is one, so every older
+        # assertion keeps its shape.
+        self.submissions.append((endpoint, filename, content_type) + ((note,) if note else ()))
         self.subjects.append(subject)
         return "job123", ""
 
@@ -816,6 +819,100 @@ def test_two_chats_albums_stay_apart():
     seen = asyncio.run(scenario())
     assert sorted((m["chat"]["id"], tuple(m["_album"])) for m in seen) == [
         (7, ("a", "b")), (8, ("x",))]
+
+
+# -- files, and a video's caption (2026-11-19) -----------------------------------
+# A photo sent as a FILE (desktop Telegram, "send without compression", a
+# forwarded document) was refused: "Yeh message type abhi check nahi kar
+# sakta — text, link, voice note ya photo bhejiye." So was a video sent as a
+# file. And a video's caption, where a forward often states its claim, was
+# dropped: only a photo's reached the check.
+
+def _doc(file_id, mime, size=50_000, **extra):
+    return {"chat": {"id": 7}, **extra,
+            "document": {"file_id": file_id, "mime_type": mime, "file_size": size}}
+
+
+@pytest.mark.parametrize("mime", ["image/jpeg", "image/png", "image/webp", "IMAGE/PNG"])
+def test_a_photo_sent_as_a_file_is_checked_as_a_photo(mime):
+    assert B.classify_message(_doc("d", mime)) == ("image", "d")
+
+
+@pytest.mark.parametrize("mime", ["video/mp4", "audio/mpeg", "audio/ogg"])
+def test_a_video_or_audio_sent_as_a_file_is_media(mime):
+    assert B.classify_message(_doc("d", mime)) == ("media", "d")
+
+
+def test_other_files_and_gifs_are_still_not_checked():
+    assert B.classify_message(_doc("d", "application/pdf"))[0] == "unsupported"
+    assert B.classify_message(_doc("d", "image/heic"))[0] == "unsupported"
+    # A GIF arrives as an animation AND a video/mp4 document: no words to hear.
+    gif = _doc("g", "video/mp4", animation={"file_id": "g", "mime_type": "video/mp4"})
+    assert B.classify_message(gif)[0] == "unsupported"
+
+
+def test_a_file_past_the_bots_download_limit_is_too_big():
+    for mime in ("image/png", "video/mp4"):
+        assert B.classify_message(
+            _doc("d", mime, size=B._TG_DOWNLOAD_LIMIT + 1))[0] == "too_big"
+
+
+class _FileTG(StubTG):
+    async def file_bytes(self, file_id):
+        return b"RIFF\x00\x00\x00\x00WEBP", f"documents/{file_id}.webp"
+
+
+def test_a_photo_files_own_type_is_what_is_sent():
+    """A .webp labelled image/jpeg is refused by the vision API, after the
+    day's slot is taken."""
+    sent = []
+
+    class App(StubApp):
+        async def submit_images(self, files, note="", subject=None):
+            sent.extend(files)
+            return await super().submit_images(files, note, subject)
+
+    _handle(_doc("d", "image/webp"), App(), _FileTG())
+    assert [(name, ctype) for name, _, ctype in sent] == [("d.webp", "image/webp")]
+
+
+def test_a_videos_caption_goes_with_it():
+    app, tg = StubApp(), StubTG()
+    _handle({"chat": {"id": 7}, "video": {"file_id": "v"},
+             "caption": " Yeh video kal Nagpur ka hai "}, app, tg)
+    assert app.submissions == [("media", "file_77.oga", "audio/ogg",
+                                "Yeh video kal Nagpur ka hai")]
+
+
+def test_photo_files_sent_together_are_one_check():
+    async def scenario():
+        seen = []
+        albums = B.AlbumCollector(seen.append, wait_s=0.05)
+        B.deliver([{"message": _doc("a", "image/png", media_group_id="G")},
+                   {"message": _doc("b", "image/jpeg", media_group_id="G",
+                                    caption="Sach hai?")}], seen.append, albums)
+        await _until_true(lambda: seen)
+        await asyncio.sleep(0.1)                     # nothing more may follow
+        return seen
+
+    seen = asyncio.run(scenario())
+    assert len(seen) == 1
+    assert seen[0]["_album"] == ["a", "b"] and seen[0]["caption"] == "Sach hai?"
+    assert "document" not in seen[0]                 # one message, not its first file
+
+
+def test_a_file_too_big_to_fetch_is_not_gathered_into_an_album():
+    """Gathered, it would fail the whole album at download; alone, it is
+    told why."""
+    async def scenario():
+        seen = []
+        albums = B.AlbumCollector(seen.append, wait_s=0.05)
+        B.deliver([{"message": _doc("big", "image/png", size=B._TG_DOWNLOAD_LIMIT + 1,
+                                    media_group_id="G")}], seen.append, albums)
+        return list(seen)
+
+    seen = asyncio.run(scenario())
+    assert len(seen) == 1 and B.classify_message(seen[0])[0] == "too_big"
 
 
 def test_ok_still_collects_the_report_the_bot_asked_a_poke_for():
