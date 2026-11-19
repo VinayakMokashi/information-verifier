@@ -45,7 +45,9 @@
 - **Built from it and the sweep, NOT LIVE until the next restart**:
   - pushed: 1d8d474, 65a0374, a2c201a, 1f8b5c5, b00f3f3, 174d967,
     622bf3a, fa775ad, b7ee6c9, 9fa2b3b;
-  - after them: d685876, 9f416d4, 64baecd, and the docs.
+  - after them: d685876, 9f416d4, 64baecd, the docs, 97ce761 and
+    2fe329c (S-15: Instagram throttling this server had been told as
+    "needs a login", measured on a public post).
   - The table is in the research file. Both bot explorers: 2,000 seeds
     each, no violations.
 - **Waiting on him:** a second restart (about 6 minutes down, S-6); the

@@ -136,6 +136,20 @@ budget and the real ledger.
   transcript cache. The notice said only "caption and sound".
 - **S-14: the web page dropped words typed before picking a picture**
   (listed as not built on 2026-11-18).
+- **S-15: Instagram throttling this server was called a login wall.**
+  - Measured: `instagram.com/p/DbIqY5NpXga/` read fine. About twenty
+    minutes and many probes later, the app's resolve was refused with
+    "That post needs a login to view … Only public posts work." It read
+    fine four times in a row a minute after that.
+  - Every yt-dlp refusal ends with a "--cookies" login hint, so the login
+    branch caught them all.
+  - With the extractor's own words: "rate-limit" is throttling; an "empty
+    media response" could be either cause; "registered users who follow"
+    is a real wall.
+  - This is likely what friends will meet when several check Instagram
+    links at once from this one address.
+- **Found reviewing my own fix (b7ee6c9):** the probe ignored "no formats"
+  for every platform, while the app does so only for Instagram.
 
 ## Commits (each failing-first; the bot's after both explorers)
 
@@ -154,6 +168,8 @@ budget and the real ledger.
 | d685876 | S-12: a captioned video may run to 20 minutes; a failed caption fetch says so |
 | 9f416d4 | S-13: the notice names the pictures |
 | 64baecd | S-14: the page sends typed words as the pictures' or clip's note |
+| 97ce761 | review of b7ee6c9: the probe ignores "no formats" for Instagram only |
+| 2fe329c | S-15: throttling says "try again in a few minutes", not "needs a login" |
 
 Measured free after the fixes:
 - link_probe on the real share link says "THE APP: YES - Instagram video

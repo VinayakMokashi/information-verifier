@@ -503,6 +503,13 @@ exceptions or places where our app is not working currently and fix it."
   The page sends typed words with picked files.
 - **The privacy notice now names a linked post's pictures** (fetched, read
   and kept), behind the code since 2026-11-18.
+- **MEASURED (free): Instagram throttles this server's anonymous visits.**
+  A public post was refused once and read again a minute later, and the
+  refusal had told the person the post "needs a login". **Decided: the
+  extractor's own words decide.** "Rate-limit" means try again; an "empty
+  media response" names both causes; only "registered users" is a login
+  wall. Every yt-dlp refusal carries a "--cookies" hint, so the login
+  words prove nothing.
 - **Not fixed (S-6): a restart's orderly stop takes the full 5 minutes**
   even with nothing running. uvicorn hangs in `server.wait_closed()`
   (Python 3.12.3, Proactor), most likely on a transport a reset
