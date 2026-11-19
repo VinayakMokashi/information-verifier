@@ -976,6 +976,10 @@ $("check").addEventListener("click", () => {
 // Several screenshots go in ONE check (2026-11-18: "I cant post multiple
 // images?"). The server says how many it reads at once, so the page does not
 // keep its own number to drift.
+// Words typed before picking go with the pictures or the clip, as a Telegram
+// photo's caption does (2026-11-19). The server's limit: longer, they would
+// sink the whole upload, so they stay in the box to be sent on their own.
+const NOTE_MAX = 1024;
 function wireFilePicker(buttonId, inputId, endpoint, label, plural) {
   $(buttonId).addEventListener("click", () => $(inputId).click());
   $(inputId).addEventListener("change", () => {
@@ -985,8 +989,16 @@ function wireFilePicker(buttonId, inputId, endpoint, label, plural) {
     for (const f of files) fd.append("file", f);
     fd.append("language", replyLanguage);
     $(inputId).value = "";   // cleared first, so an early return leaves no stale pick
-    const shown = files.length === 1 ? `${label}: ${files[0].name}`
-                                     : `${plural}: ${files.length}`;
+    const words = box.value.trim();
+    const withWords = !busy && words.length > 0 && words.length <= NOTE_MAX;
+    if (withWords) {
+      fd.append("note", words);
+      box.value = "";
+      box.style.height = "auto";
+    }
+    const shown = (files.length === 1 ? `${label}: ${files[0].name}`
+                                      : `${plural}: ${files.length}`)
+                  + (withWords ? ` — ${words}` : "");
     submit((human) => fetch(endpoint, { method: "POST", headers: human, body: fd }),
            shown);
   });

@@ -120,6 +120,33 @@ def test_the_page_lets_a_person_pick_several_images_and_sends_them_all():
     assert 'fd.append("file", f)' in page
 
 
+def _note_limit(route: str) -> int:
+    """The `note` form field's maxLength, as the server itself declares it."""
+    from app.main import app
+
+    body = app.openapi()["paths"][route]["post"]["requestBody"]["content"]
+    ref = body["multipart/form-data"]["schema"]["$ref"].rsplit("/", 1)[-1]
+    note = app.openapi()["components"]["schemas"][ref]["properties"]["note"]
+    return next(s["maxLength"] for s in note["anyOf"] if "maxLength" in s)
+
+
+def test_the_page_sends_words_typed_with_pictures_as_their_caption():
+    """2026-11-19: on Telegram a photo's caption goes with it; on the page,
+    words typed before picking a picture stayed in the box, unsent. Longer
+    than the server takes, they would sink the whole upload (422), so they
+    stay in the box instead."""
+    import re
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parent.parent / "static" / "index.html"
+            ).read_text(encoding="utf-8")
+    assert 'fd.append("note", words)' in page
+    limit = re.search(r"const NOTE_MAX = (\d+);", page)
+    assert limit
+    for route in ("/api/v1/verify/image", "/api/v1/verify/media"):
+        assert int(limit.group(1)) == _note_limit(route)
+
+
 def test_the_image_reservation_covers_the_most_images_read_at_once():
     """Reserved before any spend, it must cover the worst case (config's
     rule): every image at Sonnet 5's high resolution (4,784 tokens), the
