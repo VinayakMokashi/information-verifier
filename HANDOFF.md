@@ -42,14 +42,14 @@
     (link_smoke could not start beside it, S-4).
   - All 5 pictures were read correctly, the cap note was shown, and both
     incidents were confirmed from news reports, 75%, general web.
-- **Built from it and the sweep, NOT LIVE until the next restart**:
-  - pushed: 1d8d474, 65a0374, a2c201a, 1f8b5c5, b00f3f3, 174d967,
-    622bf3a, fa775ad, b7ee6c9, 9fa2b3b;
-  - after them: d685876, 9f416d4, 64baecd, the docs, 97ce761 and
-    2fe329c (S-15: Instagram throttling this server had been told as
-    "needs a login", measured on a public post).
-  - The table is in the research file. Both bot explorers: 2,000 seeds
-    each, no violations.
+- **Built from it and the sweep, all pushed, NOT LIVE until the next
+  restart**:
+  - 1d8d474 to 2fe329c, 15 fixes;
+  - S-15 among them: Instagram throttling this server had been told as
+    "needs a login", measured on a public post.
+  - The table is in the research file. The last suite run (on 2fe329c)
+    had 1479 passed, pytest exit 0, in a clean worktree. Both bot
+    explorers: 2,000 seeds each, no violations.
 - **Waiting on him:** a second restart (about 6 minutes down, S-6); the
   caps revert; the Wi-Fi steps.
 
