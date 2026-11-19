@@ -87,6 +87,66 @@ def test_voice_note_flow(media_client, tmp_path):
     assert report["source_text"] == "WHO ne kaha 5G se corona hota hai"
 
 
+def test_a_videos_caption_is_checked_with_what_was_said(media_client, tmp_path):
+    """2026-11-19: a forwarded video often carries its claim in the caption,
+    and only a photo's caption reached the check."""
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("clip.ogg", _tone(tmp_path, 2.0), "audio/ogg")},
+        data={"note": "Yeh video kal Nagpur ka hai"},
+    )
+    assert resp.status_code == 202
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "COMPLETE"
+    assert report["source_text"] == ("Yeh video kal Nagpur ka hai\n\n"
+                                     "WHO ne kaha 5G se corona hota hai")
+
+
+def test_a_caption_is_still_checked_when_no_speech_was_heard(media_client, tmp_path,
+                                                             monkeypatch):
+    """Music under a captioned claim: "No speech could be transcribed" threw
+    away the one thing that could be checked."""
+    class Silent:
+        async def transcribe(self, audio, language_hint=None):
+            return Transcript(text="", language="hi-IN")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: Silent())
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("music.ogg", _tone(tmp_path, 2.0), "audio/ogg")},
+        data={"note": "Sarkar sabko free laptop de rahi hai"},
+    )
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "COMPLETE"
+    assert report["source_text"].startswith("Sarkar sabko free laptop de rahi hai")
+    assert R._NO_SPEECH in report["source_text"]      # and the reader is told
+
+
+def test_no_speech_and_no_caption_still_fails_plainly(media_client, tmp_path, monkeypatch):
+    class Silent:
+        async def transcribe(self, audio, language_hint=None):
+            return Transcript(text="", language="hi-IN")
+
+    monkeypatch.setattr(R, "get_asr_provider", lambda: Silent())
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("music.ogg", _tone(tmp_path, 2.0), "audio/ogg")},
+    )
+    report = media_client.get(f"/api/v1/reports/{resp.json()['job_id']}").json()
+    assert report["status"] == "FAILED"
+    assert "No speech" in report["error"]
+
+
+def test_a_media_caption_is_capped_like_a_photos(media_client, tmp_path):
+    resp = media_client.post(
+        "/api/v1/verify/media",
+        files={"file": ("clip.ogg", _tone(tmp_path, 2.0), "audio/ogg")},
+        data={"note": "x" * 1025},
+    )
+    assert resp.status_code == 422
+    assert media_client.fake_asr.calls == 0
+
+
 def test_text_submissions_have_no_derived_text(client):
     """Nothing was machine-read, so there is nothing to show back."""
     accepted = client.post("/api/v1/verify/text", json={"text": "some claim"})

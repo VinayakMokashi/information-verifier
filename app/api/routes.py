@@ -407,21 +407,27 @@ async def transcribe_wav(wav: bytes, duration: float) -> str:
 
 async def _run_media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
-    quota: _Spend | None = None, language: str | None = None,
+    quota: _Spend | None = None, language: str | None = None, note: str = "",
 ) -> None:
     """The background job of /verify/media. Whatever ends it — an answer, a
     transcription failure, a crash — settles its day (`_finish`)."""
     try:
         async with _checkpointing(job_id, repo, meter):
             await _media_job(job_id, wav, duration, repo, meter, stream, language=language,
-                             **_engine_kwargs(quota))
+                             note=note, **_engine_kwargs(quota))
     finally:
         await _finish(job_id, repo, quota)
+
+
+# Said with a caption when the audio held no words (music under a captioned
+# claim): the caption is checked, and the reader sees why nothing was heard.
+_NO_SPEECH = "[No speech could be made out in the audio.]"
 
 
 async def _media_job(
     job_id: str, wav: bytes, duration: float, repo, meter: UsageMeter, stream=None,
     language: str | None = None, mode: str = "full", on_finished=None,
+    note: str = "",
 ) -> None:
     """Background half of /verify/media: chunk -> Sarvam -> the check.
 
@@ -451,9 +457,13 @@ async def _media_job(
         await fail("Something went wrong reading this audio. Please try again.")
         return
 
-    if not text:
+    if not text and not note:
         await fail("No speech could be transcribed from this audio.")
         return
+    if note:
+        # A video's caption (2026-11-19): a forward often carries its claim
+        # there, and only a photo's reached the check.
+        text = f"{note}\n\n{text or _NO_SPEECH}"
     await run_check(job_id, text, repo, stream, derived_text=text, meter=meter,
                     kind="media", language=language, mode=mode,
                     on_finished=on_finished)
@@ -566,6 +576,8 @@ async def verify_image(
 async def verify_media(
     background: BackgroundTasks, request: Request, response: Response,
     file: UploadFile = File(...), language: str | None = Form(None, max_length=40),
+    # A video's or voice note's caption, as for a photo (Telegram's limit).
+    note: str | None = Form(None, max_length=1024),
 ) -> JobAccepted:
     # `spend.begin()` is never called: since the Sarvam loop moved behind the
     # 202, this route spends nothing before returning, so every rejection here
@@ -609,7 +621,8 @@ async def verify_media(
         await spend.fund()
         answer, stream = await _new_job()
         background.add_task(_run_media_job, answer.job_id, wav, duration, _repo,
-                            meter, stream, quota=spend, language=language)
+                            meter, stream, quota=spend, language=language,
+                            note=(note or "").strip())
         return JobAccepted(job_id=answer.job_id, status=answer.status)
 
 
