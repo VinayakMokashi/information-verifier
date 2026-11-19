@@ -958,6 +958,60 @@ def test_searching_is_announced_once_per_search_not_per_filter_step(no_factcheck
     assert "Reading what the search found…" in statuses
 
 
+def test_words_written_before_a_search_are_not_the_answer(no_factcheck, monkeypatch):
+    """MEASURED 2026-11-19 (paid, a 9-picture carousel): pass 2 searched five
+    times, and the stored answer began "Jamui incident confirmed. Now let's
+    check the second claim.Both core incidents check out. Let me verify a
+    couple more peripheral factual elements …", glued to the Hindi answer.
+    What the model writes before a search is narration; the answer is what
+    it writes after the last one."""
+    events = [*_deltas("Let me check the fact-checkers."), _search_event(),
+              *_deltas("Claim one checks out. Now let's check the second claim."),
+              _search_event(), *_deltas("It is false. " + SENTINEL_YES)]
+    client = StubClient([(_final("It is false. " + SENTINEL_YES, searches=2,
+                                 citations=[_citation(TRUSTED_URL)]), events)])
+    answer, emitted = _run(client, monkeypatch)
+    assert [s.markdown for s in answer.sections] == ["It is false."]
+    assert answer.tier == "trusted"
+    # Live, it still streamed as it was written: the page re-renders from
+    # the stored answer when the stream ends (invariant 8).
+    assert "Let me check" in "".join(d["text"] for k, d in emitted if k == "text")
+
+
+def test_narration_before_a_paused_turn_is_dropped_too(no_factcheck, monkeypatch):
+    """A long search turn pauses and resumes as a new request; the answer
+    starts after the last search of the whole pass, not of one request."""
+    monkeypatch.setattr(settings, "web_tier_enabled", False)
+    client = StubClient([
+        (_final("Searching. ", stop="pause_turn", searches=1),
+         [*_deltas("Let me search the fact-checkers. "), _search_event()]),
+        (_final("It is false. " + SENTINEL_YES, searches=1,
+                citations=[_citation(TRUSTED_URL)]),
+         [*_deltas("One more search. "), _search_event(),
+          *_deltas("It is false. " + SENTINEL_YES)]),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert [s.markdown for s in answer.sections] == ["It is false."]
+
+
+def test_a_pass_that_only_narrated_has_not_answered(no_factcheck, monkeypatch):
+    """Its search budget ran out mid-turn, after "Let me check…" and before
+    any answer: that sentence is not an answer to label and show. The pass
+    wrote nothing, so the open web gets its turn."""
+    monkeypatch.setattr(settings, "chat_max_searches_trusted", 1)
+    client = StubClient([
+        (_final("Let me check. ", stop="pause_turn", searches=1,
+                results=[TRUSTED_URL]),
+         [*_deltas("Let me check the fact-checkers. "), _search_event()]),
+        (_final("The wider web says it is false. " + SENTINEL_YES,
+                citations=[_citation(WEB_URL)], searches=1),
+         _deltas("The wider web says it is false. " + SENTINEL_YES)),
+    ])
+    answer, _ = _run(client, monkeypatch)
+    assert len(client.requests) == 2                 # escalated
+    assert [s.markdown for s in answer.sections] == ["The wider web says it is false."]
+
+
 def test_the_language_rule_names_english_and_forbids_guessing_the_reader():
     """An English claim came back in Hinglish: the rule's examples named
     Hindi, Spanish and Hinglish — not English — beside an India-heavy

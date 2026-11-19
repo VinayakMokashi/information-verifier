@@ -385,6 +385,12 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
     # names nothing.
     core_only = False
     excluded: set[str] = set()
+    # Where the answer starts: after the pass's last tool call. What the model
+    # writes before a search is narration, and MEASURED 2026-11-19 (a pass
+    # that searched five times) it is not one "Let me check…" but several
+    # English sentences of working, glued to a Hindi answer. It still streams
+    # live; the stored answer, which every surface re-renders from, drops it.
+    answer_from = 0
 
     for _ in range(_MAX_CONTINUATIONS):
         if search and trusted and not _offered(core_only, excluded):
@@ -417,6 +423,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
                     if kind == "content_block_start":
                         block = getattr(event, "content_block", None)
                         if getattr(block, "type", "") == "server_tool_use":
+                            answer_from = len(result.markdown)
                             # MEASURED: one search showed "Searching…" four
                             # times. web_search_20260209 filters its results
                             # with code execution, and those steps are
@@ -500,7 +507,7 @@ async def _run_pass(system: str, user_content: str, *, trusted: bool,
     result.confidence, result.model_says_trusted = marker.parse()
     result.used = marker.used()
     result.summary = marker.summary()
-    result.markdown = result.markdown.strip()
+    result.markdown = result.markdown[answer_from:].strip()
 
     # De-duplicate while preserving order.
     seen: set[str] = set()
