@@ -672,6 +672,14 @@ async def gather_link_text(info: LinkInfo) -> str:
     spoken: str | None = None
     if info.subtitle is not None:
         spoken = await asyncio.to_thread(subtitle_text, info.subtitle)
+    too_long_to_hear = (info.duration is not None
+                        and info.duration > settings.max_media_seconds)
+    if spoken is None and info.has_media and too_long_to_hear:
+        # Let in for its captions (max_captioned_seconds), which failed: its
+        # audio is past the ASR cap, so a download could only end refused.
+        raise LinkError("other", "That video's captions could not be read, and it is "
+                                 f"too long to listen to (over "
+                                 f"{settings.max_media_seconds}s). Try a shorter clip.")
     if spoken is None and info.has_media:
         data, ext = await asyncio.to_thread(
             download_link_audio, info.url, settings.max_media_bytes
@@ -876,11 +884,13 @@ async def _start_link_check(url: str, language: str | None,
             raise HTTPException(_LINK_HTTP.get(exc.kind, 422), str(exc))
 
         # Everything knowable for free is checked before the job exists.
-        if info.duration is not None and info.duration > settings.max_media_seconds:
+        limit = (settings.max_captioned_seconds if info.subtitle is not None
+                 else settings.max_media_seconds)
+        if info.duration is not None and info.duration > limit:
             raise HTTPException(
                 413,
                 f"That video is {info.duration:.0f}s long; the limit is "
-                f"{settings.max_media_seconds}s. Try a shorter clip.",
+                f"{limit}s. Try a shorter clip.",
             )
         needs_asr = info.subtitle is None and info.has_media
         if needs_asr and not settings.sarvam_api_key:

@@ -127,6 +127,47 @@ def test_a_known_overlong_video_is_rejected_free(client, monkeypatch):
     assert limits.used_today() == 0           # refunded: nothing was fetched
 
 
+def test_a_longer_video_with_captions_is_checked_not_refused(client, monkeypatch):
+    """2026-11-19: the 5-minute cap protects ASR credits, and a caption track
+    needs no ASR — its text is bounded by the engine's 8,000 characters,
+    which says where it cut. A 7-minute news clip with captions was refused
+    all the same."""
+    _wire_real_gather(monkeypatch, subtitle=lambda ref: "The minister said so.")
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        duration=420.0, subtitle=SubtitleRef("en", "https://yt.example/sub", "json3")))
+
+    report = _report(client, _submit(client, SHORT))
+
+    assert report["status"] == "COMPLETE"
+    assert "The minister said so." in report["source_text"]
+
+
+def test_a_longer_video_whose_captions_fail_is_not_downloaded(client, monkeypatch):
+    """Its audio is past the ASR cap, so the download could only end in that
+    refusal (the default _wire_real_gather download raises if it is called)."""
+    _wire_real_gather(monkeypatch)                      # the caption fetch fails
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        duration=420.0, subtitle=SubtitleRef("en", "https://yt.example/sub", "json3")))
+
+    report = _report(client, _submit(client, SHORT))
+
+    assert report["status"] == "FAILED"
+    assert "captions" in report["error"]
+
+
+def test_even_with_captions_a_very_long_video_is_refused_free(client, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    limits.reset()
+    monkeypatch.setattr(R, "resolve_link", lambda u: _info(
+        duration=settings.max_captioned_seconds + 1.0,
+        subtitle=SubtitleRef("en", "https://yt.example/sub", "json3")))
+
+    resp = _submit(client, SHORT)
+
+    assert resp.status_code == 413
+    assert limits.used_today() == 0
+
+
 def test_audio_without_sarvam_key_is_a_clear_503(client, monkeypatch):
     monkeypatch.setattr(settings, "sarvam_api_key", "")
     monkeypatch.setattr(R, "resolve_link", lambda u: _info(subtitle=None))

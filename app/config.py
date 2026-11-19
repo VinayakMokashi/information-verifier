@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     # /ready says "demo", and the bot refuses to wire people to it.
     demo_mode: bool = False
     max_media_seconds: int = 300             # 5 min cap — protects ASR credits
+    # A linked video WITH a caption track needs no ASR, and its text is
+    # bounded by the engine's 8,000 characters (which says where it cut), so
+    # the 5-minute cap refused news clips for no saving (2026-11-19).
+    max_captioned_seconds: int = 1200
     asr_chunk_seconds: int = 29              # Sarvam sync API takes <=30 s per request
     # Pictures read in ONE vision call (a post's pictures; 2026-11-18). On
     # Sonnet 5 an image costs up to 4,784 tokens (the vision docs, 2026-11-18),
