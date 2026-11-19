@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     # Per picture, raw. The API's own limit is 10 MB base64-encoded, which is
     # 7.5 MB of image; past it a check would fail AFTER being accepted.
     max_image_bytes: int = 7 * 1024 * 1024
+    # The vision API refuses a picture with a side longer than this (its
+    # documented limit, read 2026-11-18). A scrolling screenshot passes it;
+    # refused here, it costs nothing and the person is told to send parts.
+    max_image_side_px: int = 8000
 
     # Spending guard — every check costs money and the share link is public.
     # One submission is one answer since the pivot (it used to fan out to a

@@ -9,9 +9,78 @@ Several pictures (a post's carousel, 2026-11-18) are read in ONE call: one
 bounded answer, where a call per picture would multiply the output cap.
 """
 import base64
+import struct
 
 from app.config import settings
 from app.providers.llm import async_client
+
+# The four types the vision API reads, told by the bytes themselves
+# (2026-11-19): a file's name and declared type can be wrong (a WebP saved
+# as .jpg, a photo sent as a Telegram file), and the API refuses a declared
+# type that does not match what it is sent — after the day's slot is taken.
+_SIGNATURES = ((b"\xff\xd8", "image/jpeg"), (b"\x89PNG", "image/png"),
+               (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif"))
+# Apple's HEIC/HEIF (and AVIF): an ISO 'ftyp' box naming one of these brands.
+_HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis",
+                b"mif1", b"msf1", b"avif"}
+# JPEG start-of-frame markers, the ones that carry the picture's size.
+_JPEG_FRAMES = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+
+
+def image_type(data: bytes) -> str | None:
+    """The media type the bytes are, if the vision API reads it."""
+    for head, media_type in _SIGNATURES:
+        if data.startswith(head):
+            return media_type
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def is_heic(data: bytes) -> bool:
+    return data[4:8] == b"ftyp" and data[8:12] in _HEIF_BRANDS
+
+
+def image_size(data: bytes) -> tuple[int, int] | None:
+    """(width, height) from the header; None when it cannot be told, and
+    then the API decides."""
+    kind = image_type(data)
+    try:
+        if kind == "image/png" and data[12:16] == b"IHDR":
+            return struct.unpack(">II", data[16:24])
+        if kind == "image/gif":
+            return struct.unpack("<HH", data[6:10])
+        if kind == "image/webp":
+            chunk = data[12:16]
+            if chunk == b"VP8X":
+                return (int.from_bytes(data[24:27], "little") + 1,
+                        int.from_bytes(data[27:30], "little") + 1)
+            if chunk == b"VP8 ":
+                width, height = struct.unpack("<HH", data[26:30])
+                return width & 0x3FFF, height & 0x3FFF
+            if chunk == b"VP8L":
+                bits = int.from_bytes(data[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if kind == "image/jpeg":
+            at = 2
+            while at + 4 <= len(data):
+                if data[at] != 0xFF:
+                    return None
+                marker = data[at + 1]
+                if marker == 0xFF:                      # fill byte
+                    at += 1
+                    continue
+                if marker == 0x01 or 0xD0 <= marker <= 0xD9:   # no length
+                    at += 2
+                    continue
+                if marker in _JPEG_FRAMES:
+                    height, width = struct.unpack(">HH", data[at + 5:at + 9])
+                    return width, height
+                at += 2 + struct.unpack(">H", data[at + 2:at + 4])[0]
+    except struct.error:
+        return None
+    return None
 
 _OCR_PROMPT = (
     "Transcribe ALL text visible in this image exactly as written, including "

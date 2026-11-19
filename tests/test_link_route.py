@@ -554,6 +554,25 @@ def test_a_picture_that_cannot_be_fetched_is_left_out_and_said(client, monkeypat
     assert "could not be fetched" in report["source_text"]
 
 
+def test_a_fetched_picture_is_read_as_what_its_bytes_are(client, monkeypatch):
+    """2026-11-19: the vision API refuses a declared type that does not match
+    the bytes, and refuses the whole call, the readable pictures with it."""
+    def mixed(url, max_bytes):
+        if url.endswith("1.jpg"):
+            return b"RIFF\x00\x00\x00\x00WEBP", "image/jpeg"     # a WebP, mislabelled
+        return b"<html>login</html>", "image/jpeg"                # no picture at all
+
+    _, read = _wire_pictures(monkeypatch, fetch=mixed)
+    monkeypatch.setattr(R, "resolve_link",
+                        lambda u: _info(has_media=False, images=_pics(2)))
+
+    report = _report(client, _submit(client))
+
+    assert report["status"] == "COMPLETE"
+    assert [t for _, t in read[0]] == ["image/webp"]
+    assert "could not be fetched" in report["source_text"]
+
+
 def test_no_picture_fetched_is_a_readable_failure_and_nothing_is_read(client, monkeypatch):
     def down(url, max_bytes):
         raise LinkError("network", "down")

@@ -36,14 +36,12 @@ from app.providers.links import (
 from app.providers import alerts, turnstile
 from app.providers.media import MediaError, MediaTooLong, normalize_to_wav, split_wav
 from app.providers.usage import UsageMeter
-from app.providers.vision import ocr_images
+from app.providers.vision import image_size, image_type, is_heic, ocr_images
 from app.trusted_sources import is_trusted_url
 from app.store.repository import AnswerRepository, safe_cache_call
 
 router = APIRouter(prefix="/api/v1")
 _repo = AnswerRepository()
-
-_ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
 # Every error below is read by a person, often on a phone, often not in their
 # first language. Measured 2026-09-22 before fixing: ffmpeg's own stderr, raw
@@ -54,6 +52,10 @@ _MSG_NOT_AN_IMAGE = ("That doesn't look like a picture. Send a screenshot or "
 _MSG_IMAGE_TOO_LARGE = (f"That picture is larger than "
                         f"{settings.max_image_bytes // (1024 * 1024)} MB. Send a "
                         "screenshot of it instead.")
+_MSG_HEIC = ("That photo is in Apple's HEIC format, which can't be read here. "
+             "Send a screenshot of it instead.")
+_MSG_IMAGE_TOO_TALL = ("That picture is too long to read in one piece. Send it "
+                       "in two or three parts, together.")
 _MSG_NOT_MEDIA = ("That doesn't look like audio or video. Send a voice note "
                   "or a video file.")
 _MSG_BAD_AUDIO = ("The audio in that file couldn't be read. Try sending it "
@@ -537,12 +539,18 @@ async def verify_image(
                                      "images at a time.")
         images = []
         for upload in file:
-            if upload.content_type not in _ALLOWED_IMAGE_TYPES:
-                raise HTTPException(415, _MSG_NOT_AN_IMAGE)
             data = await upload.read()
             if len(data) > settings.max_image_bytes:
                 raise HTTPException(413, _MSG_IMAGE_TOO_LARGE)
-            images.append((data, upload.content_type))
+            # What the bytes ARE, not what the file was called (2026-11-19):
+            # the vision API refuses a declared type that does not match.
+            media_type = image_type(data)
+            if media_type is None:
+                raise HTTPException(415, _MSG_HEIC if is_heic(data) else _MSG_NOT_AN_IMAGE)
+            size = image_size(data)
+            if size and max(size) > settings.max_image_side_px:
+                raise HTTPException(413, _MSG_IMAGE_TOO_TALL)
+            images.append((data, media_type))
         # OCR is quick; do it inline so extracted text is captured even if the
         # check itself runs in the background.
         spend.begin()          # everything past here has been paid for
@@ -706,8 +714,12 @@ async def _read_pictures(info: LinkInfo) -> str:
         if isinstance(outcome, BaseException):
             print(f"[link] a picture could not be fetched: "
                   f"{getattr(outcome, 'kind', type(outcome).__name__)}")
+        elif image_type(outcome[0]) is None:
+            # Its header said picture, its bytes do not: the vision API
+            # would refuse the whole call, the readable pictures with it.
+            print("[link] a fetched picture is not one the vision API reads")
         else:
-            fetched.append(outcome)
+            fetched.append((outcome[0], image_type(outcome[0])))
     if not fetched:
         raise LinkError("network", "That post's pictures could not be fetched. Try "
                                    "again in a minute, or send a screenshot instead.")
