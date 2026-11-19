@@ -91,6 +91,9 @@ _OCR_PROMPT = (
     "that one-sentence description. Do not interpret or fact-check anything."
 )
 
+# The visual sentence is asked for only where there is a visual: MEASURED
+# 2026-11-19, five text slides each got "No photo, chart, or visual is
+# present in this image; …", shown back to the reader as what was read.
 _OCR_MANY_PROMPT = (
     "These are {n} images, in the order they were posted. For EACH one, write "
     "'Image k:' on its own line (k from 1 to {n}), then transcribe ALL text "
@@ -98,7 +101,8 @@ _OCR_MANY_PROMPT = (
     "Tamil, Bengali, or other Indian scripts and any overlaid meme/caption "
     "text, then in one sentence describe any photo, chart, or visual in it "
     "that itself makes a factual claim (e.g. a graph, a screenshot, a doctored "
-    "image). Output only that. Do not interpret or fact-check anything."
+    "image). For an image that is only text, say nothing about visuals. "
+    "Output only that. Do not interpret or fact-check anything."
 )
 
 # The whole answer, however many images: the bound on the paid call.

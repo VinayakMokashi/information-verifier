@@ -36,6 +36,18 @@ def test_several_pictures_are_one_call_under_one_cap(monkeypatch):
     assert out == "Image 1: a\nImage 2: b"
 
 
+def test_pictures_without_a_visual_get_no_sentence_about_one(monkeypatch):
+    """MEASURED 2026-11-19 (paid, 5 text slides): after every slide the
+    reading said "No photo, chart, or visual is present in this image; it is
+    plain white text on a black background." That is shown to the reader as
+    what was read, and its English words count toward the language guess of
+    a Hinglish post."""
+    calls = _record(monkeypatch)
+    asyncio.run(V.ocr_images([(b"a", "image/jpeg"), (b"b", "image/png")]))
+    prompt = calls[0]["messages"][0]["content"][-1]["text"]
+    assert "say nothing about visuals" in prompt
+
+
 def test_one_picture_is_asked_exactly_as_before(monkeypatch):
     calls = _record(monkeypatch, text="WHO ne kaha")
     assert asyncio.run(V.ocr_image(b"a", "image/jpeg")) == "WHO ne kaha"
