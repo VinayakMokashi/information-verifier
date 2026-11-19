@@ -362,6 +362,65 @@ def test_a_share_link_that_lands_on_the_login_wall_says_so():
     assert info.value.kind == "gated"
 
 
+# A real Instagram share link (from a public bug report) and where Instagram
+# sent a plain client on 2026-11-19: one 302 to the reel. A browser
+# User-Agent got the 200 app page instead, as Facebook's did.
+_IG_SHARE = "https://www.instagram.com/share/reel/BBFJ7jx5Ys"
+_IG_SHARED_REEL = "https://www.instagram.com/reel/DDHhYR9S1LN/?igsh=QkFLTlduVTFSZQ%3D%3D"
+
+
+@pytest.mark.parametrize("url", [_IG_SHARE, "https://instagram.com/share/BAbc123",
+                                 "https://www.instagram.com/share/p/BAbc123/"])
+def test_an_instagram_share_link_is_expanded_too(url):
+    """MEASURED 2026-11-19: yt-dlp's Instagram extractor refuses /share/ on
+    purpose (only its generic extractor follows the redirect, and that one is
+    fenced off), so the app answered a share link "That link could not be
+    read." while the reel behind it read fine."""
+    seen = []
+    client = _fake_share_host({url: (302, _IG_SHARED_REEL)}, seen)
+    assert L.expand_share_link(url, client=client) == _IG_SHARED_REEL
+    assert seen == [url]
+
+
+def test_an_instagram_share_link_on_the_login_wall_says_so():
+    """Instagram's login page is /accounts/login/, not /login/: handed to
+    yt-dlp, it came back as "That link could not be read." """
+    wall = ("https://www.instagram.com/accounts/login/?next=https%3A%2F%2F"
+            "www.instagram.com%2Fshare%2Freel%2FBBFJ7jx5Ys%2F")
+    client = _fake_share_host({_IG_SHARE: (302, wall)}, [])
+    with pytest.raises(L.LinkError) as info:
+        L.expand_share_link(_IG_SHARE, client=client)
+    assert info.value.kind == "gated"
+
+
+def test_resolve_reads_the_post_an_instagram_share_link_names(monkeypatch):
+    import yt_dlp
+
+    asked, opts_seen = [], []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            opts_seen.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download):
+            asked.append(url)
+            return {"extractor": "Instagram", "id": "DDHhYR9S1LN", "title": "t",
+                    "formats": [{"url": "x"}], "description": "a caption"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(L, "_share_client",
+                        lambda: _fake_share_host({_IG_SHARE: (302, _IG_SHARED_REEL)}, []))
+    info = L.resolve_link(_IG_SHARE)
+    assert asked == [_IG_SHARED_REEL] and info.url == _IG_SHARED_REEL
+    assert opts_seen[0].get("ignore_no_formats_error")     # a post of pictures reads too
+
+
 def test_a_redirect_loop_is_cut_off():
     a = "https://www.facebook.com/share/r/AAAA/"
     b = "https://www.facebook.com/share/r/BBBB/"

@@ -286,11 +286,14 @@ _MSG_VIDEO_CAROUSEL = (
 
 
 def _is_share_link(url: str) -> bool:
-    """A Facebook share link: no video id of its own, only a redirect."""
+    """A share link: no post id of its own, only a redirect. Facebook's, and
+    Instagram's Share button's (MEASURED 2026-11-19: /share/reel/<code>
+    answered a plain client with one 302 to /reel/<id>/; yt-dlp's Instagram
+    extractor refuses /share/ on purpose, leaving it to the generic one)."""
     host = allowed_link_host(url)
     if host == "fb.watch":
         return True
-    if host in _FACEBOOK_HOSTS:
+    if host in _FACEBOOK_HOSTS or host in _INSTAGRAM_HOSTS:
         return urlsplit(url.strip()).path.startswith("/share/")
     return False
 
@@ -335,7 +338,8 @@ def expand_share_link(url: str, client: httpx.Client | None = None) -> str:
                 raise LinkError("other", _MSG_UNREADABLE) from exc
             if allowed_link_host(target) is None:
                 raise LinkError("unsupported", SUPPORTED_LINKS_MSG)
-            if urlsplit(target).path.startswith("/login"):
+            # Facebook's wall is /login/, Instagram's /accounts/login/.
+            if urlsplit(target).path.startswith(("/login", "/accounts/login")):
                 raise LinkError("gated", _MSG_NOT_OPENABLE)
             if not _is_share_link(target):
                 return target
