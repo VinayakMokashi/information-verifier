@@ -65,6 +65,17 @@ def test_the_notice_names_everyone_who_receives_what_people_send(client):
         assert recipient in text, recipient
 
 
+def test_the_notice_says_a_linked_posts_pictures_are_fetched_read_and_kept(client):
+    """Since 2026-11-18 a linked post's pictures are fetched from the
+    platform, read by Claude, and their text is kept with the post's caption
+    and words (the transcript cache). The notice said only "caption and
+    sound" (found 2026-11-19)."""
+    text = _read(client, "/privacy")
+    assert "to read its caption, pictures and sound" in text        # the fetch
+    assert "and in a linked post's pictures" in text                # what Claude reads
+    assert "its caption, words and the text in its pictures" in text  # what is kept
+
+
 def test_the_notice_states_the_retention_the_code_applies(client, monkeypatch):
     monkeypatch.setattr(settings, "answer_retention_days", 45)
     monkeypatch.setattr(settings, "answer_cache_ttl_trusted_h", 96)
